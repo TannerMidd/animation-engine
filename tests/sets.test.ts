@@ -30,6 +30,35 @@ describe('builtin sets', () => {
   it('emits nothing for an empty fore layer rather than stray markup', () => {
     expect(renderSet(BUILTIN_SETS['office']!).fore.trim()).toBe('');
   });
+
+  it('keeps legacy prop instances valid while preserving optional stable ids', () => {
+    const legacy = SetDescriptor.parse({
+      name: 'legacy-room',
+      layers: { mid: [{ prop: 'mug' }] },
+    });
+    expect(legacy.layers.mid[0]!.id).toBeUndefined();
+
+    const addressed = SetDescriptor.parse({
+      name: 'addressed-room',
+      layers: {
+        mid: [
+          { id: 'desk-mug.1', prop: 'mug' },
+          { id: 'work-laptop', prop: 'laptop' },
+        ],
+      },
+    });
+    expect(addressed.layers.mid.map((prop) => prop.id)).toEqual(['desk-mug.1', 'work-laptop']);
+  });
+
+  it('requires supplied prop ids to be unique across depth layers', () => {
+    expect(() => SetDescriptor.parse({
+      name: 'duplicate-props',
+      layers: {
+        back: [{ id: 'hero-mug', prop: 'mug' }],
+        fore: [{ id: 'hero-mug', prop: 'mug' }],
+      },
+    })).toThrow(/duplicate prop instance id.*hero-mug/);
+  });
 });
 
 describe('prop registry', () => {
@@ -87,6 +116,21 @@ describe('prop registry', () => {
     for (const [key, def] of Object.entries(PROPS)) {
       expect(def.tags.length, key).toBeGreaterThan(0);
     }
+  });
+
+  it.each(['mug', 'cup', 'laptop'])('%s exposes portable local bounds and stable interaction handles', (key) => {
+    const interaction = getProp(key).interaction;
+    expect(interaction?.portable).toBe(true);
+    expect(interaction?.bounds.width).toBeGreaterThan(0);
+    expect(interaction?.bounds.height).toBeGreaterThan(0);
+    expect(interaction?.handles.some((handle) => handle.kind === 'grip')).toBe(true);
+    expect(interaction?.handles.some((handle) => handle.kind === 'placement')).toBe(true);
+
+    const handleIds = interaction!.handles.map((handle) => handle.id);
+    expect(new Set(handleIds).size).toBe(handleIds.length);
+
+    const manifestEntry = propManifest().find((prop) => prop.key === key);
+    expect(manifestEntry?.interaction).toEqual(interaction);
   });
 
   it('escapes user text so a param cannot inject markup', () => {

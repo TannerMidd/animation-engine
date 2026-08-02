@@ -82,10 +82,22 @@ export function SetDesigner({ vocab, llm }: { vocab: Vocab | null; llm: LlmStatu
     setSaved(false);
   };
 
+  const nextPropId = (d: SetDescriptor, key: string): string => {
+    const used = new Set(
+      LAYERS.flatMap((candidate) => d.layers[candidate])
+        .map((item) => item.id)
+        .filter((id): id is string => Boolean(id)),
+    );
+    let ordinal = 1;
+    while (used.has(`${key}-${ordinal}`)) ordinal += 1;
+    return `${key}-${ordinal}`;
+  };
+
   const addProp = (key: string) => {
     const def = propDef(key);
     mutate((d) => {
       d.layers[layer].push({
+        id: nextPropId(d, key),
         prop: key,
         // Spanning props cover the whole set and ignore x, so don't give them one.
         ...(def?.spanning ? {} : { x: 640 }),
@@ -353,7 +365,39 @@ export function SetDesigner({ vocab, llm }: { vocab: Vocab | null; llm: LlmStatu
       </Panel>
 
       {/* right: inspector */}
-      <Panel title="Prop" className="w-[22%] shrink-0" bodyClass="p-3">
+      <Panel title="Set / prop" className="w-[22%] shrink-0" bodyClass="p-3">
+        <div className="mb-3 pb-3 border-b border-edge">
+          <div className="text-[11px] text-ink-dim mb-1">Walkable actor area</div>
+          <div className="grid grid-cols-2 gap-1.5">
+            <Field label="Left">
+              <NumberInput value={desc.layout.walkable.x} min={0} max={1279} step={8} onChange={(value) => mutate((draft) => {
+                draft.layout.walkable.x = Math.max(0, Math.min(1279, value));
+                draft.layout.walkable.width = Math.min(draft.layout.walkable.width, 1280 - draft.layout.walkable.x);
+                return draft;
+              })} />
+            </Field>
+            <Field label="Top">
+              <NumberInput value={desc.layout.walkable.y} min={0} max={719} step={8} onChange={(value) => mutate((draft) => {
+                draft.layout.walkable.y = Math.max(0, Math.min(719, value));
+                draft.layout.walkable.height = Math.min(draft.layout.walkable.height, 720 - draft.layout.walkable.y);
+                return draft;
+              })} />
+            </Field>
+            <Field label="Width">
+              <NumberInput value={desc.layout.walkable.width} min={1} max={1280 - desc.layout.walkable.x} step={8} onChange={(value) => mutate((draft) => {
+                draft.layout.walkable.width = Math.max(1, Math.min(1280 - draft.layout.walkable.x, value));
+                return draft;
+              })} />
+            </Field>
+            <Field label="Height">
+              <NumberInput value={desc.layout.walkable.height} min={1} max={720 - desc.layout.walkable.y} step={8} onChange={(value) => mutate((draft) => {
+                draft.layout.walkable.height = Math.max(1, Math.min(720 - draft.layout.walkable.y, value));
+                return draft;
+              })} />
+            </Field>
+          </div>
+          <div className="text-[10px] text-ink-faint mt-1">Body drags clamp here; entrances and exits remain explicit stage actions.</div>
+        </div>
         {!current || !currentDef ? (
           <Empty>Select a prop</Empty>
         ) : (
@@ -369,6 +413,17 @@ export function SetDesigner({ vocab, llm }: { vocab: Vocab | null; llm: LlmStatu
               <div className="flex-1" />
               <Button variant="danger" onClick={remove}>Remove</Button>
             </div>
+
+            <Field
+              label="Prop ID"
+              hint="Stable scene-action target. IDs must be unique across this set."
+            >
+              <TextInput
+                value={current.id ?? ''}
+                placeholder={`${current.prop}-1`}
+                onChange={(id) => updateProp({ id: id.trim() || undefined })}
+              />
+            </Field>
 
             {!currentDef.spanning && (
               <>

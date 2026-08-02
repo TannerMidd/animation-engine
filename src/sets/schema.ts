@@ -26,7 +26,25 @@ export type Layer = z.infer<typeof Layer>;
 export const ParamValue = z.union([z.number(), z.string(), z.boolean()]);
 export type ParamValue = z.infer<typeof ParamValue>;
 
+/**
+ * Stable ids for addressable pieces of a set.
+ *
+ * They intentionally use the same pleasant-to-hand-edit character set as the
+ * animation document. Existing descriptors do not have to be migrated before
+ * they can load: prop instance ids remain optional until an editor or migration
+ * assigns them.
+ */
+export const SetEntityId = z
+  .string()
+  .trim()
+  .min(1)
+  .max(128)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/, 'must start with a letter or number and use only letters, numbers, . _ : or -');
+export type SetEntityId = z.infer<typeof SetEntityId>;
+
 export const PropInstance = z.object({
+  /** Stable, set-local identity used by staging, attachment and contact events. */
+  id: SetEntityId.optional(),
   /** Key into the prop registry. */
   prop: z.string().min(1),
   /**
@@ -53,32 +71,88 @@ export type PropInstance = z.infer<typeof PropInstance>;
  * middle of the set, and `baseFrame` deliberately does not clamp to the stage —
  * so the art has to keep going or the frame runs off the edge of the world.
  */
+/**
+ * The part of the stage where an actor's root may be blocked.
+ *
+ * This is intentionally set-authored rather than inferred from the canvas.
+ * A rooftop, a narrow hallway and an office all use the same 1280x720 render
+ * contract, but they do not have the same safe floor. Entrances and exits may
+ * still use explicit offstage positions; this area governs visible blocking
+ * and direct-manipulation root motion.
+ */
+export const DEFAULT_WALKABLE_AREA = {
+  x: 64,
+  y: 540,
+  width: 1152,
+  height: 180,
+} as const;
+
+export const WalkableArea = z.object({
+  x: z.number().finite().default(DEFAULT_WALKABLE_AREA.x),
+  y: z.number().finite().default(DEFAULT_WALKABLE_AREA.y),
+  width: z.number().finite().positive().default(DEFAULT_WALKABLE_AREA.width),
+  height: z.number().finite().positive().default(DEFAULT_WALKABLE_AREA.height),
+}).default(DEFAULT_WALKABLE_AREA);
+export type WalkableArea = z.infer<typeof WalkableArea>;
+
 export const SetLayout = z.object({
   /** Where wall meets floor. Characters stand at y ~698. */
   horizonY: z.number().default(566),
   ceilingY: z.number().default(92),
   marginX: z.number().default(420),
   marginY: z.number().default(220),
+  /** Valid actor-root blocking area in stage coordinates. */
+  walkable: WalkableArea,
+}).superRefine((layout, ctx) => {
+  const { x, y, width, height } = layout.walkable;
+  if (x < 0 || y < 0 || x + width > STAGE.width || y + height > STAGE.height) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['walkable'],
+      message: `walkable area must stay inside the ${STAGE.width}x${STAGE.height} stage`,
+    });
+  }
 });
 export type SetLayout = z.infer<typeof SetLayout>;
 
-export const SetDescriptor = z.object({
-  name: z.string().min(1),
-  /** Stable id, independent of the name. Assigned at creation or by migrate. */
-  setId: z.string().optional(),
-  /** Which identity profile last wrote this set, for drift detection. */
-  identity: IdentityStamp.optional(),
-  /** Named palette. Retinting the whole set is a one-word change. */
-  palette: z.string().default('office-fluorescent'),
-  layout: SetLayout.default({}),
-  layers: z
-    .object({
-      back: z.array(PropInstance).default([]),
-      mid: z.array(PropInstance).default([]),
-      fore: z.array(PropInstance).default([]),
-    })
-    .default({}),
-});
+export const SetDescriptor = z
+  .object({
+    name: z.string().min(1),
+    /** Stable id, independent of the name. Assigned at creation or by migrate. */
+    setId: z.string().optional(),
+    /** Which identity profile last wrote this set, for drift detection. */
+    identity: IdentityStamp.optional(),
+    /** Named palette. Retinting the whole set is a one-word change. */
+    palette: z.string().default('office-fluorescent'),
+    layout: SetLayout.default({}),
+    layers: z
+      .object({
+        back: z.array(PropInstance).default([]),
+        mid: z.array(PropInstance).default([]),
+        fore: z.array(PropInstance).default([]),
+      })
+      .default({}),
+  })
+  .superRefine((set, ctx) => {
+    // Animation events address props by id without carrying a layer, so an id
+    // must identify exactly one instance across the entire descriptor.
+    const seen = new Map<string, { layer: Layer; index: number }>();
+    for (const layer of LAYERS) {
+      set.layers[layer].forEach((instance, index) => {
+        if (!instance.id) return;
+        const first = seen.get(instance.id);
+        if (first) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['layers', layer, index, 'id'],
+            message: `duplicate prop instance id "${instance.id}" (first used at ${first.layer}[${first.index}])`,
+          });
+          return;
+        }
+        seen.set(instance.id, { layer, index });
+      });
+    }
+  });
 export type SetDescriptor = z.infer<typeof SetDescriptor>;
 
 /** Stage bounds. Matches the compiler's default scene size. */
@@ -97,7 +171,9 @@ export interface SetGeometry {
   stageHeight: number;
 }
 
-export function geometryFor(layout: SetLayout): SetGeometry {
+export function geometryFor(
+  layout: Pick<SetLayout, 'marginX' | 'marginY' | 'horizonY' | 'ceilingY'>,
+): SetGeometry {
   return {
     x0: -layout.marginX,
     y0: -layout.marginY,

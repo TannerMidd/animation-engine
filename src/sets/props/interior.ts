@@ -12,11 +12,29 @@ import { escapeXml } from './structure.ts';
 export const INTERIOR_PROPS: Record<string, PropDef> = {
   desk: {
     label: 'Desk',
-    tags: ['office', 'home', 'interior'],
+    tags: ['office', 'home', 'interior', 'contact', 'surface'],
     params: [
       { key: 'width', label: 'Width', type: 'number', default: 250, min: 80, max: 700, step: 10 },
       { key: 'height', label: 'Height', type: 'number', default: 96, min: 40, max: 200, step: 5 },
     ],
+    // The geometry uses the default authored size. Scale the prop instance to
+    // keep rendering and interaction geometry together; unusually wide custom
+    // desks should be split into multiple addressable surfaces rather than
+    // silently inventing one enormous reach target.
+    interaction: {
+      portable: false,
+      bounds: { x: -125, y: -96, width: 250, height: 96 },
+      handles: [
+        {
+          id: 'work-surface', label: 'Desktop work surface', kind: 'contact',
+          x: 0, y: -96, radius: 112, normal: { x: 0, y: -1 },
+        },
+        {
+          id: 'place-center', label: 'Desktop placement', kind: 'placement',
+          x: 0, y: -96, radius: 80, normal: { x: 0, y: -1 },
+        },
+      ],
+    },
     render(ctx) {
       const { palette: p } = ctx;
       const w = num(ctx, 'width', 250);
@@ -32,12 +50,20 @@ export const INTERIOR_PROPS: Record<string, PropDef> = {
 
   monitor: {
     label: 'Monitor',
-    tags: ['office', 'interior'],
+    tags: ['office', 'interior', 'contact', 'control'],
     params: [
       { key: 'width', label: 'Width', type: 'number', default: 108, min: 40, max: 300, step: 4 },
       { key: 'height', label: 'Height', type: 'number', default: 76, min: 30, max: 200, step: 4 },
       { key: 'on', label: 'Screen lit', type: 'boolean', default: true },
     ],
+    interaction: {
+      portable: false,
+      bounds: { x: -54, y: -92, width: 108, height: 92 },
+      handles: [
+        { id: 'screen', label: 'Screen surface', kind: 'contact', x: 0, y: -54, radius: 42, normal: { x: 0, y: -1 } },
+        { id: 'power', label: 'Power control', kind: 'control', x: 38, y: -19, radius: 9, normal: { x: 0, y: -1 } },
+      ],
+    },
     render(ctx) {
       const { palette: p } = ctx;
       const w = num(ctx, 'width', 108);
@@ -388,6 +414,91 @@ export const INTERIOR_PROPS: Record<string, PropDef> = {
         out += line(p, x, -h + 16, x, -h * 0.45, p.fabric, 3);
       }
       out += rect(p, -w / 2, -h * 0.42, w, h * 0.42, p.fabric, { rx: 8 });
+      return out;
+    },
+  },
+
+  mug: {
+    label: 'Coffee mug',
+    tags: ['handheld', 'contact', 'office', 'home', 'bar', 'interior'],
+    params: [],
+    interaction: {
+      portable: true,
+      bounds: { x: -24, y: -50, width: 64, height: 50 },
+      handles: [
+        { id: 'grip', label: 'Handle grip', kind: 'grip', x: 30, y: -25, radius: 13 },
+        { id: 'base', label: 'Base contact', kind: 'placement', x: 0, y: 0, radius: 18, normal: { x: 0, y: 1 } },
+        { id: 'rim', label: 'Rim contact', kind: 'contact', x: 0, y: -44, radius: 18, normal: { x: 0, y: -1 } },
+      ],
+    },
+    render(ctx) {
+      const { palette: p } = ctx;
+      // Draw the handle first so the cup body naturally occludes its inner edge.
+      let out = ellipse(p, 27, -25, 14, 17, p.clay);
+      out += ellipse(p, 27, -25, 7, 10, p.surface, { outline: false });
+      out += rect(p, -22, -44, 44, 44, p.clay, { rx: 8 });
+      out += ellipse(p, 0, -43, 22, 6, p.clay);
+      out += ellipse(p, 0, -43, 16, 3, p.woodDark, { outline: false });
+      return out;
+    },
+  },
+
+  cup: {
+    label: 'Drinking cup',
+    tags: ['handheld', 'contact', 'office', 'home', 'bar', 'interior'],
+    params: [],
+    interaction: {
+      portable: true,
+      bounds: { x: -21, y: -42, width: 42, height: 42 },
+      handles: [
+        { id: 'grip', label: 'Body grip', kind: 'grip', x: 0, y: -21, radius: 17 },
+        { id: 'base', label: 'Base contact', kind: 'placement', x: 0, y: 0, radius: 13, normal: { x: 0, y: 1 } },
+        { id: 'rim', label: 'Rim contact', kind: 'contact', x: 0, y: -38, radius: 17, normal: { x: 0, y: -1 } },
+      ],
+    },
+    render(ctx) {
+      const { palette: p } = ctx;
+      let out = poly(p, [
+        [-20, -38],
+        [20, -38],
+        [15, 0],
+        [-15, 0],
+      ], p.surface);
+      out += ellipse(p, 0, -38, 20, 5, p.surfaceDark);
+      out += ellipse(p, 0, -38, 15, 2.5, p.glass, { outline: false });
+      return out;
+    },
+  },
+
+  laptop: {
+    label: 'Open laptop',
+    tags: ['handheld', 'contact', 'office', 'home', 'interior'],
+    params: [{ key: 'on', label: 'Screen lit', type: 'boolean', default: true }],
+    interaction: {
+      portable: true,
+      bounds: { x: -64, y: -84, width: 128, height: 84 },
+      handles: [
+        { id: 'left-grip', label: 'Left edge grip', kind: 'grip', x: -50, y: -5, radius: 12 },
+        { id: 'right-grip', label: 'Right edge grip', kind: 'grip', x: 50, y: -5, radius: 12 },
+        { id: 'base', label: 'Base contact', kind: 'placement', x: 0, y: 0, radius: 42, normal: { x: 0, y: 1 } },
+        { id: 'keyboard', label: 'Keyboard contact', kind: 'contact', x: 0, y: -8, radius: 38, normal: { x: 0, y: -1 } },
+        { id: 'screen', label: 'Screen control', kind: 'control', x: 0, y: -47, radius: 34, normal: { x: 0, y: -1 } },
+      ],
+    },
+    render(ctx) {
+      const { palette: p } = ctx;
+      const on = ctx.params['on'] !== false;
+      let out = rect(p, -55, -82, 110, 72, p.metal, { rx: 5 });
+      out += rect(p, -48, -75, 96, 58, on ? p.screen : p.metalDark, { outline: false });
+      out += poly(p, [
+        [-55, -10],
+        [55, -10],
+        [64, 0],
+        [-64, 0],
+      ], p.metal);
+      // A few broad rows read as keys without producing noisy detail at reel scale.
+      out += line(p, -41, -7, 41, -7, p.metalDark, 2);
+      out += line(p, -34, -3, 34, -3, p.metalDark, 2);
       return out;
     },
   },

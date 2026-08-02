@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, followJob, fmtMs } from '../api.ts';
-import type { Beat, CheckResult, JobEvent, LlmStatus, PreviewInfo, SceneDetail, ShotList, Vocab } from '../types.ts';
+import type {
+  AnimationDocument, Beat, CastMember, CheckResult, DialogueCue, DialogueDocument, JobEvent, LlmStatus,
+  PreviewInfo, PropDefInfo, SceneDetail, SetDescriptor, ShotList, Vocab,
+} from '../types.ts';
 import { GenerateDialog } from './GenerateDialog.tsx';
 import { ScriptEditor } from './ScriptEditor.tsx';
 import { Preview, type PreviewHandle } from './Preview.tsx';
 import { BeatTimeline } from './BeatTimeline.tsx';
 import { BeatInspector } from './BeatInspector.tsx';
+import { PerformancePanel } from './PerformancePanel.tsx';
+import { AnimationPanel } from './AnimationPanel.tsx';
+import type { AnimationEditTarget } from './AnimationOverlay.tsx';
 import { Button, Panel, Badge, Spinner, Select, Empty } from './ui.tsx';
 
 /**
@@ -34,10 +40,18 @@ export function SceneView({
   const [playheadMs, setPlayheadMs] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [job, setJob] = useState<{ kind: string; event: JobEvent | null } | null>(null);
+  const [preflight, setPreflight] = useState<Awaited<ReturnType<typeof api.preflight>> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [withAudio, setWithAudio] = useState(false);
+  const [previewLayout, setPreviewLayout] = useState<'horizontal' | 'vertical'>('horizontal');
   const [setName, setSetName] = useState<string>('office');
   const [sets, setSets] = useState<string[]>([]);
+  const [setDescriptor, setSetDescriptor] = useState<SetDescriptor | null>(null);
+  const [propDefs, setPropDefs] = useState<PropDefInfo[]>([]);
+  const [dialogue, setDialogue] = useState<DialogueDocument | null>(null);
+  const [animation, setAnimation] = useState<AnimationDocument | null>(null);
+  const [animationTarget, setAnimationTarget] = useState<AnimationEditTarget | null>(null);
+  const [inspector, setInspector] = useState<'beat' | 'perform' | 'animate'>('beat');
 
   const [writing, setWriting] = useState(false);
   const [genBusy, setGenBusy] = useState(false);
@@ -52,16 +66,30 @@ export function SceneView({
     setPreview(null);
     setSelected(null);
     setError(null);
+    setDialogue(null);
+    setAnimation(null);
+    setAnimationTarget(null);
+    setPreflight(null);
     void (async () => {
       try {
-        const [d, s] = await Promise.all([api.scene(scene), api.sets()]);
+        const [d, s, registry] = await Promise.all([api.scene(scene), api.sets(), api.props()]);
         if (cancelled) return;
         setDetail(d);
         setSource(d.source);
         setShots(d.shots);
         setWithAudio(d.hasAudio);
         setSets(s.map((x) => x.name));
+        setPropDefs(registry.props);
         if (d.shots?.set) setSetName(d.shots.set.replace(/\.(json|svg)$/, ''));
+        if (d.shots) {
+          const [dialogueDocument, animationDocument] = await Promise.all([
+            api.dialogue(scene),
+            api.animation(scene),
+          ]);
+          if (cancelled) return;
+          setDialogue(dialogueDocument);
+          setAnimation(animationDocument);
+        }
       } catch (err) {
         if (!cancelled) setError((err as Error).message);
       }
@@ -71,18 +99,73 @@ export function SceneView({
     };
   }, [scene]);
 
+  useEffect(() => {
+    let cancelled = false;
+    setSetDescriptor(null);
+    if (!setName) return () => { cancelled = true; };
+    void api.set(setName)
+      .then((descriptor) => {
+        if (!cancelled) setSetDescriptor(descriptor);
+      })
+      .catch((err: Error) => {
+        if (!cancelled) setError(err.message);
+      });
+    return () => { cancelled = true; };
+  }, [setName]);
+
   // --- rebuild preview whenever the shot list changes ---
   const rebuildPreview = useCallback(
     async (audio: boolean) => {
       try {
-        setPreview(await api.preview(scene, audio));
+        setPreview(await api.preview(scene, audio, previewLayout));
         setError(null);
       } catch (err) {
         setError((err as Error).message);
       }
     },
-    [scene],
+    [previewLayout, scene],
   );
+
+  const reloadDialogue = useCallback(async () => {
+    setPreflight(null);
+    const document = await api.dialogue(scene);
+    setDialogue(document);
+  }, [scene]);
+
+  const saveDialogueCue = useCallback(async (cue: DialogueCue) => {
+    setPreflight(null);
+    await api.saveDialogueCue(scene, cue, dialogue?.revision);
+    await reloadDialogue();
+    await rebuildPreview(withAudio);
+  }, [dialogue?.revision, rebuildPreview, reloadDialogue, scene, withAudio]);
+
+  const changeAnimationDocument = useCallback((document: AnimationDocument) => {
+    setPreflight(null);
+    setAnimation(document);
+    void rebuildPreview(withAudio);
+  }, [rebuildPreview, withAudio]);
+
+  const changeAnimationTarget = useCallback((target: AnimationEditTarget | null) => {
+    setAnimationTarget(target);
+  }, []);
+
+  const setPropInstances = setDescriptor && setDescriptor.name === setName
+    ? Object.values(setDescriptor.layers).flat()
+    : [];
+  const propTypeCounts = new Map<string, number>();
+  for (const instance of setPropInstances) {
+    propTypeCounts.set(instance.prop, (propTypeCounts.get(instance.prop) ?? 0) + 1);
+  }
+  const addressablePropRef = (instance: (typeof setPropInstances)[number]): string | null =>
+    instance.id ?? (propTypeCounts.get(instance.prop) === 1 ? instance.prop : null);
+  const propTargets = setPropInstances
+    .filter((instance) => propDefs.find((def) => def.key === instance.prop)?.interaction)
+    .map(addressablePropRef)
+    .filter((ref): ref is string => Boolean(ref));
+  const portablePropTargets = setPropInstances
+    .filter((instance) => propDefs.find((def) => def.key === instance.prop)?.interaction?.portable)
+    .map(addressablePropRef)
+    .filter((ref): ref is string => Boolean(ref));
 
   useEffect(() => {
     if (!shots) return;
@@ -93,6 +176,7 @@ export function SceneView({
   // --- debounced save + check while typing ---
   useEffect(() => {
     if (!detail || source === detail.source) return;
+    setPreflight(null);
     dirty.current = true;
     const t = setTimeout(() => {
       void (async () => {
@@ -133,6 +217,12 @@ ${summary}`)) return;
       await api.applyDirect(scene, res.proposed);
       setShots(res.proposed);
       setSelected(null);
+      const [dialogueDocument, animationDocument] = await Promise.all([
+        api.dialogue(scene),
+        api.animation(scene),
+      ]);
+      setDialogue(dialogueDocument);
+      setAnimation(animationDocument);
       setError(res.errors.length ? res.errors.join('; ') : null);
       onSceneChanged();
     } catch (err) {
@@ -143,9 +233,27 @@ ${summary}`)) return;
   };
 
   const runJob = async (kind: 'voices' | 'render') => {
+    if (kind === 'voices') setPreflight(null);
     setBusy(kind);
     setJob({ kind, event: null });
     try {
+      if (kind === 'render') {
+        const preflight = await api.preflight(scene);
+        setPreflight(preflight);
+        const blockers = preflight.notes.filter((note) => note.level === 'error');
+        if (blockers.length) {
+          setError(`Production preflight blocked export: ${blockers.map((note) => note.message).join('; ')}`);
+          setBusy(null);
+          setJob(null);
+          return;
+        }
+        if (preflight.warningReview.required && !preflight.warningReview.current) {
+          setError('Production warnings need a current, persisted creator acknowledgement. Review them below and acknowledge before rendering.');
+          setBusy(null);
+          setJob(null);
+          return;
+        }
+      }
       const started = kind === 'voices' ? await api.voices(scene) : await api.render(scene);
       const stop = followJob(started.id, (e) => {
         setJob({ kind, event: e });
@@ -172,10 +280,51 @@ ${summary}`)) return;
     }
   };
 
+  const runPreflight = async () => {
+    setBusy('preflight');
+    setError(null);
+    try {
+      setPreflight(await api.preflight(scene));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const acknowledgePreflightWarnings = async () => {
+    setBusy('acknowledging warnings');
+    setError(null);
+    try {
+      setPreflight(await api.acknowledgePreflightWarnings(scene));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   /** Beat edits write straight through to the shot list on disk. */
   const editBeat = async (index: number, next: Beat) => {
     if (!shots) return;
     const updated: ShotList = { ...shots, beats: shots.beats.map((b, i) => (i === index ? next : b)) };
+    setPreflight(null);
+    setShots(updated);
+    try {
+      await api.saveShotList(scene, updated);
+      await reloadDialogue();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  const editCastMember = async (actorId: string, changes: Partial<CastMember>) => {
+    if (!shots) return;
+    const updated: ShotList = {
+      ...shots,
+      cast: shots.cast.map((member) => member.id === actorId ? { ...member, ...changes } : member),
+    };
+    setPreflight(null);
     setShots(updated);
     try {
       await api.saveShotList(scene, updated);
@@ -189,6 +338,17 @@ ${summary}`)) return;
   const duration = preview?.durationMs ?? 0;
   const castIds = shots?.cast.map((c) => c.id) ?? [];
   const errors = check?.errors ?? [];
+  const selectedBeat = selected === null ? null : (beats[selected] ?? null);
+  const selectedCue = selectedBeat?.kind === 'line'
+    ? dialogue?.cues.find((cue) => cue.id === selectedBeat.id) ?? null
+    : null;
+  const performanceContext = selected !== null && selected > 0 && withAudio && detail?.hasAudio
+    ? {
+        audioUrl: `/api/scenes/${scene}/audio`,
+        startMs: beatStarts[Math.max(0, selected - 1)] ?? 0,
+        endMs: beatStarts[selected] ?? playheadMs,
+      }
+    : null;
 
   const jobLabel = () => {
     const e = job?.event;
@@ -249,6 +409,13 @@ ${summary}`)) return;
 
         <span className="text-[11px] text-ink-faint">set</span>
         <Select value={setName} options={sets.length ? sets : [setName]} onChange={setSetName} />
+        <Button
+          variant={previewLayout === 'vertical' ? 'default' : 'ghost'}
+          onClick={() => setPreviewLayout((value) => value === 'horizontal' ? 'vertical' : 'horizontal')}
+          title="Preview the actor-aware publishing camera"
+        >
+          {previewLayout === 'vertical' ? '9:16 view' : '16:9 view'}
+        </Button>
 
         <Button onClick={() => setWriting(true)} disabled={!!busy} title="Write this scene from a premise using the local model.">
           Write…
@@ -259,7 +426,19 @@ ${summary}`)) return;
         <Button onClick={() => void runJob('voices')} disabled={!!busy || !shots}>
           {busy === 'voices' ? <Spinner /> : 'Voices'}
         </Button>
-        <Button variant="primary" onClick={() => void runJob('render')} disabled={!!busy || !shots}>
+        <Button onClick={() => void runPreflight()} disabled={!!busy || !shots} title="Check production voices, staging, animation, continuity, and soundtrack freshness.">
+          {busy === 'preflight' ? <Spinner /> : 'Preflight'}
+        </Button>
+        <Button
+          variant="primary"
+          onClick={() => void runJob('render')}
+          disabled={!!busy || !shots || Boolean(preflight && (!preflight.ok || (preflight.warningReview.required && !preflight.warningReview.current)))}
+          title={preflight && !preflight.ok
+            ? 'Resolve the blocking preflight errors below before rendering.'
+            : preflight?.warningReview.required && !preflight.warningReview.current
+              ? 'Review and acknowledge the current preflight warnings below before rendering.'
+              : undefined}
+        >
           {busy === 'render' ? <Spinner /> : 'Render'}
         </Button>
         {detail?.hasVideo && (
@@ -271,6 +450,34 @@ ${summary}`)) return;
           >
             MP4
           </a>
+        )}
+        {detail?.hasVertical && (
+          <a
+            href={`/api/scenes/${scene}/video/vertical`}
+            className="px-2 py-1 rounded border border-edge bg-panel-2 hover:bg-edge text-[11px]"
+            download
+            title="Actor-aware 9:16 master"
+          >
+            9:16 MP4
+          </a>
+        )}
+        {detail?.hasExport && (
+          <>
+            <a
+              href={`/api/scenes/${scene}/captions.vtt`}
+              className="px-2 py-1 rounded border border-edge bg-panel-2 hover:bg-edge text-[11px]"
+              download
+              title="WebVTT sidecar; captions are not burned into the MP4"
+            >
+              VTT captions
+            </a>
+            <a href={`/api/scenes/${scene}/thumbnail/0`} target="_blank" rel="noreferrer" className="px-2 py-1 rounded border border-edge bg-panel-2 hover:bg-edge text-[11px]">
+              Thumbnail
+            </a>
+            <a href={`/api/scenes/${scene}/export`} target="_blank" rel="noreferrer" className="px-2 py-1 rounded border border-edge bg-panel-2 hover:bg-edge text-[11px]">
+              Manifest
+            </a>
+          </>
         )}
       </div>
 
@@ -288,6 +495,45 @@ ${summary}`)) return;
         </div>
       )}
 
+      {preflight && (
+        <div className="shrink-0 max-h-24 overflow-auto rounded border border-edge bg-panel px-2 py-1">
+          <div className="flex items-center gap-2 mb-0.5">
+            <Badge tone={!preflight.ok ? 'bad' : preflight.notes.some((note) => note.level === 'warn') ? 'warn' : 'good'}>
+              {!preflight.ok
+                ? 'production blocked'
+                : preflight.notes.some((note) => note.level === 'warn')
+                  ? 'no blockers · review required'
+                  : 'preflight clear'}
+            </Badge>
+            <span className="text-[10px] text-ink-faint">{preflight.notes.length} check note{preflight.notes.length === 1 ? '' : 's'}</span>
+            {preflight.warningReview.required && preflight.warningReview.current && (
+              <Badge tone="good">warnings acknowledged</Badge>
+            )}
+            {preflight.warningReview.required && !preflight.warningReview.current && !preflight.productionBlocked && (
+              <Button
+                className="py-0.5"
+                disabled={!!busy}
+                onClick={() => void acknowledgePreflightWarnings()}
+                title="Append a review record bound to these exact warnings and creative inputs. Any edit makes it stale."
+              >
+                I reviewed these warnings
+              </Button>
+            )}
+            <button className="ml-auto text-[10px] text-ink-faint hover:text-ink" onClick={() => setPreflight(null)}>close</button>
+          </div>
+          {preflight.warningReview.current && preflight.warningReview.acknowledgement && (
+            <div className="text-[10px] text-ink-faint leading-snug">
+              Review {preflight.warningReview.acknowledgement.id} · {preflight.warningReview.acknowledgement.acknowledgedBy} · {new Date(preflight.warningReview.acknowledgement.acknowledgedAt).toLocaleString()}
+            </div>
+          )}
+          {preflight.notes.map((note, i) => (
+            <div key={`${i}-${note.message}`} className={`text-[10px] leading-snug ${note.level === 'error' ? 'text-bad' : note.level === 'warn' ? 'text-accent' : 'text-ink-dim'}`}>
+              {note.level.toUpperCase()} · {note.message}
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* main row */}
       <div className="flex-1 min-h-0 flex gap-2">
         <Panel title="Script" className="w-[34%] shrink-0" bodyClass="p-0">
@@ -301,10 +547,14 @@ ${summary}`)) return;
               previewId={preview?.previewId ?? null}
               frameCount={preview?.frameCount ?? 0}
               fps={preview?.fps ?? 24}
+              viewportWidth={preview?.width ?? 1280}
+              viewportHeight={preview?.height ?? 720}
               beatStarts={beatStarts}
               estimated={preview?.estimated}
               audioUrl={withAudio && detail?.hasAudio ? `/api/scenes/${scene}/audio` : null}
               onFrame={(f) => setPlayheadMs((f / (preview?.fps ?? 24)) * 1000)}
+              animationTarget={inspector === 'animate' && previewLayout === 'horizontal' ? animationTarget : null}
+              animationValidArea={setDescriptor?.layout.walkable ?? null}
             />
           </Panel>
 
@@ -317,18 +567,64 @@ ${summary}`)) return;
           )}
         </div>
 
-        <Panel title="Beat" className="w-[22%] shrink-0" bodyClass="p-0">
-          {shots ? (
-            <BeatInspector
-              beat={selected !== null ? (beats[selected] ?? null) : null}
-              index={selected}
-              cast={shots.cast}
-              vocab={vocab}
-              expressionsFor={expressionsFor}
-              onChange={(i, next) => void editBeat(i, next)}
+        <Panel
+          title="Creator"
+          className="w-[25%] shrink-0"
+          bodyClass="p-0"
+          actions={
+            <div className="flex gap-0.5">
+              {(['beat', 'perform', 'animate'] as const).map((tab) => (
+                <Button
+                  key={tab}
+                  variant={inspector === tab ? 'default' : 'ghost'}
+                  className="px-1.5 py-0.5 text-[10px] capitalize"
+                  onClick={() => setInspector(tab)}
+                >
+                  {tab}
+                </Button>
+              ))}
+            </div>
+          }
+        >
+          {inspector === 'beat' && (shots ? (
+              <BeatInspector
+                beat={selectedBeat}
+                index={selected}
+                cast={shots.cast}
+                vocab={vocab}
+                propTargets={propTargets}
+                portablePropTargets={portablePropTargets}
+                expressionsFor={expressionsFor}
+                onChange={(i, next) => void editBeat(i, next)}
+                onCastChange={(actorId, changes) => void editCastMember(actorId, changes)}
+              />
+            ) : (
+              <Empty>Press Direct to build a shot list</Empty>
+            ))}
+          {inspector === 'perform' && (
+            <PerformancePanel
+              scene={scene}
+              cue={selectedCue}
+              document={dialogue}
+              context={performanceContext}
+              sceneRun={withAudio && detail?.hasAudio && duration > 0 ? {
+                audioUrl: `/api/scenes/${scene}/audio`,
+                beatStarts,
+                durationMs: duration,
+              } : null}
+              onReload={reloadDialogue}
+              onSaveCue={saveDialogueCue}
             />
-          ) : (
-            <Empty>Press Direct to build a shot list</Empty>
+          )}
+          {inspector === 'animate' && (
+            <AnimationPanel
+              scene={scene}
+              shots={shots}
+              document={animation}
+              playheadMs={playheadMs}
+              onDocument={changeAnimationDocument}
+              onTarget={changeAnimationTarget}
+            />
           )}
         </Panel>
       </div>

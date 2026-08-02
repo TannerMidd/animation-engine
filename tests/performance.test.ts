@@ -154,6 +154,39 @@ describe('compiled performance', () => {
     expect(pointing(Math.floor(fps * 2.6))).toBe(false);
   });
 
+  it('accents selected words and recovers instead of alternating talk poses on a timer', () => {
+    const shots = shotsFor({
+      beats: [{
+        kind: 'line', speaker: 'alice', text: 'Please listen carefully right now!',
+        expression: 'ANGRY', gesture: 'TALK', reactions: { bob: 'SHOCKED' },
+        shot: 'MID', focus: ['alice'], camera: 'HOLD',
+      }],
+    });
+    const aligned = new Map<number, LineTiming>([[0, {
+      audio: '', durationMs: 3000, cues: [{ ms: 0, shape: 'C' }],
+      speechOnsetMs: 100, speechEndMs: 2800,
+      words: [
+        { id: 'w000-please', text: 'Please', startMs: 200, endMs: 450 },
+        { id: 'w001-listen', text: 'listen', startMs: 850, endMs: 1100 },
+        { id: 'w002-carefully', text: 'carefully', startMs: 1450, endMs: 1750 },
+        { id: 'w003-right', text: 'right', startMs: 2050, endMs: 2250 },
+        { id: 'w004-now', text: 'now!', startMs: 2400, endMs: 2650 },
+      ],
+    }]]);
+    const { ir } = compileShotList(shots, rigs, aligned);
+    const at = (ms: number) => ir.frames[Math.round((ms / 1000) * ir.meta.fps)]!.actors.alice!;
+    const arms = (ms: number) => JSON.stringify({
+      lu: at(ms).parts.arm_L_upper,
+      lf: at(ms).parts.arm_L_fore,
+      ru: at(ms).parts.arm_R_upper,
+      rf: at(ms).parts.arm_R_fore,
+    });
+
+    expect(arms(1600)).not.toBe(arms(100));
+    expect(arms(2100)).toBe(arms(100));
+    expect(arms(2500)).not.toBe(arms(2100));
+  });
+
   it('preserves explicit pause durations exactly', () => {
     const { ir, durationMs } = compileShotList(shotsFor(), rigs, timings);
     // 3000ms line (timing) + 160ms tail + 1500ms pause.

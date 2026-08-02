@@ -1,0 +1,168 @@
+{
+  "name": "production-office",
+  "setId": "production-office-v1",
+  "palette": "office-fluorescent",
+  "layout": {
+    "horizonY": 566,
+    "ceilingY": 92,
+    "marginX": 420,
+    "marginY": 220,
+    "walkable": {
+      "x": 120,
+      "y": 590,
+      "width": 1040,
+      "height": 130
+    }
+  },
+  "layers": {
+    "back": [
+      {
+        "prop": "room-wall",
+        "scale": 1,
+        "flip": false,
+        "params": {
+          "bandHeight": 150,
+          "railWidth": 6
+        }
+      },
+      {
+        "prop": "room-ceiling",
+        "scale": 1,
+        "flip": false,
+        "params": {
+          "gridOffset": 58
+        }
+      },
+      {
+        "prop": "room-floor",
+        "scale": 1,
+        "flip": false,
+        "params": {
+          "bandOffset": 96
+        }
+      },
+      {
+        "id": "light-left",
+        "prop": "ceiling-light",
+        "x": 300,
+        "scale": 1,
+        "flip": false,
+        "params": {
+          "width": 240
+        }
+      },
+      {
+        "id": "light-right",
+        "prop": "ceiling-light",
+        "x": 980,
+        "scale": 1,
+        "flip": false,
+        "params": {
+          "width": 240
+        }
+      },
+      {
+        "id": "clock-wall",
+        "prop": "clock",
+        "x": 1040,
+        "scale": 1,
+        "flip": false,
+        "params": {
+          "radius": 30,
+          "y": 430
+        }
+      },
+      {
+        "id": "whiteboard-main",
+        "prop": "whiteboard",
+        "x": 265,
+        "scale": 1,
+        "flip": false,
+        "params": {
+          "width": 300,
+          "height": 170,
+          "y": 430
+        }
+      }
+    ],
+    "mid": [
+      {
+        "id": "desk-main",
+        "prop": "desk",
+        "x": 640,
+        "y": 566,
+        "scale": 1,
+        "flip": false,
+        "params": {}
+      },
+      {
+        "id": "mug-hero",
+        "prop": "mug",
+        "x": 520,
+        "y": 470,
+        "scale": 0.9,
+        "flip": false,
+        "params": {}
+      },
+      {
+        "id": "laptop-main",
+        "prop": "laptop",
+        "x": 620,
+        "y": 470,
+        "scale": 0.8,
+        "flip": false,
+        "params": {
+          "on": true
+        }
+      },
+      {
+        "id": "monitor-main",
+        "prop": "monitor",
+        "x": 710,
+        "y": 470,
+        "scale": 0.85,
+        "flip": false,
+        "params": {
+          "on": true
+        }
+      },
+      {
+        "id": "chair-host",
+        "prop": "chair",
+        "x": 845,
+        "y": 566,
+        "scale": 1,
+        "flip": true,
+        "params": {
+          "height": 90
+        }
+      },
+      {
+        "id": "cabinet-left",
+        "prop": "filing-cabinet",
+        "x": 1080,
+        "y": 566,
+        "scale": 0.9,
+        "flip": false,
+        "params": {
+          "width": 90,
+          "height": 180,
+          "drawers": 3
+        }
+      }
+    ],
+    "fore": [
+      {
+        "id": "chair-guest",
+        "prop": "chair",
+        "x": 430,
+        "y": 610,
+        "scale": 1.05,
+        "flip": false,
+        "params": {
+          "height": 84
+        }
+      }
+    ]
+  }
+}

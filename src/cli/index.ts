@@ -1,6 +1,7 @@
 #!/usr/bin/env -S npx tsx
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { ROOT, OUT_DIR, CAST_DIR, SCRIPTS_DIR, SETS_DIR, sceneDir } from '../core/paths.ts';
 import { MODELS_ROOT, HF_CACHE, OLLAMA_MODELS, strayCacheLocations } from '../core/models.ts';
 import { loadSet, saveSet, listSets, validateSet, setPath, renderSet } from '../sets/index.ts';
@@ -16,12 +17,27 @@ import { saveRig, loadRig, listRigs, validateRig, type LoadedRig } from '../cast
 import { compileScene, DEFAULT_PLAN, type ActorPlan, type ScenePlan } from '../compile/index.ts';
 import { estimateLineMs } from '../compile/scene.ts';
 import { checkScript, loadRigsForShotList } from '../pipeline/check.ts';
+import {
+  runProductionPreflight,
+  type ProductionPreflightNote,
+  type ProductionPreflightReport,
+} from '../pipeline/preflight.ts';
 import { renderScene } from '../pipeline/render.ts';
+import { readDialogueDocument } from '../pipeline/dialogue.ts';
+import { readAnimationOrDefault } from '../pipeline/animation.ts';
+import { soundtrackManifestPath } from '../pipeline/voices.ts';
+import {
+  appendPreflightWarningReview,
+  latestPreflightWarningReview,
+  productionReviewSnapshotDigest,
+  warningAcknowledgementIsCurrent,
+  type ProductionReviewSnapshot,
+} from '../pipeline/preflight-review.ts';
 import { readShotList, writeShotList, shotlistPath, writeScript } from '../pipeline/scene.ts';
 import { Ollama, pickModel } from '../llm/ollama.ts';
 import { initShow, loadProfile, listProfiles, activeProfileId, setActiveProfileId, compareProfiles } from '../show/store.ts';
 import { setActiveIdentity } from '../show/context.ts';
-import { identityHash, type ShowIdentity } from '../schema/identity.ts';
+import { identityHash, ShowIdentity } from '../schema/identity.ts';
 import { planMigration, applyMigration } from '../show/migrate.ts';
 import { generateScript } from '../llm/script.ts';
 import { generateSet } from '../llm/set.ts';
@@ -32,10 +48,20 @@ import { autoDirect, buildCapabilityManifest, validateShotList } from '../direct
 import { synthesizeLines, loadRecordedVo, listVoices, getEngine, ENGINE_NAMES, type LineTiming, type VoiceLine } from '../voice/index.ts';
 import { findRhubarb } from '../voice/rhubarb.ts';
 import { ShotList } from '../schema/script.ts';
+import { atomicWriteFile } from '../audio/files.ts';
 
 interface Args {
   _: string[];
   flags: Record<string, string | boolean>;
+}
+
+async function optionalText(file: string): Promise<string | null> {
+  try {
+    return await fs.readFile(file, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
 }
 
 function parseArgs(argv: string[]): Args {
@@ -614,6 +640,50 @@ async function resolveScript(arg: string | undefined): Promise<string> {
   return p;
 }
 
+function blockingPreflightNotes(report: ProductionPreflightReport): ProductionPreflightNote[] {
+  return report.notes.filter((note) => note.blocking);
+}
+
+/** The CLI follows the same production policy as POST /render. */
+export function productionRenderBlocked(report: ProductionPreflightReport, draft: boolean): boolean {
+  return report.renderEndpointBlocked && !draft;
+}
+
+/**
+ * `--draft` is an explicit distribution-status choice, not merely a console flag.
+ * Preserve the canonical publishing manifest and add a conspicuous machine-readable
+ * label so downstream tooling cannot mistake this bundle for an approved production render.
+ */
+export async function markExportManifestDraft(
+  manifestFile: string,
+  report: ProductionPreflightReport,
+): Promise<void> {
+  const parsed = JSON.parse(await fs.readFile(manifestFile, 'utf8')) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`cannot label non-object export manifest ${manifestFile} as draft`);
+  }
+  const blockers = blockingPreflightNotes(report);
+  const warnings = report.notes.filter((note) => note.level === 'warn');
+  const manifest = {
+    ...parsed,
+    productionStatus: {
+      state: 'draft',
+      productionReady: false,
+      draftOverride: true,
+      preflightPolicy: report.policy.id,
+      preflightPassed: !report.renderEndpointBlocked,
+      blockers: blockers.map(({ code, message }) => ({ code, message })),
+      warnings: warnings.map(({ code, message }) => ({ code, message })),
+      note: 'Created by anim render --draft. This bundle is not approved for production distribution.',
+    },
+  };
+  await atomicWriteFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+function printPreflightNotes(notes: ProductionPreflightNote[]): void {
+  for (const item of notes) console.error(`  - [${item.code}] ${item.message}`);
+}
+
 /**
  * Thin wrapper over the pipeline.
  *
@@ -655,13 +725,97 @@ async function cmdRender(args: Args) {
     console.log(`  direct   ${shots.beats.length} beats -> ${path.relative(process.cwd(), shotlistPath(scene))}`);
   }
 
-  const rigs = await loadRigsForShotList(shots);
+  const draft = args.flags['draft'] === true;
+  // Render exactly the creative state that the production gate inspects. A
+  // save racing this short check belongs to the next invocation, never half
+  // of this export.
+  const identitySnapshot = ShowIdentity.parse(structuredClone(activeIdentity()));
+  const [dialogueSnapshot, animationSnapshot, setSnapshot, rigSnapshot, soundtrackSnapshot] = await Promise.all([
+    readDialogueDocument(scene),
+    readAnimationOrDefault(scene),
+    shots.set ? loadSet(shots.set) : Promise.resolve(null),
+    loadRigsForShotList(shots),
+    optionalText(soundtrackManifestPath(scene)),
+  ]);
+  const reviewSnapshot: ProductionReviewSnapshot = {
+    shots,
+    dialogue: dialogueSnapshot,
+    animation: animationSnapshot,
+    setDescriptor: setSnapshot,
+    identity: identitySnapshot,
+    rigs: rigSnapshot,
+    soundtrackManifest: soundtrackSnapshot,
+  };
+  const preflight = await runProductionPreflight(scene, shots);
+  const blockers = blockingPreflightNotes(preflight);
+  const warnings = preflight.notes.filter((note) => note.level === 'warn');
+  if (productionRenderBlocked(preflight, draft)) {
+    console.error(`\nProduction render blocked by ${preflight.policy.id} preflight:`);
+    printPreflightNotes(blockers);
+    console.error('\nResolve these blockers in the editor, then run Voices and Preflight again.');
+    console.error('For a diagnostic render only, rerun with --draft; that output is manifest-labeled non-production.');
+    process.exitCode = 1;
+    return;
+  }
+  if (draft) {
+    console.error('\n*** DRAFT RENDER — NOT PRODUCTION READY ***');
+    console.error(`The ${preflight.policy.id} production gate is explicitly bypassed for this diagnostic render.`);
+    if (blockers.length) printPreflightNotes(blockers);
+    console.error('The export manifest will be labeled draft. Video pixels are not watermarked.');
+  } else {
+    console.log(`  preflight ${preflight.policy.id} passed`);
+    if (warnings.length) {
+      console.error(`  review    ${warnings.length} non-blocking warning${warnings.length === 1 ? '' : 's'}:`);
+      printPreflightNotes(warnings);
+    }
+  }
+
+  const [currentShots, currentDialogue, currentAnimation, currentSet, currentRigs, currentSoundtrack] = await Promise.all([
+    readShotList(scene),
+    readDialogueDocument(scene),
+    readAnimationOrDefault(scene),
+    shots.set ? loadSet(shots.set) : Promise.resolve(null),
+    loadRigsForShotList(shots),
+    optionalText(soundtrackManifestPath(scene)),
+  ]);
+  if (!currentShots) throw new Error('the directed shot list disappeared during production preflight');
+  const currentReviewSnapshot: ProductionReviewSnapshot = {
+    shots: currentShots,
+    dialogue: currentDialogue,
+    animation: currentAnimation,
+    setDescriptor: currentSet,
+    identity: ShowIdentity.parse(structuredClone(activeIdentity())),
+    rigs: currentRigs,
+    soundtrackManifest: currentSoundtrack,
+  };
+  if (productionReviewSnapshotDigest(currentReviewSnapshot) !== productionReviewSnapshotDigest(reviewSnapshot)) {
+    throw new Error('the scene changed during production preflight; run the render command again');
+  }
+
+  let warningAcknowledgement = warnings.length ? await latestPreflightWarningReview(scene) : null;
+  if (!draft && warnings.length) {
+    if (!warningAcknowledgementIsCurrent(preflight, reviewSnapshot, warningAcknowledgement)) {
+      if (args.flags['ack-warnings'] !== true) {
+        console.error('\nReview the warnings above, then rerun with --ack-warnings to record an acknowledgement for this exact scene revision.');
+        process.exitCode = 1;
+        return;
+      }
+      warningAcknowledgement = await appendPreflightWarningReview(scene, preflight, reviewSnapshot, 'cli-creator');
+      console.log(`  review    acknowledged as ${warningAcknowledgement.id}`);
+    }
+  }
+
   const engineName = typeof args.flags['voice-engine'] === 'string' ? args.flags['voice-engine'] : 'chatterbox';
 
   let lastStage = '';
-  const result = await renderScene(shots, rigs, {
+  const result = await renderScene(shots, rigSnapshot, {
     scene,
     engine: engineName,
+    ...(dialogueSnapshot ? { dialogue: dialogueSnapshot } : {}),
+    animation: animationSnapshot,
+    setDescriptor: setSnapshot,
+    identity: identitySnapshot,
+    warningAcknowledgement: draft ? null : warningAcknowledgement,
     onStage: (p) => {
       if (p.stage !== lastStage) {
         if (lastStage) process.stdout.write('\n');
@@ -673,9 +827,12 @@ async function cmdRender(args: Args) {
   });
   if (lastStage) process.stdout.write('\n');
 
+  if (draft) await markExportManifestDraft(result.exportManifest, preflight);
+
   const held = Math.round((1 - result.captured / result.frames) * 100);
   console.log(`  frames   ${result.captured} unique of ${result.frames} (${held}% held)`);
-  console.log(`\nWrote ${path.relative(process.cwd(), result.mp4)}  (${(result.durationMs / 1000).toFixed(1)}s)`);
+  console.log(`\nWrote ${draft ? 'DRAFT ' : ''}${path.relative(process.cwd(), result.mp4)}  (${(result.durationMs / 1000).toFixed(1)}s)`);
+  if (draft) console.log(`Draft label: ${path.relative(process.cwd(), result.exportManifest)}`);
   console.log(`Edit ${path.relative(process.cwd(), shotlistPath(scene))} and re-run with --shotlist to retime it.`);
 }
 
@@ -958,12 +1115,15 @@ const HELP = `anim — script to limited-animation scene
                            --name my-scene --seconds 75 --characters 2
   new <name>             scaffold a script with the format documented inline
   check <script.md>      parse, direct and validate — fast, renders nothing
-  render <script.md>     script -> MP4. Casts any missing characters for you.
+  render <script.md>     production-gated script -> MP4. Casts missing characters.
                            --seed 7 --fps 24 --char-fps 12
                            --resting DEADPAN   baseline expression
                            --set office        background set (generated if missing)
                            --voice-engine chatterbox | sapi
+                           --ack-warnings     record review of current non-blocking warnings
                            --shotlist          reuse your edited shotlist.json
+                           --draft             bypass blockers for diagnostics only;
+                                               manifest-labeled non-production
   cast new <name>        create a placeholder character
   cast list              list characters
   cast check [name...]   validate rigs against their SVGs
@@ -1064,7 +1224,12 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error(`\nerror: ${(err as Error).message}`);
-  process.exitCode = 1;
-});
+const invokedAsScript = process.argv[1]
+  ? import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href
+  : false;
+if (invokedAsScript) {
+  main().catch((err) => {
+    console.error(`\nerror: ${(err as Error).message}`);
+    process.exitCode = 1;
+  });
+}

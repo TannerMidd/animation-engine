@@ -31,12 +31,20 @@ describe('model storage', () => {
   it('sets every library cache variable that would otherwise default to the user profile', () => {
     // Each of these has burned someone by silently writing gigabytes to $HOME.
     const env = modelEnv();
-    expect(Object.keys(env).sort()).toEqual(
-      ['HF_HOME', 'HUGGINGFACE_HUB_CACHE', 'TORCH_HOME', 'TRANSFORMERS_CACHE'].sort(),
-    );
-    for (const value of Object.values(env)) {
+    const cacheKeys = ['HF_HOME', 'HUGGINGFACE_HUB_CACHE', 'TORCH_HOME', 'TRANSFORMERS_CACHE'] as const;
+    for (const key of cacheKeys) {
+      const value = env[key]!;
       expect(value.startsWith(MODELS_ROOT)).toBe(true);
     }
+  });
+
+  it('forces render workers offline so a job cannot fetch missing model weights', () => {
+    expect(modelEnv()).toMatchObject({
+      HF_HUB_OFFLINE: '1',
+      TRANSFORMERS_OFFLINE: '1',
+      HF_DATASETS_OFFLINE: '1',
+      HF_HUB_DISABLE_TELEMETRY: '1',
+    });
   });
 
   it('watches the default locations these tools fall back to', () => {

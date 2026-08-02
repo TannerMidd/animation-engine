@@ -10,10 +10,26 @@ import type { TtsEngine, SynthRequest, SynthResult, Availability } from '../type
 // first on sys.path, so a worker called chatterbox.py shadows the installed
 // chatterbox package and makes its own import fail.
 const SCRIPT = path.join(ROOT, 'src', 'voice', 'engines', 'chatterbox_worker.py');
+const CACHE_PROBE = [
+  'import torch',
+  'from chatterbox.tts import ChatterboxTTS',
+  'from huggingface_hub import hf_hub_download',
+  "files=['ve.safetensors','t3_cfg.safetensors','s3gen.safetensors','tokenizer.json','conds.pt']",
+  "for name in files: hf_hub_download(repo_id='ResembleAI/chatterbox', filename=name, local_files_only=True)",
+  'print(torch.cuda.is_available())',
+].join('\n');
 
 /** The project venv, unless overridden. */
 export function pythonPath(): string {
   return process.env['ANIM_PYTHON'] ?? path.join(ROOT, '.venv', 'Scripts', 'python.exe');
+}
+
+/** Model-cache routing shared by probes and real synthesis workers. */
+export function chatterboxProcessEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  // Project routing wins over an ambient cache variable. A stale HF_HOME is
+  // otherwise enough for a real synthesis job to put gigabytes on C: even
+  // though the availability probe used the correct location.
+  return { ...base, ...modelEnv() };
 }
 
 interface PyEvent {
@@ -50,11 +66,13 @@ export class ChatterboxEngine implements TtsEngine {
       return { ok: false, reason: `no Python at ${py}. Create it with: python -m venv .venv` };
     }
 
-    const probe = await this.runPython(['-c', 'import chatterbox, torch; print(torch.cuda.is_available())']);
+    const probe = await this.runPython(['-c', CACHE_PROBE]);
     if (probe.code !== 0) {
       return {
         ok: false,
-        reason: `chatterbox is not importable in ${py}:\n${probe.stderr.split('\n').slice(-4).join('\n')}`,
+        reason:
+          `chatterbox or its explicitly cached model is unavailable in ${py}. ` +
+          `Install/prefetch ResembleAI/chatterbox before rendering:\n${probe.stderr.split('\n').slice(-4).join('\n')}`,
       };
     }
     return { ok: true };
@@ -87,7 +105,10 @@ export class ChatterboxEngine implements TtsEngine {
     let fatal: string | null = null;
 
     await new Promise<void>((resolve, reject) => {
-      const proc = spawn(pythonPath(), [SCRIPT, jobFile], { stdio: ['ignore', 'pipe', 'pipe'] });
+      const proc = spawn(pythonPath(), [SCRIPT, jobFile], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: chatterboxProcessEnv(),
+      });
       let buffer = '';
       let stderr = '';
 
@@ -130,7 +151,7 @@ export class ChatterboxEngine implements TtsEngine {
       const proc = spawn(pythonPath(), args, {
         stdio: ['ignore', 'pipe', 'pipe'],
         // Keep model weights off the system drive; see src/core/models.ts.
-        env: { ...process.env, ...modelEnv() },
+        env: chatterboxProcessEnv(),
       });
       let stdout = '';
       let stderr = '';

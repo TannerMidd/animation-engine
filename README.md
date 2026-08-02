@@ -1,11 +1,12 @@
 # animation-engine
 
-Script → limited-animation scene, in the Adult Swim vein. Free, local, deterministic.
+Script → creator-directed limited-animation show. Local-first, deterministic, and editable.
 
-Nothing in the pipeline needs PyTorch, CUDA, an API key, or a network connection. That was a
-deliberate design constraint — this machine's RTX 5070 Ti is Blackwell (sm_120) and stable
-PyTorch still doesn't ship kernels for it, so anything torch-based would have been a setup
-fight before it was a feature.
+The renderer, editor, timeline, staging, captions, Foley, and publishing pipeline run locally
+without an API key. Neural TTS and performance-driven character voice conversion are optional
+local production tools and require an explicitly installed PyTorch/model environment. Worker
+processes run with Hugging Face/Transformers offline flags: a render or conversion job never
+downloads missing weights, and model caches remain under `F:\ai-models` by default.
 
 ## Status
 
@@ -13,7 +14,7 @@ fight before it was a feature.
 |---|---|
 | **M0** Schemas + placeholder puppet → still PNG | done |
 | **M1** Deterministic render harness → idle MP4 | done |
-| **M2** Voice + phoneme-accurate lipsync | done |
+| **M2** Voice + waveform-derived viseme lipsync | done |
 | **M3** Script → director → multi-character scene with cuts | done |
 | **M3.5** Neural voices (Chatterbox) + Rhubarb lipsync | done |
 | **M6** Declarative set system + foreground layering | done |
@@ -22,6 +23,27 @@ fight before it was a feature.
 | **M9–M11** Beat timeline, set designer, cast editor | done |
 | **M12** Local LLM for script + set generation | next |
 | **M5** Inkscape SVG ingestion (your own art) | |
+| **M22** Performance capture, voice conversion, dialogue editorial | foundation implemented; verification gaps below |
+| **M23** Stateful staging and validated physical actions | in progress |
+| **M24** AnimationDoc, direct manipulation, motion assist, puppeteering | foundation implemented |
+| **M25** Sequence-level coverage and editorial grammar | foundation implemented |
+| **M26** 48 kHz stereo mix, stems, deterministic Foley | foundation implemented; no full post chain/archive master |
+| **M27** Captions, thumbnails, 16:9 + actor-aware 9:16 publishing | foundation implemented; sidecar captions only |
+
+“Foundation implemented” means the deterministic authoring/export path exists and is tested;
+it is not a claim that the human acceptance reels or every Phase 4 quality target have passed.
+Current boundaries are explicit:
+
+- voice-conversion QA measures signal, speech ratio, duration, clipping, and an
+  energy-envelope cadence proxy, then requires a human audition; it does **not** run ASR,
+  verify the transcript or target speaker identity, or produce verified phoneme alignment;
+- conversion provenance records the detected Hugging Face snapshot commit(s), package RECORD
+  fingerprint, and worker hash, but installation still follows an unpinned repository ref and
+  there is no approved-model manifest or independent weights checksum yet;
+- publishing writes WebVTT/SRT sidecars, not burned-in captions;
+- the mixer writes a social programme master and stems, not a separate less-compressed
+  archival master or a complete EQ/de-ess/compression/room-matching post chain; and
+- `--draft` labels the export manifest but does not add a visible watermark to the video.
 
 ## Model storage — read this first
 
@@ -29,9 +51,9 @@ Model weights are gigabytes, and every ML library defaults to a cache under your
 profile, i.e. the system drive. **This project keeps them off it.**
 
 `src/core/models.ts` derives a models root from the drive the checkout is on
-(`F:\ai-models` here) and passes `HF_HOME` / `TORCH_HOME` explicitly to every Python process
-it spawns — not relying on an ambient variable, because a missing one means a silent
-multi-gigabyte download to the wrong disk. Override with `ANIM_MODELS_ROOT`.
+(`F:\ai-models` here) and passes cache paths plus offline flags explicitly to every Python
+worker. Missing weights fail the job instead of being fetched in the background. Override the
+root with `ANIM_MODELS_ROOT`.
 
 Ollama is separate software and needs telling once:
 
@@ -76,7 +98,7 @@ Then open **http://127.0.0.1:5178**. Three panels:
 
 | | |
 |---|---|
-| **Scenes** | Script editor with Fountain highlighting, live scrubbable preview, beat timeline, and a per-beat inspector. Direct / Voices / Render as explicit steps. |
+| **Scenes** | Script editor, Line Booth/Scene Run performance capture, waveform dialogue editorial, stateful staging, creator animation studio, 16:9/9:16 preview, production preflight, and publishing exports. |
 | **Sets** | Build environments: layer tabs (back / mid / **fore**), prop palette, controls generated from each prop's declared params, and a live preview with characters staged in it that you can **drag props around on**. Composition notes appear over the frame, and *Tidy composition* applies the mechanical fixes. |
 | **Cast** | Edit what a character **looks like** — build, head shape, nose, ears, hair, facial hair, glasses, eye and brow style, four colour ramps and seven proportion sliders — with the puppet redrawn live. A *Faces* tab shows every expression at once. Voice settings, microphone recording for cloning, and a one-line audition to hear the result. |
 
@@ -91,6 +113,12 @@ tells you which you're watching.
 
 Editing a beat writes `shotlist.json` — the same file you'd edit by hand. Changing one
 line's expression re-synthesizes only that line, because the voice cache is keyed by content.
+
+The complete creator workflow is in **[docs/CREATOR_WORKFLOW.md](docs/CREATOR_WORKFLOW.md)**.
+Production render is deliberately stricter than preview: unsupported actions, stale audio,
+unapproved performances, animation conflicts, and broken continuity block export. Nonblocking
+warnings require an append-only review acknowledgement tied to the exact creative inputs; any
+relevant edit makes that acknowledgement stale.
 
 ### Appearance is data
 
@@ -129,7 +157,18 @@ python -m venv .venv && .venv\Scripts\python -m pip install chatterbox-tts
 .venv\Scripts\python -m pip install --force-reinstall torch torchaudio --index-url https://download.pytorch.org/whl/cu128
 ```
 
-Chatterbox runs fine on torch 2.11 despite the pin. Then put `rhubarb.exe` under `tools/`
+The package install does not guarantee the model weights are cached. Prefetch them explicitly
+while network access is intentional (the current integration does not yet pin a repository
+revision or record a weights checksum):
+
+```powershell
+$env:HF_HOME = 'F:\ai-models\huggingface'
+$env:HUGGINGFACE_HUB_CACHE = 'F:\ai-models\huggingface\hub'
+.venv\Scripts\python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='ResembleAI/chatterbox')"
+```
+
+After that, workers use only the local cache. Chatterbox runs fine on torch 2.11 despite the
+package pin. Then put `rhubarb.exe` under `tools/`
 ([releases](https://github.com/DanielSWolf/rhubarb-lip-sync/releases)) and:
 
 ```bash
@@ -148,7 +187,7 @@ speaks every line, lipsyncs it, renders, and muxes — from an empty `cast/` fol
 |---|---|
 | `new <name>` | scaffold a script with the format documented inline |
 | `check <script.md>` | parse, direct and validate — sub-second, renders nothing |
-| `render <script.md>` | script → MP4. `--set office --seed 7 --resting DEADPAN --shotlist` |
+| `render <script.md>` | Production-gated script → MP4. `--set office --seed 7 --resting DEADPAN --shotlist`; `--draft` labels only the manifest and does not visibly watermark the MP4. |
 | `cast new <name>` | create a placeholder character |
 | `cast check [name...]` | validate rigs against their SVGs |
 | `cast regen [name...]` | redraw art after a generator change, keeping voices — `--reroll` |
@@ -196,13 +235,14 @@ length is a writing decision — not something to guess at.
 
 ```
 script.md
- → [1 parse]    screenplay.json   cues, parentheticals, beats
- → [2 direct]   shotlist.json     shots, staging, expressions, camera  ← EDIT THIS
- → [3 voice]    SAPI              WAV + viseme events per line
- → [4 time]     mouth cues        SAPI viseme ids → Rhubarb A–X shapes
- → [5 compile]  scene.ir.json     per-frame transforms — no AI in this stage
- → [6 render]   frames/*.png      Playwright seek+shot, deduped
- → [7 mux]      out/<scene>.mp4   native WAV mix + ffmpeg
+ → [1 parse]     screenplay.json        cues, parentheticals, beats
+ → [2 direct]    shotlist.json          shot purpose + structured staging
+ → [3 perform]   dialogue.json          immutable takes, trims, approvals, timing
+ → [4 animate]   animation.json         generated + creator-owned motion layers
+ → [5 compile]   scene.ir.json          deterministic frame state
+ → [6 mix]       dialogue.wav + stems   48 kHz stereo + frame-locked Foley
+ → [7 capture]   horizontal + portrait  actor-aware cameras, native cards
+ → [8 publish]   MP4/captions/thumbs    manifest with hashes and provenance
 ```
 
 ### Voices

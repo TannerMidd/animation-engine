@@ -1,6 +1,7 @@
 import type {
-  CastSummary, CheckResult, FacePlate, Health, JobEvent, JobSummary, LlmStatus, Look, PreviewInfo,
-  Outfit, PropDefInfo, RigDoc, SceneDetail, SceneSummary, SetDescriptor, SetSummary, ShotList, ShowInfo, Vocab,
+  AnimationDocument, CastSummary, CheckResult, DialogueCue, DialogueDocument, FacePlate, Health, JobEvent,
+  JobSummary, LlmStatus, Look, PreviewInfo, Outfit, ProductionPreflightReport, PropDefInfo, RecordedTake, RigDoc, SceneDetail,
+  SceneSummary, SetDescriptor, SetSummary, ShotList, ShowInfo, Vocab,
 } from './types.ts';
 
 /** Thin typed wrappers over the engine server. */
@@ -47,16 +48,88 @@ export const api = {
     }>(`/api/scenes/${name}/direct`, body),
   applyDirect: (name: string, shots: ShotList) =>
     post<{ ok: true }>(`/api/scenes/${name}/direct/apply`, { shots }),
-  preflight: (name: string) =>
-    call<{ ok: boolean; notes: Array<{ level: 'error' | 'warn' | 'info'; message: string }> }>(
-      `/api/scenes/${name}/preflight`,
-    ),
+  preflight: (name: string) => call<ProductionPreflightReport>(`/api/scenes/${name}/preflight`),
+  acknowledgePreflightWarnings: (name: string, acknowledgedBy = 'local-creator') =>
+    post<ProductionPreflightReport>(`/api/scenes/${name}/preflight/acknowledge`, { acknowledgedBy }),
 
   saveShotList: (name: string, shots: ShotList) =>
     put<{ ok: true }>(`/api/scenes/${name}/shotlist`, { shots }),
 
-  preview: (name: string, withAudio: boolean) =>
-    post<PreviewInfo>(`/api/scenes/${name}/preview`, { withAudio }),
+  dialogue: (name: string) => call<DialogueDocument>(`/api/scenes/${name}/dialogue`),
+  saveDialogue: (name: string, document: DialogueDocument) =>
+    put<{ ok: true; revision: number }>(`/api/scenes/${name}/dialogue`, { document }),
+  saveDialogueCue: (name: string, cue: DialogueCue, expectedRevision?: number) =>
+    put<{ ok: true; revision: number; cue: DialogueCue }>(
+      `/api/scenes/${name}/dialogue/cues/${encodeURIComponent(cue.id)}`, { cue, expectedRevision },
+    ),
+  registerVoiceConsent: (
+    name: string,
+    cueId: string,
+    body: {
+      id: string;
+      subject: string;
+      basis: 'self-owned' | 'written-license' | 'performer-contract' | 'synthetic-owned';
+      scope?: 'target-voice' | 'performance' | 'both';
+      distribution?: boolean;
+      training?: boolean;
+      expiresAt?: string | null;
+      notes?: string[];
+      confirmed: boolean;
+    },
+  ) => post<{ ok: true; revision: number }>(
+    `/api/scenes/${name}/dialogue/${encodeURIComponent(cueId)}/consents`, body,
+  ),
+  revokeVoiceConsent: (name: string, consentId: string) => post<{ ok: true; revision: number }>(
+    `/api/scenes/${name}/dialogue/consents/${encodeURIComponent(consentId)}/revoke`, {},
+  ),
+  uploadPerformance: (
+    name: string,
+    cueId: string,
+    body: {
+      dataBase64: string;
+      filename?: string;
+      mode?: 'line-booth' | 'scene-run' | 'imported';
+      performerId?: string | null;
+      consentId?: string | null;
+      inputDevice?: string | null;
+      latencyCompensationMs?: number;
+      countInMs?: number;
+    },
+  ) => post<{ ok: true; revision: number; take: RecordedTake; capture: { warnings: string[] } }>(
+    `/api/scenes/${name}/dialogue/${encodeURIComponent(cueId)}/takes`, body,
+  ),
+  uploadSceneRun: (
+    name: string,
+    body: {
+      dataBase64: string;
+      filename?: string;
+      speaker: string;
+      segments: Array<{ cueId: string; inMs: number; outMs: number; speechOnsetMs?: number; speechEndMs?: number }>;
+      performerId?: string | null;
+      consentId?: string | null;
+      inputDevice?: string | null;
+      latencyCompensationMs?: number;
+      countInMs?: number;
+    },
+  ) => post<{
+    ok: true;
+    revision: number;
+    take: RecordedTake;
+    capture: { warnings: string[] };
+    segments: Array<{ cueId: string; inMs: number; outMs: number; speechOnsetMs: number; speechEndMs: number }>;
+  }>(`/api/scenes/${name}/dialogue/scene-runs`, body),
+  convertPerformance: (
+    name: string,
+    cueId: string,
+    body: { takeId?: string; consentId: string; registerPolicy?: 'preserve-performer' | 'adapt-to-character'; seed?: number },
+  ) => post<JobSummary>(`/api/scenes/${name}/dialogue/${encodeURIComponent(cueId)}/convert`, body),
+
+  animation: (name: string) => call<AnimationDocument>(`/api/scenes/${name}/animation`),
+  saveAnimation: (name: string, document: AnimationDocument) =>
+    put<{ ok: true; revision: number; document: AnimationDocument }>(`/api/scenes/${name}/animation`, { document }),
+
+  preview: (name: string, withAudio: boolean, layout: 'horizontal' | 'vertical' = 'horizontal') =>
+    post<PreviewInfo>(`/api/scenes/${name}/preview`, { withAudio, layout }),
 
   voices: (name: string) => post<JobSummary>(`/api/scenes/${name}/voices`),
   render: (name: string, engine?: string) => post<JobSummary>(`/api/scenes/${name}/render`, { engine }),

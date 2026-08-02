@@ -69,6 +69,9 @@ export async function buildPage(opts: PageOptions): Promise<string> {
   // than on top of it.
   const setBack = opts.set ? `<g id="set-back">${opts.set.back}</g>` : '';
   const setFore = opts.set ? `<g id="set-fore">${opts.set.fore}</g>` : '';
+  const dynamicProps = opts.set?.dynamic
+    ? `<g id="dynamic-props">${opts.set.dynamic}</g>`
+    : '';
 
   const actorMarkup = ir.cast
     .map((member) => {
@@ -148,6 +151,7 @@ export async function buildPage(opts: PageOptions): Promise<string> {
 <svg id="stage" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
     ${setBack}
     ${actorMarkup}
+    ${dynamicProps}
     ${setFore}
 </svg>
 ${grain}

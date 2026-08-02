@@ -44,12 +44,49 @@ export interface ParamSpec {
   choices?: string[];
 }
 
+/** Axis-aligned local-space collision/selection bounds before instance transforms. */
+export interface PropLocalBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export type PropHandleKind = 'grip' | 'contact' | 'placement' | 'control';
+
+/**
+ * A stable interaction point in the prop's authored local coordinates.
+ *
+ * Consumers apply the PropInstance x/y/scale/flip transform. `radius` is the
+ * useful snap/pick radius, not visual geometry; `normal` describes the outward
+ * contact direction where one is meaningful.
+ */
+export interface PropInteractionHandle {
+  id: string;
+  label: string;
+  kind: PropHandleKind;
+  x: number;
+  y: number;
+  radius: number;
+  normal?: { x: number; y: number };
+}
+
+/** Interaction metadata kept beside the renderer so catalogue entries cannot drift. */
+export interface PropInteractionGeometry {
+  /** True when attach/detach actions may move the prop away from its set placement. */
+  portable: boolean;
+  bounds: PropLocalBounds;
+  handles: PropInteractionHandle[];
+}
+
 export interface PropDef {
   label: string;
   tags: string[];
   params: ParamSpec[];
   /** Spans the whole set and draws in set coordinates. Walls, floors, skies. */
   spanning?: boolean;
+  /** Optional local-space bounds and stable handles for staging/contact authoring. */
+  interaction?: PropInteractionGeometry;
   render(ctx: PropContext): string;
 }
 

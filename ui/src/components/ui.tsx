@@ -33,16 +33,18 @@ export function Button({
 }
 
 export function Select({
-  value, options, onChange, className = '',
+  value, options, onChange, className = '', disabled,
 }: {
   value: string;
   options: readonly string[];
   onChange: (v: string) => void;
   className?: string;
+  disabled?: boolean;
 }) {
   return (
     <select
       value={value}
+      disabled={disabled}
       onChange={(e) => onChange(e.target.value)}
       className={`bg-panel-2 border border-edge rounded px-1.5 py-1 text-[12px] text-ink outline-none focus:border-accent ${className}`}
     >
@@ -54,7 +56,7 @@ export function Select({
 }
 
 export function NumberInput({
-  value, onChange, min, max, step = 1, className = '',
+  value, onChange, min, max, step = 1, className = '', disabled,
 }: {
   value: number;
   onChange: (v: number) => void;
@@ -62,6 +64,7 @@ export function NumberInput({
   max?: number;
   step?: number;
   className?: string;
+  disabled?: boolean;
 }) {
   return (
     <input
@@ -70,6 +73,7 @@ export function NumberInput({
       min={min}
       max={max}
       step={step}
+      disabled={disabled}
       onChange={(e) => {
         const n = Number(e.target.value);
         if (Number.isFinite(n)) onChange(n);
@@ -80,19 +84,23 @@ export function NumberInput({
 }
 
 export function TextInput({
-  value, onChange, placeholder, className = '',
+  value, onChange, onBlur, placeholder, className = '', disabled,
 }: {
   value: string;
   onChange: (v: string) => void;
+  onBlur?: () => void;
   placeholder?: string;
   className?: string;
+  disabled?: boolean;
 }) {
   return (
     <input
       type="text"
       value={value}
       placeholder={placeholder}
+      disabled={disabled}
       onChange={(e) => onChange(e.target.value)}
+      onBlur={onBlur}
       className={`bg-panel-2 border border-edge rounded px-1.5 py-1 text-[12px] text-ink outline-none focus:border-accent w-full ${className}`}
     />
   );

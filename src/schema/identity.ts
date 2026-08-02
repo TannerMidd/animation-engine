@@ -186,10 +186,13 @@ export const AudioBible = z.object({
       levelDb: z.number().min(-40).max(0).default(-6),
     })
     .default({}),
-  /** Master bus targets. RMS-based — an approximation, not broadcast LUFS. */
+  /** Master bus targets. Old profiles retain targetRmsDb as a migration alias. */
   mix: z
     .object({
+      targetIntegratedLufs: z.number().min(-36).max(-8).default(-16),
+      /** @deprecated Parsed for old identity files; new mastering uses LUFS. */
       targetRmsDb: z.number().min(-40).max(-6).default(-20),
+      /** Inter-sample ceiling measured after four-times oversampling, in dBTP. */
       ceilingDb: z.number().min(-6).max(0).default(-1),
     })
     .default({}),

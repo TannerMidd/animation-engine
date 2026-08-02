@@ -164,6 +164,7 @@
       "levelDb": -6
     },
     "mix": {
+      "targetIntegratedLufs": -16,
       "targetRmsDb": -20,
       "ceilingDb": -1
     }

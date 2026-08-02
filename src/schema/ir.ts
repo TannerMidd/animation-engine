@@ -45,10 +45,40 @@ export const IRActor = z.object({
 });
 export type IRActor = z.infer<typeof IRActor>;
 
+/** One addressable set prop that can leave its authored set placement. */
+export const IRProp = z.object({
+  /** Stable set-local id (or a deterministic legacy fallback). */
+  id: z.string().min(1),
+  /** Prop registry key, e.g. "mug" or "laptop". */
+  prop: z.string().min(1),
+});
+export type IRProp = z.infer<typeof IRProp>;
+
+/** Fully baked placement for one dynamic prop on one frame. */
+export const IRPropState = z.object({
+  visible: z.boolean(),
+  /**
+   * `set` shows the authored set instance. `world` hides that instance and
+   * shows the movable duplicate at the coordinates below.
+   */
+  mode: z.enum(['set', 'world']),
+  /** Position of the prop's local origin in set coordinates. */
+  x: z.number(),
+  y: z.number(),
+  scale: z.number().positive(),
+  flip: z.boolean(),
+  rotation: z.number(),
+  /** Informational continuity metadata; placement is already fully baked. */
+  heldBy: z.string().min(1).nullable(),
+});
+export type IRPropState = z.infer<typeof IRPropState>;
+
 export const IRFrame = z.object({
   camera: IRCamera,
   /** Actor id -> state. */
   actors: z.record(z.string(), IRActor),
+  /** Dynamic prop id -> complete state. Absent on legacy IR. */
+  props: z.record(z.string(), IRPropState).optional(),
   /**
    * Which card this frame shows instead of the stage. A key into the card art
    * in `meta.cards` rather than inline SVG, so forty held title frames cost
@@ -91,6 +121,8 @@ export type IRMeta = z.infer<typeof IRMeta>;
 export const SceneIR = z.object({
   meta: IRMeta,
   cast: z.array(IRCastMember),
+  /** Addressable props used by this scene. Absent on legacy IR. */
+  props: z.array(IRProp).optional(),
   frames: z.array(IRFrame),
 });
 export type SceneIR = z.infer<typeof SceneIR>;

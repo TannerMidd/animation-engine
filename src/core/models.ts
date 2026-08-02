@@ -20,11 +20,16 @@ export const TORCH_CACHE = path.join(MODELS_ROOT, 'torch');
 export const OLLAMA_MODELS = path.join(MODELS_ROOT, 'ollama');
 
 /**
- * Environment for any Python we spawn.
+ * Environment for any Python worker we spawn.
  *
  * Set explicitly on the child rather than relying on the user having exported
  * them: an ambient variable that isn't there means a silent 3GB download to the
  * system drive, and the failure only shows up when that drive fills.
+ *
+ * Workers are deliberately offline. Installing or prefetching a model is a
+ * separate, explicit command; synthesis and conversion must either find the
+ * requested files in the governed cache or fail. This also prevents a render
+ * from changing model bytes because a remote repository moved.
  */
 export function modelEnv(): Record<string, string> {
   return {
@@ -32,6 +37,10 @@ export function modelEnv(): Record<string, string> {
     HUGGINGFACE_HUB_CACHE: path.join(HF_CACHE, 'hub'),
     TRANSFORMERS_CACHE: path.join(HF_CACHE, 'hub'),
     TORCH_HOME: TORCH_CACHE,
+    HF_HUB_OFFLINE: '1',
+    TRANSFORMERS_OFFLINE: '1',
+    HF_DATASETS_OFFLINE: '1',
+    HF_HUB_DISABLE_TELEMETRY: '1',
   };
 }
 

@@ -5,6 +5,7 @@ import { SetDescriptor, geometryFor, STAGE, type PropInstance, type SetGeometry 
 import { getPalette, type Palette } from './palettes.ts';
 import { getProp, PROP_KEYS, PROPS } from './props/index.ts';
 import { r } from './props/types.ts';
+import { resolveSetProps, type ResolvedSetProp } from './interaction.ts';
 
 /**
  * Set descriptor -> SVG.
@@ -16,11 +17,18 @@ import { r } from './props/types.ts';
 export interface RenderedSet {
   back: string;
   fore: string;
+  /** Movable copies of interaction-enabled props, placed above actors by the page builder. */
+  dynamic: string;
   geo: SetGeometry;
   palette: Palette;
 }
 
-function renderInstance(inst: PropInstance, palette: Palette, geo: SetGeometry): string {
+function renderInstance(
+  inst: PropInstance,
+  palette: Palette,
+  geo: SetGeometry,
+  resolved: ResolvedSetProp | undefined,
+): { set: string; dynamic: string } {
   const def = getProp(inst.prop);
   const ctx = {
     palette,
@@ -31,7 +39,7 @@ function renderInstance(inst: PropInstance, palette: Palette, geo: SetGeometry):
   };
 
   // Spanning props cover the whole set and place themselves in set coordinates.
-  if (def.spanning) return def.render(ctx);
+  if (def.spanning) return { set: def.render(ctx), dynamic: '' };
 
   // Everything else authors in local space around its own base, and the
   // registry places it. Keeping that arithmetic in one place is deliberate:
@@ -39,18 +47,43 @@ function renderInstance(inst: PropInstance, palette: Palette, geo: SetGeometry):
   // up with limbs rotating about empty space.
   const sx = inst.flip ? -inst.scale : inst.scale;
   const transform = `translate(${r(ctx.x)},${r(ctx.y)}) scale(${r(sx)},${r(inst.scale)})`;
-  return `<g transform="${transform}">${def.render(ctx)}</g>`;
+  const art = def.render(ctx);
+  if (!resolved?.interaction) {
+    return { set: `<g transform="${transform}">${art}</g>`, dynamic: '' };
+  }
+
+  // The authored instance remains in its original depth layer until runtime
+  // state says it has moved. A second, initially hidden copy sits in a common
+  // interaction layer so a held object can cross cuts without DOM reparenting.
+  const attrs = `data-prop-id="${resolved.id}" data-prop-kind="${resolved.prop}"`;
+  return {
+    set: `<g id="set-prop-${resolved.id}" ${attrs} transform="${transform}">${art}</g>`,
+    dynamic: `<g id="dynamic-prop-${resolved.id}" ${attrs} style="display:none">${art}</g>`,
+  };
 }
 
 export function renderSet(desc: SetDescriptor): RenderedSet {
   const palette = getPalette(desc.palette);
   const geo = geometryFor(desc.layout);
+  const resolved = new Map(
+    resolveSetProps(desc).map((prop) => [`${prop.layer}:${prop.index}`, prop] as const),
+  );
 
-  const layer = (items: PropInstance[]) => items.map((i) => renderInstance(i, palette, geo)).join('\n');
+  const layer = (name: 'back' | 'mid' | 'fore', items: PropInstance[]) =>
+    items.map((instance, index) => renderInstance(
+      instance,
+      palette,
+      geo,
+      resolved.get(`${name}:${index}`),
+    ));
+  const back = layer('back', desc.layers.back);
+  const mid = layer('mid', desc.layers.mid);
+  const fore = layer('fore', desc.layers.fore);
 
   return {
-    back: layer(desc.layers.back) + '\n' + layer(desc.layers.mid),
-    fore: layer(desc.layers.fore),
+    back: [...back, ...mid].map((item) => item.set).join('\n'),
+    fore: fore.map((item) => item.set).join('\n'),
+    dynamic: [...back, ...mid, ...fore].map((item) => item.dynamic).filter(Boolean).join('\n'),
     geo,
     palette,
   };

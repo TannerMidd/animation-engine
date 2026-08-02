@@ -26,6 +26,25 @@ export const CAMERA_MOVES = ['HOLD', 'PUSH_IN', 'PULL_OUT', 'PAN_L', 'PAN_R', 'S
 export const CameraMove = z.enum(CAMERA_MOVES);
 export type CameraMove = z.infer<typeof CameraMove>;
 
+/**
+ * Why a frame exists in the cut.
+ *
+ * This is editorial intent rather than rendering vocabulary: two beats may
+ * use the same MID but serve very different jobs. Persisting the job lets a
+ * later director revise coverage without mistaking a reaction or button for
+ * an arbitrary crop. `coverage` is the legacy default.
+ */
+export const SHOT_PURPOSES = [
+  'coverage',
+  'establishing',
+  'reaction',
+  'action',
+  'emphasis',
+  'button',
+] as const;
+export const ShotPurpose = z.enum(SHOT_PURPOSES);
+export type ShotPurpose = z.infer<typeof ShotPurpose>;
+
 /** Staging marks as fractions of stage width. Named so scripts read like blocking notes. */
 export const MARKS = {
   FAR_L: 0.16,
@@ -36,6 +55,80 @@ export const MARKS = {
 } as const;
 export const Mark = z.enum(['FAR_L', 'SL', 'CENTER', 'SR', 'FAR_R']);
 export type Mark = z.infer<typeof Mark>;
+
+// --- stage state ----------------------------------------------------------
+
+/**
+ * A position an actor can occupy during a scene.
+ *
+ * `mark` is the readable authoring form. Exact coordinates are available for
+ * hand staging and for entrances that begin outside the frame. Omitted axes
+ * preserve their current value, so a move can change only depth or only x.
+ */
+export const StagePosition = z
+  .object({
+    mark: Mark.optional(),
+    x: z.number().optional(),
+    y: z.number().optional(),
+    depth: z.number().min(-1).max(1).optional(),
+  })
+  .refine((p) => p.mark !== undefined || p.x !== undefined || p.y !== undefined || p.depth !== undefined, {
+    message: 'a stage position needs a mark, coordinate, or depth',
+  });
+export type StagePosition = z.infer<typeof StagePosition>;
+
+export const LOOK_DIRECTIONS = ['left', 'right', 'front'] as const;
+export const LookDirection = z.enum(LOOK_DIRECTIONS);
+export type LookDirection = z.infer<typeof LookDirection>;
+
+const ActorAction = {
+  actor: z.string().min(1),
+  /** Optional duration inside the containing beat; absent uses that beat's share. */
+  durationFrames: z.number().int().positive().optional(),
+};
+
+const AttentionTarget = {
+  /** A cast id. */
+  target: z.string().min(1).optional(),
+  direction: LookDirection.optional(),
+};
+
+/**
+ * Structured actions the staging compiler can reason about.
+ *
+ * Every action in this contract has a deterministic compiler implementation.
+ * Prop references may use a stable set-instance id, or a registry key when
+ * exactly one matching instance exists in the active set.
+ */
+export const StageAction = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('enter'), ...ActorAction, from: StagePosition.optional(), to: StagePosition.optional() }),
+  z.object({ type: z.literal('exit'), ...ActorAction, to: StagePosition.optional() }),
+  z.object({ type: z.literal('move'), ...ActorAction, to: StagePosition }),
+  z.object({ type: z.literal('sit'), ...ActorAction }),
+  z.object({ type: z.literal('stand'), ...ActorAction }),
+  z.object({ type: z.literal('look'), ...ActorAction, ...AttentionTarget }),
+  z.object({ type: z.literal('turn'), ...ActorAction, ...AttentionTarget }),
+  z.object({ type: z.literal('reach'), ...ActorAction, target: z.string().min(1) }),
+  z.object({ type: z.literal('pick_up'), ...ActorAction, prop: z.string().min(1) }),
+  z.object({
+    type: z.literal('put_down'),
+    ...ActorAction,
+    prop: z.string().min(1),
+    /** Optional authored placement; omitted uses a reachable point beside the actor. */
+    to: StagePosition.optional(),
+  }),
+  z.object({ type: z.literal('tap'), ...ActorAction, target: z.string().min(1), count: z.number().int().positive().default(1) }),
+]);
+export type StageAction = z.infer<typeof StageAction>;
+
+export const STAGE_ACTION_TYPES = [
+  'enter', 'exit', 'move', 'sit', 'stand', 'look', 'turn', 'reach', 'pick_up', 'put_down', 'tap',
+] as const;
+
+/** Actions with a deterministic visual implementation in the current compiler. */
+export const SUPPORTED_STAGE_ACTIONS = [
+  'enter', 'exit', 'move', 'sit', 'stand', 'look', 'turn', 'reach', 'pick_up', 'put_down', 'tap',
+] as const;
 
 // --- screenplay -----------------------------------------------------------
 
@@ -77,6 +170,17 @@ export const ShotCastMember = z.object({
   mark: Mark,
   flip: z.boolean().default(false),
   scale: z.number().positive().default(1.25),
+  /** Initial state. Legacy shot lists retain their old on-mark, visible IDLE. */
+  visible: z.boolean().default(true),
+  /** Exact initial placement; null means derive x from `mark` and y from the stage floor. */
+  position: z.object({ x: z.number(), y: z.number() }).nullable().default(null),
+  /** -1 background, 0 stage plane, +1 foreground. Rendered as a bounded scale change. */
+  depth: z.number().min(-1).max(1).default(0),
+  /** Persistent base pose beneath speech gestures. */
+  pose: z.string().min(1).default('IDLE'),
+  /** Optional portable set prop already carried when the scene begins or the actor enters. */
+  heldProp: z.string().min(1).nullable().default(null),
+  heldHand: z.enum(['left', 'right']).nullable().default(null),
   /** Expression this character returns to when not otherwise directed. */
   resting: z.string().default('NEUTRAL'),
   /**
@@ -91,6 +195,10 @@ export type ShotCastMember = z.infer<typeof ShotCastMember>;
 
 /** Framing shared by every beat kind. */
 const Framing = {
+  /** Stable across repeated directing/parsing of the same semantic beat. */
+  id: z.string().min(1).optional(),
+  /** The editorial job this beat's framing performs. */
+  purpose: ShotPurpose.default('coverage'),
   shot: Shot.default('MID'),
   /** Who the shot is on. Empty means everyone. */
   focus: z.array(z.string()).default([]),
@@ -129,13 +237,19 @@ export const ShotBeat = z.discriminatedUnion('kind', [
     kind: z.literal('action'),
     text: z.string(),
     ms: z.number().int().positive(),
+    /** Ordered stage events executed during this beat. */
+    stage: z.array(StageAction).default([]),
+    /** Director/parser notes that preflight must surface rather than ignore. */
+    unsupported: z.array(z.string().min(1)).default([]),
     reactions: z.record(z.string(), z.string()).default({}),
     ...Framing,
   }),
 ]);
 export type ShotBeat = z.infer<typeof ShotBeat>;
+/** Builder/JSON input keeps defaulted framing fields, including purpose, optional. */
+export type ShotBeatInput = z.input<typeof ShotBeat>;
 
-export const ShotList = z.object({
+const ShotListShape = z.object({
   scene: z.string().min(1),
   /** Which identity profile directed this scene, for drift detection. */
   identity: IdentityStamp.optional(),
@@ -156,6 +270,69 @@ export const ShotList = z.object({
   cast: z.array(ShotCastMember).min(1),
   beats: z.array(ShotBeat).min(1),
 });
+
+/** Semantic key deliberately excludes framing/directing choices. */
+function beatSemanticKey(beat: ShotBeat): string {
+  switch (beat.kind) {
+    case 'line':
+      return `line:${beat.speaker}:${beat.text}`;
+    case 'pause':
+      return `pause:${beat.ms}`;
+    case 'action':
+      return `action:${beat.text}`;
+  }
+}
+
+/** Small platform-independent FNV-1a hash; identity, not security. */
+function beatHash(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+/** Stable id for legacy/machine-authored beats that omitted one. */
+export function stableBeatId(scene: string, beat: ShotBeat, occurrence: number): string {
+  return `${beat.kind}-${beatHash(`${scene}\0${beatSemanticKey(beat)}\0${occurrence}`)}`;
+}
+
+/**
+ * Backfill stable beat ids at the shot-list boundary.
+ *
+ * The occurrence is among semantically identical beats, not the array index,
+ * so inserting an unrelated beat does not rename every edit below it.
+ */
+export const ShotList = ShotListShape.superRefine((shots, ctx) => {
+  shots.cast.forEach((member, index) => {
+    if ((member.heldProp === null) !== (member.heldHand === null)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['cast', index, member.heldProp === null ? 'heldProp' : 'heldHand'],
+        message: 'initial heldProp and heldHand must be set together',
+      });
+    }
+  });
+}).transform((shots) => {
+  const occurrences = new Map<string, number>();
+  const used = new Set(shots.beats.flatMap((b) => (b.id ? [b.id] : [])));
+
+  const beats = shots.beats.map((beat) => {
+    if (beat.id) return { ...beat, id: beat.id };
+    const key = beatSemanticKey(beat);
+    const occurrence = occurrences.get(key) ?? 0;
+    occurrences.set(key, occurrence + 1);
+    const base = stableBeatId(shots.scene, beat, occurrence);
+    let id = base;
+    let suffix = 1;
+    while (used.has(id)) id = `${base}-${suffix++}`;
+    used.add(id);
+    return { ...beat, id };
+  });
+
+  return { ...shots, beats };
+});
 export type ShotList = z.infer<typeof ShotList>;
 
 // --- capability manifest --------------------------------------------------
@@ -169,7 +346,9 @@ export type ShotList = z.infer<typeof ShotList>;
  */
 export interface CapabilityManifest {
   shots: readonly string[];
+  shotPurposes: readonly string[];
   cameraMoves: readonly string[];
   marks: readonly string[];
+  stageActions: readonly string[];
   characters: Record<string, { expressions: string[]; poses: string[] }>;
 }

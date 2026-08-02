@@ -16,8 +16,8 @@ import type { ShowIdentity } from '../schema/identity.ts';
  * around the scene as frames; they are also directly previewable.
  */
 
-const W = 1280;
-const H = 720;
+const DEFAULT_CARD = { width: 1280, height: 720 } as const;
+export interface CardDimensions { width: number; height: number }
 
 /** Fit a size so the text spans at most `maxWidth`. */
 function fitSize(text: string, ideal: number, maxWidth: number): number {
@@ -25,20 +25,26 @@ function fitSize(text: string, ideal: number, maxWidth: number): number {
   return width > maxWidth ? (ideal * maxWidth) / width : ideal;
 }
 
-function frame(identity: ShowIdentity, inner: string): string {
+function frame(identity: ShowIdentity, inner: string, width: number, height: number): string {
   const cards = identity.visual.cards;
   const style = activeStyle();
-  const grain = style.grain > 0 ? grainOverlay({ ...style, grain: Math.max(style.grain, 0.06) }, 'card-grain', 0, 0, W, H) : '';
+  const grain = style.grain > 0 ? grainOverlay({ ...style, grain: Math.max(style.grain, 0.06) }, 'card-grain', 0, 0, width, height) : '';
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">
-  <rect x="0" y="0" width="${W}" height="${H}" fill="${cards.paper}"/>
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
+  <rect x="0" y="0" width="${width}" height="${height}" fill="${cards.paper}"/>
   ${inner}
   ${grain}
 </svg>`;
 }
 
 /** The opening card: title over an accent rule, subtitle beneath. */
-export function titleCardSvg(identity: ShowIdentity, title: string, sub?: string): string {
+export function titleCardSvg(
+  identity: ShowIdentity,
+  title: string,
+  sub?: string,
+  dimensions: CardDimensions = DEFAULT_CARD,
+): string {
+  const { width: W, height: H } = dimensions;
   const cards = identity.visual.cards;
   const cleanTitle = supportedText(title).trim() || 'UNTITLED';
   const size = fitSize(cleanTitle, 96, W * 0.82);
@@ -71,11 +77,12 @@ export function titleCardSvg(identity: ShowIdentity, title: string, sub?: string
     }
   }
 
-  return frame(identity, inner);
+  return frame(identity, inner, W, H);
 }
 
 /** The end card. Abrupt by tradition. */
-export function endCardSvg(identity: ShowIdentity): string {
+export function endCardSvg(identity: ShowIdentity, dimensions: CardDimensions = DEFAULT_CARD): string {
+  const { width: W, height: H } = dimensions;
   const cards = identity.visual.cards;
   const text = supportedText(cards.endText).trim() || 'THE END';
   const size = fitSize(text, 72, W * 0.6);
@@ -88,5 +95,5 @@ export function endCardSvg(identity: ShowIdentity): string {
     anchor: 'middle',
   });
 
-  return frame(identity, inner);
+  return frame(identity, inner, W, H);
 }

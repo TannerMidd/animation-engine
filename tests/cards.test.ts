@@ -5,6 +5,7 @@ import { compileShotList, cardTiming } from '../src/compile/scene.ts';
 import { buildPlaceholderRig, buildPlaceholderSvg } from '../src/cast/placeholder.ts';
 import type { LineTiming } from '../src/voice/index.ts';
 import type { LoadedRig } from '../src/cast/store.ts';
+import { endCardSvg, titleCardSvg } from '../src/render/cards.ts';
 
 /**
  * Cards are packaging, not time.
@@ -90,5 +91,14 @@ describe('card splicing', () => {
     const title = withCards.ir.frames[0]!;
     expect(title.actors).toEqual({});
     expect(title.camera).toEqual({ x: 0, y: 0, w: 1280, h: 720 });
+  });
+});
+
+describe('portrait card treatment', () => {
+  it('generates native 9:16 card artwork instead of stretching a horizontal card', () => {
+    const title = titleCardSvg(DEFAULT_IDENTITY, 'The Update', 'INT. Room - Day', { width: 720, height: 1280 });
+    const end = endCardSvg(DEFAULT_IDENTITY, { width: 720, height: 1280 });
+    expect(title).toContain('viewBox="0 0 720 1280"');
+    expect(end).toContain('viewBox="0 0 720 1280"');
   });
 });

@@ -1,8 +1,5 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 
-const STAGE_W = 1280;
-const STAGE_H = 720;
-
 /**
  * The preview page at a fixed 1280x720, scaled to fit its container.
  *
@@ -16,12 +13,14 @@ interface RuntimeWindow extends Window {
 }
 
 export function ScaledFrame({
-  src, title, iframeRef, onLoad, seekOnReady = true,
+  src, title, iframeRef, onLoad, seekOnReady = true, width = 1280, height = 720,
 }: {
   src: string | null;
   title: string;
   iframeRef?: React.Ref<HTMLIFrameElement>;
   onLoad?: () => void;
+  width?: number;
+  height?: number;
   /**
    * Apply frame 0 once the runtime is ready.
    *
@@ -74,16 +73,16 @@ export function ScaledFrame({
     if (!el) return;
 
     const measure = () => {
-      const { width, height } = el.getBoundingClientRect();
-      if (width < 8 || height < 8) return;
-      setScale(Math.min(width / STAGE_W, height / STAGE_H));
+      const { width: containerWidth, height: containerHeight } = el.getBoundingClientRect();
+      if (containerWidth < 8 || containerHeight < 8) return;
+      setScale(Math.min(containerWidth / Math.max(1, width), containerHeight / Math.max(1, height)));
     };
 
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [width, height]);
 
   // The wrapper is sized to the *scaled* dimensions and the iframe scales from
   // its top-left corner.
@@ -95,15 +94,15 @@ export function ScaledFrame({
   // hundreds of pixels off. Giving the wrapper the post-scale size means
   // ordinary centring applies to something that actually fits.
   const wrapper: CSSProperties = {
-    width: STAGE_W * scale,
-    height: STAGE_H * scale,
+    width: width * scale,
+    height: height * scale,
     position: 'relative',
     overflow: 'hidden',
   };
 
   const frame: CSSProperties = {
-    width: STAGE_W,
-    height: STAGE_H,
+    width,
+    height,
     transform: `scale(${scale})`,
     transformOrigin: 'top left',
     position: 'absolute',

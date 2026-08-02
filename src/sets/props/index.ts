@@ -45,6 +45,7 @@ export function propManifest() {
       tags: def.tags,
       spanning: def.spanning ?? false,
       params: def.params,
+      interaction: def.interaction ?? null,
     };
   });
 }

@@ -1,4 +1,4 @@
-import type { SetDescriptor } from './schema.ts';
+import { DEFAULT_WALKABLE_AREA, type SetDescriptor } from './schema.ts';
 
 /**
  * Builtin sets, materialised into `sets/` on first use.
@@ -17,7 +17,7 @@ import type { SetDescriptor } from './schema.ts';
 const office: SetDescriptor = {
   name: 'office',
   palette: 'office-fluorescent',
-  layout: { horizonY: 566, ceilingY: 92, marginX: 420, marginY: 220 },
+  layout: { horizonY: 566, ceilingY: 92, marginX: 420, marginY: 220, walkable: { ...DEFAULT_WALKABLE_AREA } },
   layers: {
     back: [
       { prop: 'room-wall', scale: 1, flip: false, params: { bandHeight: 150, railWidth: 6 } },
@@ -42,7 +42,7 @@ const office: SetDescriptor = {
 const diveBar: SetDescriptor = {
   name: 'dive-bar',
   palette: 'bar-night',
-  layout: { horizonY: 580, ceilingY: 70, marginX: 420, marginY: 220 },
+  layout: { horizonY: 580, ceilingY: 70, marginX: 420, marginY: 220, walkable: { ...DEFAULT_WALKABLE_AREA } },
   layers: {
     back: [
       { prop: 'room-wall', scale: 1, flip: false, params: { bandHeight: 180, railWidth: 5 } },
@@ -66,7 +66,7 @@ const diveBar: SetDescriptor = {
 const roadside: SetDescriptor = {
   name: 'roadside',
   palette: 'exterior-dusk',
-  layout: { horizonY: 560, ceilingY: 0, marginX: 420, marginY: 220 },
+  layout: { horizonY: 560, ceilingY: 0, marginX: 420, marginY: 220, walkable: { ...DEFAULT_WALKABLE_AREA } },
   layers: {
     back: [
       { prop: 'sky', scale: 1, flip: false, params: { bandHeight: 150 } },

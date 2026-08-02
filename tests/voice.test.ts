@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { deliveryFor, estimateMouthCues, getEngine, ENGINE_NAMES } from '../src/voice/index.ts';
+import {
+  buildSynthRequest, deliveryFor, estimateMouthCues, getEngine, ENGINE_NAMES,
+} from '../src/voice/index.ts';
+import { chatterboxProcessEnv } from '../src/voice/engines/chatterbox.ts';
+import { modelEnv } from '../src/core/models.ts';
 
 describe('delivery mapping', () => {
   it('delivers a deadpan line flatter than an angry one', () => {
@@ -25,6 +29,34 @@ describe('delivery mapping', () => {
       expect(d.cfg, name).toBeGreaterThan(0);
       expect(d.cfg, name).toBeLessThanOrEqual(1);
     }
+  });
+
+  it('propagates character persona into a cache-miss synthesis request', () => {
+    const line = {
+      id: 'line-1',
+      text: 'This should sound like the character.',
+      expression: 'JOY',
+      voice: 'David',
+      rate: 0,
+      ref: null,
+      persona: { energy: 0.6, pace: 1.4 },
+      seed: 7,
+    };
+
+    const request = buildSynthRequest(line, 'take.wav');
+    expect({ exaggeration: request.exaggeration, cfg: request.cfgWeight })
+      .toEqual(deliveryFor(line.expression, line.persona));
+    expect(request.exaggeration).not.toBe(deliveryFor(line.expression).exaggeration);
+    expect(request.cfgWeight).not.toBe(deliveryFor(line.expression).cfg);
+  });
+});
+
+describe('Chatterbox process environment', () => {
+  it('routes both probes and synthesis workers to the project model caches', () => {
+    const env = chatterboxProcessEnv({ HF_HOME: 'C:\\wrong-cache', PATH: 'test-path' });
+    expect(env).toMatchObject(modelEnv());
+    expect(env['HF_HOME']).not.toBe('C:\\wrong-cache');
+    expect(env['PATH']).toBe('test-path');
   });
 });
 

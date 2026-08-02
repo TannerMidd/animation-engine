@@ -50,12 +50,48 @@ export interface MouthCue {
   shape: MouthShape;
 }
 
+/** Optional word-level timing, in line-local playback coordinates. */
+export interface WordTiming {
+  id?: string;
+  text: string;
+  startMs: number;
+  endMs: number;
+  confidence?: number | null;
+}
+
 /** A line's audio and the mouth track that goes with it. */
 export interface LineTiming {
   /** Absolute path to the WAV. */
   audio: string;
+  /** Duration after source trim, before any authored pause after the line. */
   durationMs: number;
+  /** Exact mixer output window after safe edge-silence fitting/interruption. */
+  playbackDurationMs?: number;
   cues: MouthCue[];
+  /** Source-asset trim coordinates. Omitted means play the complete file. */
+  sourceInMs?: number;
+  sourceOutMs?: number;
+  /** Actual voiced bounds inside the trimmed, line-local playback window. */
+  speechStartMs?: number;
+  speechOnsetMs?: number;
+  speechEndMs?: number;
+  words?: WordTiming[];
+  alignment?: { words?: WordTiming[] };
+  /** Dialogue-edit decisions used by the compiler's authored timeline. */
+  turnGapMs?: number;
+  pickupMs?: number;
+  pauseAfterMs?: number;
+  overlapMs?: number;
+  overlapMode?: 'pickup' | 'overlap' | 'interruption';
+  overlapWithCueId?: string;
+  interruptAtMs?: number | null;
+  /** Optional authored body-timeline start, excluding title-card offset. */
+  absoluteStartMs?: number;
+  editorialTiming?: boolean;
+  /** Stable provenance used by soundtrack currentness. */
+  cueId?: string;
+  selectionKey?: string;
+  timingKey?: string;
 }
 
 /**

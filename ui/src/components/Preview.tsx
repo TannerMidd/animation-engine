@@ -1,6 +1,11 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Button, Badge } from './ui.tsx';
 import { ScaledFrame } from './ScaledFrame.tsx';
+import {
+  AnimationOverlay,
+  type AnimationEditTarget,
+  type AnimationValidArea,
+} from './AnimationOverlay.tsx';
 
 /**
  * The live preview.
@@ -37,10 +42,16 @@ interface Props {
   onFrame?: (frame: number) => void;
   /** Fired when the user scrubs or steps, so the timeline can follow. */
   onUserSeek?: (ms: number) => void;
+  /** Creator-selected controller shown as a direct-manipulation handle. */
+  animationTarget?: AnimationEditTarget | null;
+  /** Set-authored root blocking area used by direct manipulation. */
+  animationValidArea?: AnimationValidArea | null;
+  viewportWidth?: number;
+  viewportHeight?: number;
 }
 
 export const Preview = forwardRef<PreviewHandle, Props>(function Preview(
-  { previewId, frameCount, fps, audioUrl, beatStarts, estimated, onFrame, onUserSeek },
+  { previewId, frameCount, fps, audioUrl, beatStarts, estimated, onFrame, onUserSeek, animationTarget, animationValidArea, viewportWidth, viewportHeight },
   ref,
 ) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -165,7 +176,21 @@ export const Preview = forwardRef<PreviewHandle, Props>(function Preview(
   return (
     <div className="flex flex-col h-full min-h-0">
       <div className="relative flex-1 min-h-0 rounded-t-md overflow-hidden">
-        <ScaledFrame src={previewId ? `/preview/${previewId}` : null} title="preview" iframeRef={iframeRef} />
+        <ScaledFrame
+          src={previewId ? `/preview/${previewId}` : null}
+          title="preview"
+          iframeRef={iframeRef}
+          width={viewportWidth ?? 1280}
+          height={viewportHeight ?? 720}
+        />
+        {ready && animationTarget && (
+          <AnimationOverlay
+            iframe={iframeRef}
+            frame={frame}
+            target={animationTarget}
+            validArea={animationValidArea}
+          />
+        )}
         {previewId && !ready && (
           <div className="absolute inset-0 grid place-items-center text-ink-faint text-[12px] bg-stage/60 pointer-events-none">
             building preview…

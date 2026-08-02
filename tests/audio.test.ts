@@ -1,11 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import {
-  BUS_RATE, assembleMaster, resampleLinear, toBusSamples, fadeEdges, rmsDb, db,
+  BUS_RATE, assembleMaster, masterToWav, stemToWav, resampleLinear, toBusSamples, fadeEdges, rmsDb, db,
+  integratedLoudnessLufs, measureProgramme, truePeakDbtp,
 } from '../src/audio/bus.ts';
 import { renderAmbience, acousticProfileFor, ACOUSTIC_PROFILES } from '../src/audio/ambience.ts';
 import { titleSting, endSting } from '../src/audio/stings.ts';
 import { deliveryFor, NEUTRAL_PERSONA } from '../src/voice/index.ts';
 import { encodeWav, decodeWav } from '../src/voice/wav.ts';
+import { assessProgrammeQuality, levelDialogueBySpeaker } from '../src/audio/quality.ts';
 
 const sine = (freq: number, ms: number, level = 0.5): Float64Array => {
   const out = new Float64Array(Math.round((ms / 1000) * BUS_RATE));
@@ -14,6 +16,26 @@ const sine = (freq: number, ms: number, level = 0.5): Float64Array => {
 };
 
 describe('the master bus', () => {
+  it('writes a centred 48 kHz stereo production master', () => {
+    const wav = decodeWav(masterToWav([{ samples: sine(220, 100), startMs: 0 }], { durationMs: 100 }));
+    expect(wav.sampleRate).toBe(48_000);
+    expect(wav.channels).toBe(2);
+  });
+
+  it('keeps stem gain independent of programme loudness normalisation', () => {
+    const source = sine(220, 500, 0.01);
+    const stem = toBusSamples(decodeWav(stemToWav(
+      [{ samples: source, startMs: 0 }],
+      { durationMs: 500 },
+    )), 'stem');
+    const master = toBusSamples(decodeWav(masterToWav(
+      [{ samples: source, startMs: 0 }],
+      { durationMs: 500, targetRmsDb: -20 },
+    )), 'master');
+    expect(rmsDb(stem)).toBeLessThan(-40);
+    expect(rmsDb(master) - rmsDb(stem)).toBeGreaterThan(11);
+  });
+
   it('assembles deterministically', () => {
     const clips = () => [
       { samples: sine(220, 400), startMs: 100 },
@@ -44,6 +66,60 @@ describe('the master bus', () => {
     for (let i = 0; i < out.length; i++) f[i] = out[i]! / 32768;
     // The voiced part should have been lifted well above its raw -34dB RMS.
     expect(rmsDb(f)).toBeGreaterThan(-30);
+  });
+
+  it('measures deterministic gated integrated loudness on the centred stereo programme', () => {
+    const tone = sine(1_000, 1_200, db(-20));
+    const first = integratedLoudnessLufs(tone);
+    const second = integratedLoudnessLufs(tone);
+    expect(first).toBe(second);
+    // A -20 dBFS-peak 1 kHz sine duplicated to stereo is approximately -20 LUFS.
+    expect(first).toBeGreaterThan(-20.6);
+    expect(first).toBeLessThan(-19.4);
+    expect(integratedLoudnessLufs(new Float64Array(BUS_RATE))).toBe(-Infinity);
+  });
+
+  it('measures and enforces inter-sample true peak rather than only sample peak', () => {
+    const intersample = new Float64Array([0, 0.8, 0.8, 0, -0.8, -0.8, 0]);
+    const samplePeakDb = 20 * Math.log10(0.8);
+    expect(truePeakDbtp(intersample)).toBeGreaterThan(samplePeakDb);
+
+    const mastered = assembleMaster([
+      { samples: sine(9_973, 800, 1), startMs: 0 },
+    ], { durationMs: 800, targetIntegratedLufs: -10, ceilingDb: -2 });
+    const floats = Float64Array.from(mastered, (sample) => sample / 32768);
+    const metrics = measureProgramme(floats);
+    expect(metrics.integratedLufs).not.toBeNull();
+    expect(metrics.truePeakDbtp).toBeLessThanOrEqual(-1.95);
+    expect(metrics.truePeakDbtp!).toBeGreaterThanOrEqual(metrics.samplePeakDbfs!);
+  });
+
+  it('levels cast members modestly without flattening any performance', () => {
+    const quiet = sine(220, 600, 0.05);
+    const loud = sine(220, 600, 0.1);
+    const result = levelDialogueBySpeaker([
+      { speaker: 'alice', clip: { samples: quiet, startMs: 0 } },
+      { speaker: 'bob', clip: { samples: loud, startMs: 700 } },
+    ]);
+    expect(result.adjustments.map((item) => item.speaker)).toEqual(['alice', 'bob']);
+    expect(result.adjustments[0]!.adjustmentDb).toBe(3);
+    expect(result.adjustments[1]!.adjustmentDb).toBe(-3);
+    // One static gain per speaker: samples and their internal dynamics are not rewritten.
+    expect(result.entries[0]!.clip.samples).toBe(quiet);
+    expect(result.entries[1]!.clip.samples).toBe(loud);
+  });
+
+  it('makes LUFS and dBTP the release gate while allowing intentional silence', () => {
+    const pass = assessProgrammeQuality({
+      integratedLufs: -16.4, truePeakDbtp: -1.02, samplePeakDbfs: -1.3,
+    }, -16, -1);
+    expect(pass.passed).toBe(true);
+    expect(assessProgrammeQuality({
+      integratedLufs: -20, truePeakDbtp: -0.3, samplePeakDbfs: -1,
+    }, -16, -1).passed).toBe(false);
+    expect(assessProgrammeQuality({
+      integratedLufs: null, truePeakDbtp: null, samplePeakDbfs: null,
+    }, -16, -1)).toMatchObject({ passed: true, intentionalSilence: true });
   });
 
   it('resamples 22050 -> 24000 with the right length and no invented energy', () => {

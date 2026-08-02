@@ -24,6 +24,7 @@
 
   var ir = null;
   var actors = {};
+  var props = {};
 
   function castKey(scene) {
     return scene.cast
@@ -33,12 +34,19 @@
       .join('|');
   }
 
+  function propKey(scene) {
+    return (scene.props || [])
+      .map(function (prop) { return prop.id + ':' + prop.prop; })
+      .join('|');
+  }
+
   /**
    * Resolve every element we will touch, once. Per-frame work is then pure
    * attribute writes — no querying, no allocation in the hot path.
    */
   function build(scene) {
     actors = {};
+    props = {};
 
     scene.cast.forEach(function (member) {
       var group = document.getElementById('actor-' + member.id);
@@ -83,6 +91,23 @@
       };
     });
 
+    (scene.props || []).forEach(function (prop) {
+      var setEl = document.getElementById('set-prop-' + prop.id);
+      var dynamicEl = document.getElementById('dynamic-prop-' + prop.id);
+      if (!setEl || !dynamicEl) {
+        throw new Error('runtime: no rendered set instance for prop "' + prop.id + '"');
+      }
+      dynamicEl.style.display = 'none';
+      setEl.style.display = '';
+      props[prop.id] = {
+        setEl: setEl,
+        dynamicEl: dynamicEl,
+        lastMode: null,
+        lastVisible: null,
+        lastPlacement: null,
+      };
+    });
+
     ir = scene;
     window.__IR = scene;
     window.__frameCount = scene.frames.length;
@@ -98,7 +123,7 @@
    * silently rendering the wrong puppets.
    */
   window.__loadIR = function (scene) {
-    if (ir && castKey(scene) !== castKey(ir)) return false;
+    if (ir && (castKey(scene) !== castKey(ir) || propKey(scene) !== propKey(ir))) return false;
     build(scene);
     return true;
   };
@@ -181,6 +206,42 @@
         if (slot.shown && slot.variants[slot.shown]) slot.variants[slot.shown].style.display = 'none';
         if (want && slot.variants[want]) slot.variants[want].style.display = '';
         slot.shown = want || null;
+      }
+    }
+
+    var frameProps = frame.props || {};
+    for (var propId in props) {
+      var prop = props[propId];
+      var propState = frameProps[propId];
+      var visible = !propState || propState.visible;
+      var mode = propState ? propState.mode : 'set';
+
+      if (!visible) {
+        if (prop.lastVisible !== false) {
+          prop.setEl.style.display = 'none';
+          prop.dynamicEl.style.display = 'none';
+          prop.lastVisible = false;
+        }
+        continue;
+      }
+
+      if (prop.lastVisible !== true || prop.lastMode !== mode) {
+        prop.setEl.style.display = mode === 'set' ? '' : 'none';
+        prop.dynamicEl.style.display = mode === 'world' ? '' : 'none';
+        prop.lastVisible = true;
+        prop.lastMode = mode;
+      }
+
+      if (mode === 'world') {
+        var propSx = propState.flip ? -propState.scale : propState.scale;
+        var propPlacement =
+          'translate(' + propState.x + ',' + propState.y + ') ' +
+          (propState.rotation ? 'rotate(' + propState.rotation + ') ' : '') +
+          'scale(' + propSx + ',' + propState.scale + ')';
+        if (propPlacement !== prop.lastPlacement) {
+          prop.dynamicEl.setAttribute('transform', propPlacement);
+          prop.lastPlacement = propPlacement;
+        }
       }
     }
 

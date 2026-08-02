@@ -3,8 +3,8 @@ import { encodeWav, toInt16, type WavData } from '../voice/wav.ts';
 /**
  * The master bus.
  *
- * One fixed output format — 24 kHz mono 16-bit, the native rate of the primary
- * voice engine — assembled in float64 and converted exactly once at the end.
+ * One fixed production format — 48 kHz centred stereo 16-bit — is assembled
+ * in mono float64 and converted/interleaved exactly once at the end.
  * Everything audible goes through here: dialogue, ambience beds, stings.
  * Assembling in integers was fine when the only sources were non-overlapping
  * speech clips; a bed under dialogue means genuine summation, and summed int16
@@ -17,7 +17,8 @@ import { encodeWav, toInt16, type WavData } from '../voice/wav.ts';
  * fingerprint depends on.
  */
 
-export const BUS_RATE = 24_000;
+/** Social/archival master sample rate. Dialogue is centred in a stereo file. */
+export const BUS_RATE = 48_000;
 
 export interface BusClip {
   /** Mono samples in [-1, 1] at BUS_RATE. */
@@ -94,27 +95,182 @@ export function rmsDb(samples: Float64Array): number {
   return rms > 0 ? 20 * Math.log10(rms) : -Infinity;
 }
 
-export interface MasterOptions {
-  durationMs: number;
-  /**
-   * RMS loudness target for the whole programme, in dBFS. Stated plainly: this
-   * is an RMS approximation, not broadcast LUFS — right for keeping renders
-   * consistent with each other, which is what matters here.
-   */
-  targetRmsDb?: number;
-  /** Peak ceiling after limiting. */
-  ceilingDb?: number;
+/** Deterministic programme measurements on the centred stereo master. */
+export interface LoudnessMetrics {
+  /** ITU-R BS.1770-style gated programme loudness. Null is intentional silence. */
+  integratedLufs: number | null;
+  /** Four-times oversampled inter-sample peak, in dBTP. Null is silence. */
+  truePeakDbtp: number | null;
+  /** Discrete sample peak, retained as a useful diagnostic rather than the gate. */
+  samplePeakDbfs: number | null;
+}
+
+function finiteDb(value: number): number | null {
+  return Number.isFinite(value) ? Math.round(value * 100) / 100 : null;
+}
+
+interface BiquadCoefficients {
+  b0: number;
+  b1: number;
+  b2: number;
+  a1: number;
+  a2: number;
+}
+
+/** Direct-form-I biquad. Coefficients below are the 48 kHz BS.1770 K-weighting filters. */
+function biquad(input: Float64Array, c: BiquadCoefficients): Float64Array {
+  const output = new Float64Array(input.length);
+  let x1 = 0;
+  let x2 = 0;
+  let y1 = 0;
+  let y2 = 0;
+  for (let i = 0; i < input.length; i++) {
+    const x0 = input[i]!;
+    const y0 = c.b0 * x0 + c.b1 * x1 + c.b2 * x2 - c.a1 * y1 - c.a2 * y2;
+    output[i] = y0;
+    x2 = x1;
+    x1 = x0;
+    y2 = y1;
+    y1 = y0;
+  }
+  return output;
+}
+
+function kWeight(samples: Float64Array): Float64Array {
+  // Coefficients published for the BS.1770 K-weighting response at 48 kHz.
+  const shelf = biquad(samples, {
+    b0: 1.53512485958697,
+    b1: -2.69169618940638,
+    b2: 1.19839281085285,
+    a1: -1.69065929318241,
+    a2: 0.73248077421585,
+  });
+  return biquad(shelf, {
+    b0: 1,
+    b1: -2,
+    b2: 1,
+    a1: -1.99004745483398,
+    a2: 0.99007225036621,
+  });
 }
 
 /**
- * Assemble clips onto a silent timeline and master it.
+ * BS.1770-style integrated loudness for the bus's dual-mono stereo programme.
  *
- * Order: sum -> loudness normalise -> limit. Normalising before the limiter
- * means the ceiling is enforced on the final level, and a hot mix trades a
- * little transient for never clipping.
+ * 400 ms blocks advance by 100 ms, first passing the -70 LUFS absolute gate
+ * and then the relative gate ten LU below the absolute-gated programme. Short
+ * clips use their available samples, which keeps line-level QC useful without
+ * pretending a padded silence was part of the performance.
  */
-export function assembleMaster(clips: BusClip[], opts: MasterOptions): Int16Array {
-  const total = Math.max(1, Math.round((opts.durationMs / 1000) * BUS_RATE));
+export function integratedLoudnessLufs(samples: Float64Array, centredStereo = true): number {
+  if (!samples.length) return -Infinity;
+  const weighted = kWeight(samples);
+  const blockLength = Math.min(weighted.length, Math.round(BUS_RATE * 0.4));
+  const hop = Math.max(1, Math.round(BUS_RATE * 0.1));
+  const channelEnergy = centredStereo ? 2 : 1;
+  const energies: number[] = [];
+  const lastStart = Math.max(0, weighted.length - blockLength);
+
+  for (let start = 0; start <= lastStart; start += hop) {
+    let sum = 0;
+    for (let i = start; i < start + blockLength; i++) sum += weighted[i]! * weighted[i]!;
+    energies.push((sum / blockLength) * channelEnergy);
+  }
+  // Include the tail block when the duration is not an exact hop multiple.
+  if (lastStart > 0 && lastStart % hop !== 0) {
+    let sum = 0;
+    for (let i = lastStart; i < weighted.length; i++) sum += weighted[i]! * weighted[i]!;
+    energies.push((sum / blockLength) * channelEnergy);
+  }
+
+  const toLufs = (energy: number) => energy > 0 ? -0.691 + 10 * Math.log10(energy) : -Infinity;
+  const absolute = energies.filter((energy) => toLufs(energy) >= -70);
+  if (!absolute.length) return -Infinity;
+  const absoluteMean = absolute.reduce((sum, energy) => sum + energy, 0) / absolute.length;
+  const relativeGate = toLufs(absoluteMean) - 10;
+  const relative = absolute.filter((energy) => toLufs(energy) >= relativeGate);
+  const integrated = relative.reduce((sum, energy) => sum + energy, 0) / relative.length;
+  return toLufs(integrated);
+}
+
+function sinc(value: number): number {
+  if (Math.abs(value) < 1e-12) return 1;
+  const angle = Math.PI * value;
+  return Math.sin(angle) / angle;
+}
+
+/**
+ * Four-times oversampled inter-sample peak.
+ *
+ * An eight-tap Lanczos reconstruction catches peaks between PCM samples; a
+ * simple linear interpolation cannot and therefore is still only a sample
+ * peak. Coefficients are precomputed and DC-normalised per phase so the result
+ * is deterministic and inexpensive enough to run on every production master.
+ */
+export function truePeakDbtp(samples: Float64Array): number {
+  if (!samples.length) return -Infinity;
+  let peak = 0;
+  for (let i = 0; i < samples.length; i++) peak = Math.max(peak, Math.abs(samples[i]!));
+
+  const phaseCoefficients: number[][] = [];
+  for (let phase = 1; phase < 4; phase++) {
+    const fraction = phase / 4;
+    const coefficients: number[] = [];
+    let total = 0;
+    for (let tap = -3; tap <= 4; tap++) {
+      const distance = fraction - tap;
+      const coefficient = Math.abs(distance) < 4 ? sinc(distance) * sinc(distance / 4) : 0;
+      coefficients.push(coefficient);
+      total += coefficient;
+    }
+    phaseCoefficients.push(coefficients.map((coefficient) => coefficient / total));
+  }
+
+  for (let i = 0; i < samples.length - 1; i++) {
+    for (const coefficients of phaseCoefficients) {
+      let value = 0;
+      for (let offset = 0; offset < coefficients.length; offset++) {
+        const at = i + offset - 3;
+        if (at >= 0 && at < samples.length) value += samples[at]! * coefficients[offset]!;
+      }
+      peak = Math.max(peak, Math.abs(value));
+    }
+  }
+  return peak > 0 ? 20 * Math.log10(peak) : -Infinity;
+}
+
+/** Measure the final centred-stereo programme with release-gate precision. */
+export function measureProgramme(samples: Float64Array): LoudnessMetrics {
+  let samplePeak = 0;
+  for (let i = 0; i < samples.length; i++) samplePeak = Math.max(samplePeak, Math.abs(samples[i]!));
+  return {
+    integratedLufs: finiteDb(integratedLoudnessLufs(samples)),
+    truePeakDbtp: finiteDb(truePeakDbtp(samples)),
+    samplePeakDbfs: finiteDb(samplePeak > 0 ? 20 * Math.log10(samplePeak) : -Infinity),
+  };
+}
+
+export interface MasterOptions {
+  durationMs: number;
+  /**
+   * Gated integrated-loudness target for the whole programme.
+   */
+  targetIntegratedLufs?: number;
+  /** @deprecated Accepted as a target value for old callers; measurement is LUFS. */
+  targetRmsDb?: number;
+  /** True-peak ceiling after limiting, in dBTP. */
+  ceilingDb?: number;
+}
+
+export interface StemOptions {
+  durationMs: number;
+  /** Safety ceiling only. Stems deliberately skip programme normalisation. */
+  ceilingDb?: number;
+}
+
+/** Sum timeline clips without changing their production gain. */
+function assembleMix(clips: BusClip[], durationMs: number): Float64Array {
+  const total = Math.max(1, Math.round((durationMs / 1000) * BUS_RATE));
   const mix = new Float64Array(total);
 
   for (const clip of clips) {
@@ -127,41 +283,59 @@ export function assembleMaster(clips: BusClip[], opts: MasterOptions): Int16Arra
       mix[at]! += clip.samples[i]! * gain;
     }
   }
+  return mix;
+}
 
-  // Loudness: measured over the voiced portion only. A scene that is mostly
-  // deliberate silence must not have its dialogue cranked to make the average
-  // hit target — silence is a creative choice, not a level error.
-  const target = opts.targetRmsDb ?? -20;
-  const loud = rmsDb(gated(mix));
-  if (Number.isFinite(loud)) {
-    const gain = Math.min(db(12), db(target - loud));
-    for (let i = 0; i < mix.length; i++) mix[i]! *= gain;
-  }
-
-  limit(mix, db(opts.ceilingDb ?? -1));
-
-  // Convert once, with rounding — the only int16 conversion on the bus.
-  const out = new Int16Array(total);
-  for (let i = 0; i < total; i++) {
+function toPcm16(mix: Float64Array): Int16Array {
+  const out = new Int16Array(mix.length);
+  for (let i = 0; i < mix.length; i++) {
     const v = Math.round(mix[i]! * 32767);
     out[i] = v > 32767 ? 32767 : v < -32768 ? -32768 : v;
   }
   return out;
 }
 
-/** Samples above a low activity floor — the material the loudness target means. */
-function gated(mix: Float64Array): Float64Array {
-  const floor = db(-45);
-  let count = 0;
-  for (let i = 0; i < mix.length; i++) if (Math.abs(mix[i]!) > floor) count++;
-  if (count === 0) return mix;
+/**
+ * Assemble clips onto a silent timeline and master it.
+ *
+ * Order: sum -> integrated-loudness normalise -> sample limit -> true-peak
+ * trim. The final trim is what makes the ceiling an inter-sample promise rather
+ * than merely a legal PCM sample value.
+ */
+export function assembleMaster(clips: BusClip[], opts: MasterOptions): Int16Array {
+  const mix = assembleMix(clips, opts.durationMs);
 
-  const active = new Float64Array(count);
-  let at = 0;
-  for (let i = 0; i < mix.length; i++) {
-    if (Math.abs(mix[i]!) > floor) active[at++] = mix[i]!;
+  // BS.1770 gating excludes intentional silence from the normalisation target.
+  const target = opts.targetIntegratedLufs ?? opts.targetRmsDb ?? -16;
+  const loud = integratedLoudnessLufs(mix);
+  if (Number.isFinite(loud)) {
+    const gain = Math.min(db(12), db(target - loud));
+    for (let i = 0; i < mix.length; i++) mix[i]! *= gain;
   }
-  return active;
+
+  const ceilingDb = opts.ceilingDb ?? -1;
+  limit(mix, db(ceilingDb));
+  const measuredTruePeak = truePeakDbtp(mix);
+  if (Number.isFinite(measuredTruePeak) && measuredTruePeak > ceilingDb) {
+    const trim = db(ceilingDb - measuredTruePeak);
+    for (let i = 0; i < mix.length; i++) mix[i]! *= trim;
+  }
+
+  // Convert once, with rounding — the only int16 conversion on the bus.
+  return toPcm16(mix);
+}
+
+/**
+ * Assemble one production stem at authored mix gain.
+ *
+ * A stem is not loudness-normalised independently: doing that would destroy
+ * the balance between dialogue, room tone, Foley and stings. It only receives
+ * peak safety so a legal 16-bit WAV can always be written.
+ */
+export function assembleStem(clips: BusClip[], opts: StemOptions): Int16Array {
+  const mix = assembleMix(clips, opts.durationMs);
+  limit(mix, db(opts.ceilingDb ?? -1));
+  return toPcm16(mix);
 }
 
 /**
@@ -185,5 +359,22 @@ function limit(mix: Float64Array, ceiling: number): void {
 
 /** The mastered programme as a WAV file body. */
 export function masterToWav(clips: BusClip[], opts: MasterOptions): Buffer {
-  return encodeWav(assembleMaster(clips, opts), BUS_RATE, 1);
+  const mono = assembleMaster(clips, opts);
+  const stereo = new Int16Array(mono.length * 2);
+  for (let i = 0; i < mono.length; i++) {
+    stereo[i * 2] = mono[i]!;
+    stereo[i * 2 + 1] = mono[i]!;
+  }
+  return encodeWav(stereo, BUS_RATE, 2);
+}
+
+/** A full-programme, centred 48 kHz stereo production stem. */
+export function stemToWav(clips: BusClip[], opts: StemOptions): Buffer {
+  const mono = assembleStem(clips, opts);
+  const stereo = new Int16Array(mono.length * 2);
+  for (let i = 0; i < mono.length; i++) {
+    stereo[i * 2] = mono[i]!;
+    stereo[i * 2 + 1] = mono[i]!;
+  }
+  return encodeWav(stereo, BUS_RATE, 2);
 }

@@ -3,10 +3,15 @@ import { compileShotList } from '../compile/scene.ts';
 import { buildPage } from '../render/page.ts';
 import { loadSet, renderSet } from '../sets/index.ts';
 import { estimateTimings } from './voices.ts';
+import { readAnimation } from './animation.ts';
 import type { ShotList } from '../schema/script.ts';
 import type { SceneIR } from '../schema/index.ts';
+import type { AnimationDocument } from '../schema/animation.ts';
 import type { LoadedRig } from '../cast/store.ts';
 import type { LineTiming } from '../voice/index.ts';
+import { reframeScenePortrait, PORTRAIT_MASTER } from './reframe.ts';
+import { activeIdentity } from '../show/context.ts';
+import { endCardSvg, titleCardSvg } from '../render/cards.ts';
 
 const RUNTIME_PATH = new URL('../render/runtime.js', import.meta.url);
 
@@ -29,20 +34,39 @@ export interface PreviewResult {
   estimated: boolean;
 }
 
+export type PreviewLayout = 'horizontal' | 'vertical';
+
 export async function buildPreview(
   shots: ShotList,
   rigs: Map<string, LoadedRig>,
   timings: Map<number, LineTiming> | null,
+  animation: AnimationDocument | null | undefined = undefined,
+  layout: PreviewLayout = 'horizontal',
 ): Promise<PreviewResult> {
   const estimated = timings === null;
   const resolved = timings ?? estimateTimings(shots);
+  const authored = animation === undefined ? await readAnimation(shots.scene) : animation;
+  const setDescriptor = shots.set ? await loadSet(shots.set) : null;
 
-  const compiled = compileShotList(shots, rigs, resolved);
+  const compiled = compileShotList(shots, rigs, resolved, authored, setDescriptor);
+  const identity = activeIdentity();
+  const portraitCards = shots.cards ? {
+    titleSvg: titleCardSvg(
+      identity,
+      shots.title ?? shots.scene.replace(/-/g, ' '),
+      shots.subtitle ?? undefined,
+      PORTRAIT_MASTER,
+    ),
+    endSvg: endCardSvg(identity, PORTRAIT_MASTER),
+  } : undefined;
+  const ir = layout === 'vertical'
+    ? reframeScenePortrait(compiled.ir, { cards: portraitCards })
+    : compiled.ir;
   const runtime = await fs.readFile(RUNTIME_PATH, 'utf8');
-  const set = shots.set ? renderSet(await loadSet(shots.set)) : null;
+  const set = setDescriptor ? renderSet(setDescriptor) : null;
 
   const html = await buildPage({
-    ir: compiled.ir,
+    ir,
     rigs,
     runtime,
     set,
@@ -53,5 +77,5 @@ export async function buildPreview(
   // card offsets included, so a timeline click lands on exactly the frame the
   // compiler put that beat at. The old duplicate arithmetic here is what the
   // roadmap calls a preview that lies.
-  return { ir: compiled.ir, html, durationMs: compiled.durationMs, beatStarts: compiled.beatStarts, estimated };
+  return { ir, html, durationMs: compiled.durationMs, beatStarts: compiled.beatStarts, estimated };
 }
