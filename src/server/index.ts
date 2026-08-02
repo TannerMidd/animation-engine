@@ -21,6 +21,8 @@ import { facePlates } from '../cast/sheet.ts';
 import { rollLook } from '../cast/look.ts';
 import { Rig, Look, LOOK_CHOICES, LOOK_SWATCHES, LOOK_SLIDERS } from '../schema/index.ts';
 import { saveReference, clearReference, referencePath, IDEAL_SECONDS } from '../voice/reference.ts';
+import { mintCandidates, commitCandidate, discardCandidates, candidatePath, ensureVoiceRefs } from '../voice/casting.ts';
+import { soundtrackIsCurrent } from '../pipeline/voices.ts';
 import { auditionVoice, AUDITION_LINES } from '../pipeline/audition.ts';
 import { ShotList, SHOTS, CAMERA_MOVES, MARKS } from '../schema/script.ts';
 import { listSets, loadSet, saveSet, validateSet, lintSet, tidySet, setPath } from '../sets/index.ts';
@@ -340,7 +342,7 @@ router.post('/api/scenes/:name/voices', async ({ res, params }) => {
     });
     const compiled = compileShotList(shots, rigs, timings);
     handle.progress({ stage: 'audio', done: 0, total: 1 });
-    await mixSceneAudio(scene, compiled.audio, compiled.durationMs);
+    await mixSceneAudio(scene, shots, compiled.audio, compiled.durationMs);
     return { lines: timings.size, durationMs: compiled.durationMs };
   });
 
@@ -370,8 +372,55 @@ router.post('/api/scenes/:name/render', async ({ req, res, params }) => {
   json(res, jobSummary(job));
 });
 
-router.get('/api/scenes/:name/audio', ({ res, params, req }) =>
-  sendFile(res, path.join(sceneDir(params['name']!), 'dialogue.wav'), req));
+/**
+ * Serve the scene's soundtrack — but never a stale one.
+ *
+ * The manifest records what the track was built from; if the shot list, a
+ * voice reference, the identity profile, or the ambience settings have moved
+ * since, playing the old audio against the new edit would be quietly wrong in
+ * the way nobody catches. A 409 with "run Voices again" is the honest answer.
+ */
+router.get('/api/scenes/:name/audio', async ({ res, params, req }) => {
+  const scene = params['name']!;
+  const shots = await readShotList(scene).catch(() => null);
+  if (shots) {
+    const rigs = await rigsFor(shots);
+    if (!(await soundtrackIsCurrent(scene, shots, rigs))) {
+      throw new HttpError(409, 'the rendered audio is stale — the scene, a voice, or the show identity changed since. Run Voices again.');
+    }
+  }
+  return sendFile(res, path.join(sceneDir(scene), 'dialogue.wav'), req);
+});
+
+/**
+ * Voice casting preflight, as an explicit job.
+ *
+ * The same idempotent step a render runs — minting default voices for cast
+ * members that have none — invocable on its own so voices can be settled and
+ * auditioned before committing to a full render.
+ */
+router.post('/api/scenes/:name/voices/prepare', async ({ res, params }) => {
+  const scene = params['name']!;
+  const shots = await requireShotList(scene);
+  const onDisk = new Set(await listRigs());
+
+  const job = startJob('prepare-voices', scene, async (handle) => {
+    const evicted = await freeVramForRender();
+    if (evicted.length) handle.log(`unloaded ${evicted.join(', ')} to free VRAM`);
+
+    const candidates = [];
+    for (const member of shots.cast) {
+      if (!onDisk.has(member.rig)) continue;
+      const { rig } = await loadRig(member.rig);
+      candidates.push({ name: member.rig, charId: rig.charId, voiceRef: rig.voiceRef });
+    }
+    const minted = await ensureVoiceRefs(candidates, (done, total, name) =>
+      handle.progress({ stage: 'casting', done, total, message: name }));
+    return { minted };
+  });
+
+  json(res, jobSummary(job));
+});
 
 router.get('/api/scenes/:name/video', ({ res, params, req }) =>
   sendFile(res, outputPath(params['name']!), req));
@@ -592,11 +641,12 @@ router.del('/api/cast/:name/ref', async ({ res, params }) => {
  *
  * Runs as a job because the first Chatterbox call loads a model into VRAM and
  * takes tens of seconds — long enough that a synchronous request looks like a
- * hang. Later takes are cached and come back immediately.
+ * hang. Later takes are cached and come back immediately. Passing `candidate`
+ * auditions an uncommitted minted voice instead of the character's current one.
  */
 router.post('/api/cast/:name/audition', async ({ req, res, params }) => {
   const name = params['name']!;
-  const body = await readJson<{ text?: string; expression?: string; engine?: string; seed?: number }>(req);
+  const body = await readJson<{ text?: string; expression?: string; engine?: string; seed?: number; candidate?: string }>(req);
   const { rig } = await loadRig(name);
 
   const job = startJob('audition', name, async (handle) => {
@@ -604,7 +654,10 @@ router.post('/api/cast/:name/audition', async ({ req, res, params }) => {
     if (evicted.length) handle.log(`unloaded ${evicted.join(', ')} to free VRAM`);
 
     handle.progress({ stage: 'synth', done: 0, total: 1 });
-    const result = await auditionVoice(rig, body);
+    const result = await auditionVoice(rig, {
+      ...body,
+      refOverride: body.candidate !== undefined ? candidatePath(name, body.candidate) : undefined,
+    });
     handle.progress({ stage: 'synth', done: 1, total: 1 });
     // The take lands in the content-addressed voice cache; the UI fetches it
     // back through the route below rather than being handed a disk path.
@@ -613,6 +666,49 @@ router.post('/api/cast/:name/audition', async ({ req, res, params }) => {
   });
 
   json(res, jobSummary(job));
+});
+
+// --- voice minting ---
+
+/**
+ * Mint candidate voices for a character.
+ *
+ * A job — each candidate is a Chatterbox synthesis plus an ffmpeg transform.
+ * Candidates sit in cast/.candidates until one is committed; the character's
+ * current voice is untouched until then, and cancelling costs nothing.
+ */
+router.post('/api/cast/:name/voices/mint', async ({ req, res, params }) => {
+  const name = params['name']!;
+  const body = await readJson<{ count?: number }>(req);
+  const { rig } = await loadRig(name);
+
+  const job = startJob('mint-voices', name, async (handle) => {
+    const evicted = await freeVramForRender();
+    if (evicted.length) handle.log(`unloaded ${evicted.join(', ')} to free VRAM`);
+
+    handle.progress({ stage: 'minting', done: 0, total: body.count ?? 3 });
+    const candidates = await mintCandidates(name, rig.charId ?? name, body.count ?? 3);
+    handle.progress({ stage: 'minting', done: candidates.length, total: candidates.length });
+    return { candidates: candidates.map((c) => ({ salt: c.salt, semitones: c.params.semitones, tempo: c.params.tempo })) };
+  });
+
+  json(res, jobSummary(job));
+});
+
+router.get('/api/cast/:name/candidate/:salt', ({ res, params, req }) =>
+  sendFile(res, candidatePath(params['name']!, params['salt']!), req));
+
+router.post('/api/cast/:name/voices/commit', async ({ req, res, params }) => {
+  const body = await readJson<{ salt: string }>(req);
+  if (body.salt === undefined) throw new HttpError(400, 'expected { salt }');
+  await commitCandidate(params['name']!, body.salt);
+  const { rig } = await loadRig(params['name']!);
+  json(res, { ok: true, voiceRef: rig.voiceRef, provenance: rig.voiceProvenance });
+});
+
+router.post('/api/cast/:name/voices/discard', async ({ res, params }) => {
+  await discardCandidates(params['name']!);
+  json(res, { ok: true });
 });
 
 router.get('/api/cast/:name/audition.wav', ({ res, params, req }) => {

@@ -26,6 +26,8 @@ function carryOver(existing: RigDoc, fresh: RigDoc): RigDoc {
     voice: existing.voice,
     voiceRate: existing.voiceRate,
     voiceRef: existing.voiceRef,
+    voiceProvenance: existing.voiceProvenance,
+    voicePersona: existing.voicePersona,
     idle: existing.idle,
   };
 }

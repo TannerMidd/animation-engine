@@ -162,6 +162,36 @@ const RigShape = z.object({
    * specific person. Ignored by engines that cannot clone.
    */
   voiceRef: z.string().nullable().default(null),
+  /**
+   * Where the reference came from, so a minted voice is distinguishable from a
+   * deliberate recording. `minted` refs may be re-offered for rerolling;
+   * `recorded`/`uploaded` ones are someone's explicit choice and never touched
+   * automatically.
+   */
+  voiceProvenance: z
+    .object({
+      source: z.enum(['minted', 'recorded', 'uploaded']),
+      /** Mint seed, for reproducing a minted voice exactly. */
+      seed: z.number().int().optional(),
+      /** sha1 of the reference bytes at attach time. */
+      hash: z.string().optional(),
+    })
+    .nullable()
+    .default(null),
+  /**
+   * How this character delivers lines, as bounded multipliers around 1.
+   *
+   * `energy` scales the emotion exaggeration an expression asks for; `pace`
+   * bends the guidance weight (lower reads slower and more deliberate). Two
+   * characters given the same ANGRY line should not perform it identically —
+   * this is where that difference lives.
+   */
+  voicePersona: z
+    .object({
+      energy: z.number().min(0.5).max(1.5).default(1),
+      pace: z.number().min(0.5).max(1.5).default(1),
+    })
+    .default({}),
   /** Relative path to the puppet SVG, resolved against the rig file. */
   svg: z.string().min(1),
 });

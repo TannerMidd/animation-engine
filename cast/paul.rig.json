@@ -1,6 +1,12 @@
 {
   "name": "paul",
+  "charId": "paul",
   "locks": [],
+  "identity": {
+    "id": "house",
+    "version": "1.0.0",
+    "hash": "2c4e4135943b"
+  },
   "canvas": {
     "width": 200,
     "height": 400
@@ -522,12 +528,15 @@
   },
   "voice": "Zira",
   "voiceRate": 0,
-  "voiceRef": null,
-  "svg": "paul.svg",
-  "charId": "paul",
-  "identity": {
-    "id": "house",
-    "version": "1.0.0",
-    "hash": "faa90d6e4611"
-  }
+  "voiceRef": "paul.ref.wav",
+  "voiceProvenance": {
+    "source": "minted",
+    "seed": 549324037,
+    "hash": "58af4d74d851125fdbc860577276e9d3304d2cc8"
+  },
+  "voicePersona": {
+    "energy": 1,
+    "pace": 1
+  },
+  "svg": "paul.svg"
 }

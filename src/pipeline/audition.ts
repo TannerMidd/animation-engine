@@ -33,6 +33,11 @@ export interface AuditionOptions {
   engine?: string;
   /** Changes the take without changing the text — the "say it again" button. */
   seed?: number;
+  /**
+   * Audition with this reference instead of the character's committed one.
+   * How voice candidates are heard before any of them is accepted.
+   */
+  refOverride?: string;
 }
 
 export interface AuditionResult {
@@ -55,7 +60,8 @@ export async function auditionVoice(rig: Rig, opts: AuditionOptions = {}): Promi
       expression: opts.expression ?? 'DEADPAN',
       voice: rig.voice,
       rate: rig.voiceRate,
-      ref: rig.voiceRef ? path.join(CAST_DIR, rig.voiceRef) : null,
+      ref: opts.refOverride ?? (rig.voiceRef ? path.join(CAST_DIR, rig.voiceRef) : null),
+      persona: rig.voicePersona,
       seed: opts.seed ?? 1,
     }],
     { engine: opts.engine ?? 'chatterbox' },

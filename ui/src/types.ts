@@ -218,6 +218,7 @@ export interface RigDoc {
   voice: string;
   voiceRate: number;
   voiceRef: string | null;
+  voiceProvenance?: { source: 'minted' | 'recorded' | 'uploaded' } | null;
   look?: Look;
   expressions: { name: string }[];
   poses: { name: string }[];

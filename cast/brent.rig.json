@@ -1,6 +1,12 @@
 {
   "name": "brent",
+  "charId": "brent",
   "locks": [],
+  "identity": {
+    "id": "house",
+    "version": "1.0.0",
+    "hash": "2c4e4135943b"
+  },
   "canvas": {
     "width": 200,
     "height": 400
@@ -522,12 +528,15 @@
   },
   "voice": "David",
   "voiceRate": 1,
-  "voiceRef": null,
-  "svg": "brent.svg",
-  "charId": "brent",
-  "identity": {
-    "id": "house",
-    "version": "1.0.0",
-    "hash": "faa90d6e4611"
-  }
+  "voiceRef": "brent.ref.wav",
+  "voiceProvenance": {
+    "source": "minted",
+    "seed": 1067816518,
+    "hash": "15b21e4d4243daa668e1df0cc147754d468b555a"
+  },
+  "voicePersona": {
+    "energy": 1,
+    "pace": 1
+  },
+  "svg": "brent.svg"
 }

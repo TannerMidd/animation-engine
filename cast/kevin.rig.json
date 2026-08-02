@@ -1,6 +1,12 @@
 {
   "name": "kevin",
+  "charId": "kevin",
   "locks": [],
+  "identity": {
+    "id": "house",
+    "version": "1.0.0",
+    "hash": "2c4e4135943b"
+  },
   "canvas": {
     "width": 200,
     "height": 400
@@ -522,12 +528,15 @@
   },
   "voice": "David",
   "voiceRate": -2,
-  "voiceRef": null,
-  "svg": "kevin.svg",
-  "charId": "kevin",
-  "identity": {
-    "id": "house",
-    "version": "1.0.0",
-    "hash": "faa90d6e4611"
-  }
+  "voiceRef": "kevin.ref.wav",
+  "voiceProvenance": {
+    "source": "minted",
+    "seed": 956588265,
+    "hash": "ce0a35531941cc2f88f3b0fe5abd47b7baa1b093"
+  },
+  "voicePersona": {
+    "energy": 1,
+    "pace": 1
+  },
+  "svg": "kevin.svg"
 }

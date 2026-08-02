@@ -410,9 +410,17 @@ export function buildPlaceholderRig(name: string, look?: Look): Rig {
     // a scene don't sound identical by default.
     voice: voiceRng.pick(['David', 'Zira']),
     voiceRate: voiceRng.int(-2, 1),
-    // No reference clip by default. Point this at ~5-10s of clean speech under
-    // cast/ and a cloning engine will make the character sound like that.
+    // No reference clip by default. Minting (or a recording) attaches one; a
+    // cloning engine then makes the character sound like that.
     voiceRef: null,
+    voiceProvenance: null,
+    // Delivery personality: how hot and how quick this character runs relative
+    // to the expression's baseline. Small ranges — a persona is a voice, not a
+    // different show.
+    voicePersona: {
+      energy: Math.round(voiceRng.range(0.85, 1.2) * 100) / 100,
+      pace: Math.round(voiceRng.range(0.88, 1.15) * 100) / 100,
+    },
     svg: `${name}.svg`,
   };
 }

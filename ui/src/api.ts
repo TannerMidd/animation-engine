@@ -70,8 +70,14 @@ export const api = {
       `/api/cast/${name}/ref`, { filename, dataBase64 },
     ),
   clearRef: (name: string) => del<{ ok: true; voiceRef: null }>(`/api/cast/${name}/ref`),
-  audition: (name: string, body: { text?: string; expression?: string; engine?: string; seed?: number }) =>
+  audition: (name: string, body: { text?: string; expression?: string; engine?: string; seed?: number; candidate?: string }) =>
     post<JobSummary>(`/api/cast/${name}/audition`, body),
+
+  mintVoices: (name: string, count = 3) => post<JobSummary>(`/api/cast/${name}/voices/mint`, { count }),
+  commitVoice: (name: string, salt: string) =>
+    post<{ ok: true; voiceRef: string }>(`/api/cast/${name}/voices/commit`, { salt }),
+  discardVoices: (name: string) => post<{ ok: true }>(`/api/cast/${name}/voices/discard`),
+  prepareVoices: (scene: string) => post<JobSummary>(`/api/scenes/${scene}/voices/prepare`),
 
   sets: () => call<SetSummary[]>('/api/sets'),
   set: (name: string) => call<SetDescriptor>(`/api/sets/${name}`),

@@ -1,6 +1,12 @@
 {
   "name": "dolores",
+  "charId": "dolores",
   "locks": [],
+  "identity": {
+    "id": "house",
+    "version": "1.0.0",
+    "hash": "2c4e4135943b"
+  },
   "canvas": {
     "width": 200,
     "height": 400
@@ -522,12 +528,15 @@
   },
   "voice": "David",
   "voiceRate": -2,
-  "voiceRef": null,
-  "svg": "dolores.svg",
-  "charId": "dolores",
-  "identity": {
-    "id": "house",
-    "version": "1.0.0",
-    "hash": "faa90d6e4611"
-  }
+  "voiceRef": "dolores.ref.wav",
+  "voiceProvenance": {
+    "source": "minted",
+    "seed": 352576135,
+    "hash": "9c243c6132c71e6ec7a0cdb679bfcef9db30e08f"
+  },
+  "voicePersona": {
+    "energy": 1,
+    "pace": 1
+  },
+  "svg": "dolores.svg"
 }

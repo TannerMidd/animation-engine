@@ -33,6 +33,10 @@ export function VoicePanel({
   const [auditionUrl, setAuditionUrl] = useState<string | null>(null);
   const [auditionStage, setAuditionStage] = useState<string | null>(null);
 
+  const [candidates, setCandidates] = useState<Array<{ salt: string }>>([]);
+  const [mintStage, setMintStage] = useState<string | null>(null);
+  const [mintStamp, setMintStamp] = useState(0);
+
   const recorder = useRef<MediaRecorder | null>(null);
   const chunks = useRef<Blob[]>([]);
   const stopFollow = useRef<(() => void) | null>(null);
@@ -51,6 +55,8 @@ export function VoicePanel({
     setWarnings([]);
     setError(null);
     setLine('');
+    setCandidates([]);
+    setMintStage(null);
   }, [name]);
 
   useEffect(() => () => stopFollow.current?.(), []);
@@ -117,6 +123,35 @@ export function VoicePanel({
     setRecording(false);
   };
 
+  const mint = () => {
+    stopFollow.current?.();
+    setError(null);
+    setCandidates([]);
+    setMintStage('minting');
+
+    void api
+      .mintVoices(name, 3)
+      .then((job) => {
+        stopFollow.current = followJob(job.id, (e) => {
+          if (e.type === 'progress') setMintStage(`minting ${e.done ?? 0}/${e.total ?? 3}`);
+          if (e.type === 'error') {
+            setError(e.message ?? 'minting failed');
+            setMintStage(null);
+          }
+          if (e.type === 'done') {
+            setMintStage(null);
+            setMintStamp(Date.now());
+            const result = e.result as { candidates?: Array<{ salt: string }> } | undefined;
+            setCandidates(result?.candidates ?? []);
+          }
+        });
+      })
+      .catch((err: Error) => {
+        setError(err.message);
+        setMintStage(null);
+      });
+  };
+
   const audition = () => {
     stopFollow.current?.();
     setError(null);
@@ -166,13 +201,64 @@ export function VoicePanel({
       <div className="h-px bg-edge my-3" />
 
       <div className="flex items-center gap-2 mb-2">
-        <span className="text-[11px] uppercase tracking-wide text-ink-faint">Voice clone</span>
-        {rig.voiceRef ? <Badge tone="good">cloned</Badge> : <Badge>no clip</Badge>}
+        <span className="text-[11px] uppercase tracking-wide text-ink-faint">Voice</span>
+        {rig.voiceRef ? (
+          <Badge tone="good">{rig.voiceProvenance?.source === 'minted' ? 'minted' : 'cloned'}</Badge>
+        ) : (
+          <Badge tone="warn">uncast</Badge>
+        )}
+      </div>
+
+      {!rig.voiceRef && (
+        <p className="text-[11px] text-accent mb-2">
+          No voice yet — this character would speak with the engine's one built-in voice, the same as
+          every other uncast character. Rendering casts one automatically; rolling candidates here
+          lets you pick it instead.
+        </p>
+      )}
+
+      <div className="mb-3">
+        <Button
+          className="w-full"
+          disabled={!!mintStage || !cloningReady}
+          onClick={mint}
+          title="Manufacture distinct candidate voices from the character's identity seed — no recording needed."
+        >
+          {mintStage ? <><Spinner /> {mintStage}…</> : rig.voiceProvenance?.source === 'minted' ? 'Reroll voice candidates' : 'Roll voice candidates'}
+        </Button>
+
+        {candidates.length > 0 && (
+          <div className="mt-2 flex flex-col gap-1.5">
+            {candidates.map((c) => (
+              <div key={c.salt} className="flex items-center gap-1.5">
+                <audio controls src={`/api/cast/${name}/candidate/${name}.${c.salt || 'default'}.wav?t=${mintStamp}`} className="h-7 flex-1 min-w-0" />
+                <Button
+                  variant="primary"
+                  onClick={() =>
+                    void api
+                      .commitVoice(name, c.salt)
+                      .then((r) => {
+                        onPatch({ voiceRef: r.voiceRef });
+                        setCandidates([]);
+                        setAuditionUrl(null);
+                      })
+                      .catch((err: Error) => setError(err.message))
+                  }
+                >
+                  Use
+                </Button>
+              </div>
+            ))}
+            <div className="text-[11px] text-ink-faint">
+              The clips are the reference itself — pick the timbre; every line will clone from it.
+            </div>
+          </div>
+        )}
       </div>
 
       <p className="text-[11px] text-ink-faint mb-2">
-        Read anything for {ideal.min}–{ideal.max} seconds in the voice you want. Chatterbox matches the
-        timbre, not the words.
+        Or record your own: read anything for {ideal.min}–{ideal.max} seconds in the voice you want.
+        Chatterbox matches the timbre, not the words. A recording always beats a minted voice.
       </p>
 
       <div className="flex items-center gap-1 mb-2">

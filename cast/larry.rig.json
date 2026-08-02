@@ -1,6 +1,12 @@
 {
   "name": "larry",
+  "charId": "larry",
   "locks": [],
+  "identity": {
+    "id": "house",
+    "version": "1.0.0",
+    "hash": "2c4e4135943b"
+  },
   "canvas": {
     "width": 200,
     "height": 400
@@ -523,11 +529,10 @@
   "voice": "Zira",
   "voiceRate": 0,
   "voiceRef": null,
-  "svg": "larry.svg",
-  "charId": "larry",
-  "identity": {
-    "id": "house",
-    "version": "1.0.0",
-    "hash": "faa90d6e4611"
-  }
+  "voiceProvenance": null,
+  "voicePersona": {
+    "energy": 1,
+    "pace": 1
+  },
+  "svg": "larry.svg"
 }

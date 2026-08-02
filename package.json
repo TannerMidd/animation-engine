@@ -16,7 +16,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "verify": "npm run typecheck && npm test && npm run ui:build && tsx src/cli/index.ts migrate && tsx src/cli/index.ts show validate"
+    "verify": "npm run typecheck && npm test && node tests/python/run.mjs && npm run ui:build && tsx src/cli/index.ts migrate && tsx src/cli/index.ts show validate"
   },
   "dependencies": {
     "playwright": "^1.49.0",

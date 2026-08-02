@@ -1,6 +1,12 @@
 {
   "name": "steve",
+  "charId": "steve",
   "locks": [],
+  "identity": {
+    "id": "house",
+    "version": "1.0.0",
+    "hash": "2c4e4135943b"
+  },
   "canvas": {
     "width": 200,
     "height": 400
@@ -522,12 +528,15 @@
   },
   "voice": "Zira",
   "voiceRate": -1,
-  "voiceRef": null,
-  "svg": "steve.svg",
-  "charId": "steve",
-  "identity": {
-    "id": "house",
-    "version": "1.0.0",
-    "hash": "faa90d6e4611"
-  }
+  "voiceRef": "steve.ref.wav",
+  "voiceProvenance": {
+    "source": "minted",
+    "seed": 734621471,
+    "hash": "3bb7327d1322b2c1a37ec709a9178aa9af442237"
+  },
+  "voicePersona": {
+    "energy": 1,
+    "pace": 1
+  },
+  "svg": "steve.svg"
 }

@@ -1,6 +1,12 @@
 {
   "name": "janice",
+  "charId": "janice",
   "locks": [],
+  "identity": {
+    "id": "house",
+    "version": "1.0.0",
+    "hash": "2c4e4135943b"
+  },
   "canvas": {
     "width": 200,
     "height": 400
@@ -522,12 +528,15 @@
   },
   "voice": "David",
   "voiceRate": -1,
-  "voiceRef": null,
-  "svg": "janice.svg",
-  "charId": "janice",
-  "identity": {
-    "id": "house",
-    "version": "1.0.0",
-    "hash": "faa90d6e4611"
-  }
+  "voiceRef": "janice.ref.wav",
+  "voiceProvenance": {
+    "source": "minted",
+    "seed": 834087563,
+    "hash": "5651d70c1a0b8122b3ce7f551e7f80b68d515605"
+  },
+  "voicePersona": {
+    "energy": 1,
+    "pace": 1
+  },
+  "svg": "janice.svg"
 }

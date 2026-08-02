@@ -87,8 +87,33 @@ export type EditorialBible = z.infer<typeof EditorialBible>;
 // --- audio ----------------------------------------------------------------
 
 export const AudioBible = z.object({
-  // M18 fills this: acoustic profiles, ambience recipes, stings, mix targets,
-  // and the voice policy. The slot exists now so profiles have a stable shape.
+  /**
+   * Room tone under every scene. `setProfiles` overrides the palette-derived
+   * acoustic profile per set name — the axis that keeps sound and picture
+   * independently ownable.
+   */
+  ambience: z
+    .object({
+      enabled: z.boolean().default(true),
+      /** Bed loudness as RMS dBFS. Room tone that gets noticed has failed. */
+      levelDb: z.number().min(-60).max(-8).default(-30),
+      setProfiles: z.record(z.string(), z.string()).default({}),
+    })
+    .default({}),
+  /** Card punctuation. Synthesized, seeded, bumper-minimal. */
+  stings: z
+    .object({
+      enabled: z.boolean().default(true),
+      levelDb: z.number().min(-40).max(0).default(-6),
+    })
+    .default({}),
+  /** Master bus targets. RMS-based — an approximation, not broadcast LUFS. */
+  mix: z
+    .object({
+      targetRmsDb: z.number().min(-40).max(-6).default(-20),
+      ceilingDb: z.number().min(-6).max(0).default(-1),
+    })
+    .default({}),
 });
 export type AudioBible = z.infer<typeof AudioBible>;
 

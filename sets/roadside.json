@@ -1,5 +1,11 @@
 {
   "name": "roadside",
+  "setId": "roadside",
+  "identity": {
+    "id": "house",
+    "version": "1.0.0",
+    "hash": "2c4e4135943b"
+  },
   "palette": "exterior-dusk",
   "layout": {
     "horizonY": 560,
@@ -115,11 +121,5 @@
         }
       }
     ]
-  },
-  "setId": "roadside",
-  "identity": {
-    "id": "house",
-    "version": "1.0.0",
-    "hash": "faa90d6e4611"
   }
 }

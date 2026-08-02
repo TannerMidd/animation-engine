@@ -62,7 +62,7 @@ export async function renderScene(
   report({ stage: 'compile', done: 1, total: 1, message: `${compiled.ir.frames.length} frames` });
 
   report({ stage: 'audio', done: 0, total: 1 });
-  const dialogue = await mixSceneAudio(scene, compiled.audio, compiled.durationMs);
+  const dialogue = await mixSceneAudio(scene, shots, compiled.audio, compiled.durationMs);
   report({ stage: 'audio', done: 1, total: 1 });
 
   const result = await renderFrames({

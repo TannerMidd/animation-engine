@@ -1,5 +1,11 @@
 {
   "name": "lobby-night",
+  "setId": "lobby-night",
+  "identity": {
+    "id": "house",
+    "version": "1.0.0",
+    "hash": "2c4e4135943b"
+  },
   "palette": "office-night",
   "layout": {
     "horizonY": 560,
@@ -87,11 +93,5 @@
         "params": {}
       }
     ]
-  },
-  "setId": "lobby-night",
-  "identity": {
-    "id": "house",
-    "version": "1.0.0",
-    "hash": "faa90d6e4611"
   }
 }

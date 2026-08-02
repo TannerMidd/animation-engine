@@ -29,7 +29,6 @@ import { parseScript } from '../parse/index.ts';
 import { autoDirect, buildCapabilityManifest, validateShotList } from '../direct/index.ts';
 import { synthesizeLines, loadRecordedVo, listVoices, getEngine, ENGINE_NAMES, type LineTiming, type VoiceLine } from '../voice/index.ts';
 import { findRhubarb } from '../voice/rhubarb.ts';
-import { mixDialogue } from '../voice/mix.ts';
 import { ShotList } from '../schema/script.ts';
 
 interface Args {
