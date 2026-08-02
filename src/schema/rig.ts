@@ -187,6 +187,21 @@ const RigShape = z.object({
     .nullable()
     .default(null),
   /**
+   * How this character carries themselves, inside the show's acting envelope.
+   *
+   * `reactionMs` is their listening latency; `gestureBias` scales how much the
+   * director lets them talk with their hands; `fidgetAmp` how visibly their
+   * weight shifts during holds. Small numbers, but they are what separates the
+   * jumpy one from the still one across every scene they appear in.
+   */
+  acting: z
+    .object({
+      reactionMs: z.number().min(0).max(1500).default(280),
+      gestureBias: z.number().min(0.5).max(1.6).default(1),
+      fidgetAmp: z.number().min(0).max(6).default(2),
+    })
+    .optional(),
+  /**
    * How this character delivers lines, as bounded multipliers around 1.
    *
    * `energy` scales the emotion exaggeration an expression asks for; `pace`

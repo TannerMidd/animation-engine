@@ -99,8 +99,33 @@ export const PerformanceBible = z.object({
   register: z.array(z.string()).default([]),
   /** Baseline expression when a line carries no parenthetical. */
   restingExpression: z.string().default('DEADPAN'),
-  // M20 extends: acting ranges, gesture arcs, reaction latency, gaze
-  // behaviour, intensity limits.
+  /**
+   * The show's acting envelope. Characters roll their personal values inside
+   * these ranges, so a restrained show and a twitchy show differ before any
+   * individual character does.
+   */
+  acting: z
+    .object({
+      /** How long a listener takes to visibly react to a line, in ms. */
+      reaction: z
+        .object({ minMs: z.number().min(0).default(140), maxMs: z.number().max(1500).default(480) })
+        .default({}),
+      /** A gesture holds at least this long before it may release. */
+      gestureMinHoldMs: z.number().min(200).default(900),
+      /** Fraction of the line after which a held gesture drops back to talking. */
+      gestureReleaseFraction: z.number().min(0.3).max(1).default(0.68),
+      /** Idle weight-shift while not speaking: amplitude and cadence. */
+      fidget: z
+        .object({
+          amp: z.number().min(0).max(6).default(2.2),
+          minMs: z.number().min(800).default(2800),
+          maxMs: z.number().default(5200),
+        })
+        .default({}),
+      /** Whether listeners look at whoever is speaking. */
+      gaze: z.boolean().default(true),
+    })
+    .default({}),
 });
 export type PerformanceBible = z.infer<typeof PerformanceBible>;
 

@@ -132,7 +132,11 @@ describe('profile-owned rendering', () => {
   });
 
   it('exposes the identity resting expression as the directing default', () => {
-    setActiveIdentity(fixture({ id: 'cheery', performance: { register: [], restingExpression: 'JOY' } }));
+    setActiveIdentity(
+      fixture({
+        performance: ShowIdentity.shape.performance.parse({ restingExpression: 'JOY' }),
+      }),
+    );
     expect(activeIdentity().performance.restingExpression).toBe('JOY');
   });
 });

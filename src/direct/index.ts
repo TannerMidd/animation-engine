@@ -100,15 +100,18 @@ function supportable(want: string, available: Set<string>, resting: string): str
 const SHRUG_WORDS = /\b(i don'?t know|dunno|whatever|i guess|no idea|beats me|somehow)\b/i;
 const POINT_WORDS = /\b(you'?re|you need|you have to|go ahead and|make sure|remember to|listen)\b/i;
 
-function gestureFor(text: string, expression: string, rng: Rng): string {
+function gestureFor(text: string, expression: string, rng: Rng, bias = 1): string {
   if (SHRUG_WORDS.test(text)) return 'SHRUG';
   if (POINT_WORDS.test(text)) return 'POINT';
 
   const words = text.split(/\s+/).length;
   // Stillness is funnier than gesticulating. A deadpan character delivering a
-  // short line should just stand there.
-  if (expression === 'DEADPAN' && words <= 8) return rng.chance(0.75) ? 'NONE' : 'TALK';
-  if (words <= 4) return rng.chance(0.5) ? 'NONE' : 'TALK';
+  // short line should just stand there — but *how* still is the character's
+  // own trait: a high gesture bias erodes the stand-there probabilities, a low
+  // one raises them.
+  const still = (p: number) => Math.min(0.95, Math.max(0.05, p / bias));
+  if (expression === 'DEADPAN' && words <= 8) return rng.chance(still(0.75)) ? 'NONE' : 'TALK';
+  if (words <= 4) return rng.chance(still(0.5)) ? 'NONE' : 'TALK';
   return 'TALK';
 }
 
@@ -266,7 +269,7 @@ export function autoDirect(
           speaker,
           text: el.text,
           expression,
-          gesture: gestureFor(el.text, expression, rng),
+          gesture: gestureFor(el.text, expression, rng, rigs.get(speaker)?.rig.acting?.gestureBias ?? 1),
           shot,
           focus: shot === 'TWO_SHOT' ? [] : [speaker],
           camera: expression === 'ANGRY' && /!$/.test(el.text) ? 'SHAKE' : 'HOLD',

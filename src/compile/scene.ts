@@ -15,6 +15,10 @@ import {
   mouthOpenness,
   type BlinkWindow,
 } from './layers.ts';
+import {
+  actingOf, expressionSegments, valueAt, gestureReleaseMs, fidgetSchedule, fidgetAt,
+  gazeTowardSpeaker, type ActingResolved, type FidgetShift,
+} from './performance.ts';
 
 /**
  * Shot list + audio timing -> per-frame scene IR.
@@ -63,7 +67,10 @@ interface Timed {
   startMs: number;
   endMs: number;
   timing?: LineTiming;
+  /** When a held gesture on this beat drops back into talking. */
+  releaseMs: number;
 }
+type TimedBeat = Timed;
 
 interface ActorRt {
   id: string;
@@ -83,6 +90,12 @@ interface ActorRt {
   breathPhase: number;
   talkPhase: number;
   hasEyesClosed: boolean;
+  hasEyesSide: boolean;
+  acting: ActingResolved;
+  /** Expression timeline with listener latency applied. Filled at compile. */
+  exprSegments: Array<{ fromMs: number; value: string }>;
+  /** Held weight-shift schedule. Filled at compile. */
+  fidgets: FidgetShift[];
   /** Previous character-frame's resolved parts, for the snap frame. */
   lastParts: Record<string, IRTransform>;
   lastPoseKey: string;
@@ -115,9 +128,12 @@ function buildTimeline(shots: ShotList, timings: Map<number, LineTiming>): Timed
       ms = beat.ms;
     }
 
-    out.push({ beat, index, startMs: cursor, endMs: cursor + ms, timing });
+    out.push({ beat, index, startMs: cursor, endMs: cursor + ms, timing, releaseMs: 0 });
     cursor += ms;
   });
+
+  // Gesture release points, once the whole timeline is placed.
+  for (const t of out) t.releaseMs = gestureReleaseMs(t, shots.characterFps);
 
   return out;
 }
@@ -158,27 +174,40 @@ function prepareActor(shots: ShotList, member: ShotList['cast'][number], loaded:
     breathPhase: rng.range(0, Math.PI * 2),
     talkPhase: rng.range(0, TALK_SWAP_MS),
     hasEyesClosed: rig.swapSets.some((s) => s.slot === 'eyes' && s.variants.includes('eyes_closed')),
+    hasEyesSide: rig.swapSets.some((s) => s.slot === 'eyes' && s.variants.includes('eyes_side')),
+    acting: actingOf(rig),
+    exprSegments: [],
+    fidgets: [],
     lastParts: {},
     lastPoseKey: '',
   };
 }
 
-/** Which pose a character holds this frame. */
-function poseNameFor(actor: ActorRt, beat: ShotBeat, msIntoBeat: number): string {
-  if (beat.kind !== 'line' || beat.speaker !== actor.id) return 'IDLE';
-  if (beat.gesture === 'NONE') return 'IDLE';
-  if (beat.gesture !== 'TALK') return beat.gesture;
-
-  // Alternate hands while talking, offset per actor so two people gesturing at
-  // once don't move in lockstep.
+/** The talk-pose alternation, shared by plain talking and post-gesture talking. */
+function talkPose(actor: ActorRt, msIntoBeat: number): string {
   const n = Math.floor((msIntoBeat + actor.talkPhase) / TALK_SWAP_MS);
   const name = n % 2 === 0 ? 'TALK_A' : 'TALK_B';
   return actor.poses.has(name) ? name : 'IDLE';
 }
 
-function expressionNameFor(actor: ActorRt, beat: ShotBeat): string {
-  if (beat.kind === 'line' && beat.speaker === actor.id) return beat.expression;
-  return beat.reactions[actor.id] ?? actor.resting;
+/**
+ * Which pose a character holds this frame.
+ *
+ * Gestures arc rather than switch: a POINT lands at the top of the line, holds
+ * at least the show's minimum, then releases back into ordinary talk-motion
+ * for the rest of the line. The release time is precomputed per beat and
+ * grid-quantized, so it costs held frames nothing.
+ */
+function poseNameFor(actor: ActorRt, active: TimedBeat, charMs: number): string {
+  const beat = active.beat;
+  if (beat.kind !== 'line' || beat.speaker !== actor.id) return 'IDLE';
+  if (beat.gesture === 'NONE') return 'IDLE';
+
+  const msIntoBeat = charMs - active.startMs;
+  if (beat.gesture === 'TALK') return talkPose(actor, msIntoBeat);
+
+  if (!actor.poses.has(beat.gesture)) return talkPose(actor, msIntoBeat);
+  return charMs < active.releaseMs ? beat.gesture : talkPose(actor, msIntoBeat);
 }
 
 export function compileShotList(
@@ -210,7 +239,15 @@ export function compileShotList(
     // and silently never render, so clamp it to just over one.
     const blinkDur = Math.max(actor.rig.idle.blinkDuration, 1.001 / shots.characterFps);
     actor.blinks = scheduleBlinks(rng, durationSec, actor.rig.idle.blinkRateHz, blinkDur);
+
+    actor.exprSegments = expressionSegments(
+      timeline, actor.id, actor.resting, actor.acting, shots.characterFps);
+    actor.fidgets = fidgetSchedule(
+      shots.seed, actor.rig.charId ?? actor.id, durationMs, actor.acting, shots.characterFps);
   }
+
+  /** Stage x per cast id, for gaze geometry. */
+  const stageX = new Map(actors.map((a) => [a.id, a.x]));
 
   const frameInfo: ActorFrameInfo[] = actors.map((a) => ({
     id: a.id,
@@ -251,8 +288,8 @@ export function compileShotList(
 
       cachedActors = {};
       for (const actor of actors) {
-        const poseName = poseNameFor(actor, active.beat, intoBeat);
-        const exprName = expressionNameFor(actor, active.beat);
+        const poseName = poseNameFor(actor, active, charMs);
+        const exprName = valueAt(actor.exprSegments, charMs);
         const poseKey = `${poseName}|${exprName}`;
 
         const pose = actor.poses.get(poseName);
@@ -300,9 +337,32 @@ export function compileShotList(
           rot: breath * 0.6 + openness * 1.1,
         });
 
+        // Listeners look at whoever is talking — after their reaction has
+        // landed, when their puppet has a side-eye variant, and only when the
+        // side variant's direction actually points at the speaker. Expressions
+        // that own the eyes (wide, squint) win over the glance.
+        const isListener = active.beat.kind === 'line' && active.beat.speaker !== actor.id;
+        if (isListener && actor.hasEyesSide) {
+          const speakerX = stageX.get((active.beat as { speaker: string }).speaker);
+          const eyesNow = swaps['eyes'];
+          if (
+            speakerX !== undefined &&
+            (eyesNow === 'eyes_open' || eyesNow === 'eyes_half') &&
+            gazeTowardSpeaker(actor, speakerX)
+          ) {
+            swaps['eyes'] = 'eyes_side';
+          }
+        }
+
         if (actor.hasEyesClosed && !expr.suppressBlink && isBlinking(actor.blinks, charSec)) {
           swaps['eyes'] = 'eyes_closed';
         }
+
+        // Held weight shift while not speaking. A held offset is just a
+        // different held frame, so deduplication is untouched.
+        const speaking = active.beat.kind === 'line' && active.beat.speaker === actor.id;
+        const shift = speaking ? 0 : fidgetAt(actor.fidgets, charMs);
+        if (shift !== 0) out['torso'] = add(out['torso'] ?? IDENTITY, { x: shift });
 
         cachedActors[actor.id] = {
           visible: true,

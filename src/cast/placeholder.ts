@@ -415,7 +415,6 @@ export function buildPlaceholderRig(name: string, look?: Look, outfit?: Outfit):
     ],
     poses: buildPoses(),
     expressions: buildExpressions(),
-    idle: { breathAmplitude: 3, breathPeriod: 4, blinkRateHz: 0.45, blinkDuration: 0.12 },
     // Voice is rolled from the name like everything else, so two characters in
     // a scene don't sound identical by default.
     voice: voiceRng.pick(['David', 'Zira']),
@@ -430,6 +429,20 @@ export function buildPlaceholderRig(name: string, look?: Look, outfit?: Outfit):
     voicePersona: {
       energy: Math.round(voiceRng.range(0.85, 1.2) * 100) / 100,
       pace: Math.round(voiceRng.range(0.88, 1.15) * 100) / 100,
+    },
+    // Idle motion and acting personality. Drawn from the same stream, strictly
+    // AFTER the voice fields — appending draws is how existing characters keep
+    // their voices when the generator gains new rolls.
+    idle: {
+      breathAmplitude: Math.round(voiceRng.range(2.2, 4.2) * 10) / 10,
+      breathPeriod: Math.round(voiceRng.range(3.2, 5) * 10) / 10,
+      blinkRateHz: Math.round(voiceRng.range(0.3, 0.6) * 100) / 100,
+      blinkDuration: 0.12,
+    },
+    acting: {
+      reactionMs: Math.round(voiceRng.range(140, 480)),
+      gestureBias: Math.round(voiceRng.range(0.7, 1.35) * 100) / 100,
+      fidgetAmp: Math.round(voiceRng.range(0.8, 3.2) * 10) / 10,
     },
     svg: `${name}.svg`,
   };

@@ -523,12 +523,6 @@
       "suppressBlink": false
     }
   ],
-  "idle": {
-    "breathAmplitude": 3,
-    "breathPeriod": 4,
-    "blinkRateHz": 0.45,
-    "blinkDuration": 0.12
-  },
   "voice": "Zira",
   "voiceRate": -1,
   "voiceRef": "steve.ref.wav",
@@ -541,11 +535,22 @@
     "energy": 1,
     "pace": 1
   },
+  "idle": {
+    "breathAmplitude": 3,
+    "breathPeriod": 4,
+    "blinkRateHz": 0.45,
+    "blinkDuration": 0.12
+  },
+  "acting": {
+    "reactionMs": 397,
+    "gestureBias": 0.79,
+    "fidgetAmp": 0.8
+  },
   "svg": "steve.svg",
   "charId": "steve",
   "identity": {
     "id": "house",
     "version": "1.0.0",
-    "hash": "3df86a4a8e52"
+    "hash": "db5f40c8a297"
   }
 }

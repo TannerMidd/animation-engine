@@ -523,12 +523,6 @@
       "suppressBlink": false
     }
   ],
-  "idle": {
-    "breathAmplitude": 3,
-    "breathPeriod": 4,
-    "blinkRateHz": 0.45,
-    "blinkDuration": 0.12
-  },
   "voice": "Zira",
   "voiceRate": 0,
   "voiceRef": null,
@@ -537,11 +531,22 @@
     "energy": 1,
     "pace": 1
   },
+  "idle": {
+    "breathAmplitude": 3,
+    "breathPeriod": 4,
+    "blinkRateHz": 0.45,
+    "blinkDuration": 0.12
+  },
+  "acting": {
+    "reactionMs": 471,
+    "gestureBias": 1.08,
+    "fidgetAmp": 3
+  },
   "svg": "larry.svg",
   "charId": "larry",
   "identity": {
     "id": "house",
     "version": "1.0.0",
-    "hash": "3df86a4a8e52"
+    "hash": "db5f40c8a297"
   }
 }

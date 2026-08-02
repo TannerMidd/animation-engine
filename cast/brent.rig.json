@@ -523,12 +523,6 @@
       "suppressBlink": false
     }
   ],
-  "idle": {
-    "breathAmplitude": 3,
-    "breathPeriod": 4,
-    "blinkRateHz": 0.45,
-    "blinkDuration": 0.12
-  },
   "voice": "David",
   "voiceRate": 1,
   "voiceRef": "brent.ref.wav",
@@ -541,11 +535,22 @@
     "energy": 1,
     "pace": 1
   },
+  "idle": {
+    "breathAmplitude": 3,
+    "breathPeriod": 4,
+    "blinkRateHz": 0.45,
+    "blinkDuration": 0.12
+  },
+  "acting": {
+    "reactionMs": 268,
+    "gestureBias": 0.76,
+    "fidgetAmp": 1.8
+  },
   "svg": "brent.svg",
   "charId": "brent",
   "identity": {
     "id": "house",
     "version": "1.0.0",
-    "hash": "3df86a4a8e52"
+    "hash": "db5f40c8a297"
   }
 }
