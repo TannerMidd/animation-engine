@@ -1,0 +1,42 @@
+{
+  "id": "loud-cartoon",
+  "name": "Loud Cartoon",
+  "version": "1.0.0",
+  "seed": 909,
+  "description": "Evaluation fixture B: heavy shaky marker, badly misregistered fills, everyone slightly too pleased. The print shop gave up years ago.",
+  "visual": {
+    "style": {
+      "lineWidth": 7.5,
+      "lineWidthJitter": 0.5,
+      "wobble": 5.2,
+      "wobbleSegments": 4,
+      "fillOffset": [5.5, -4.0],
+      "grain": 0.14
+    },
+    "setNotes": [
+      "Rooms are crowded at the edges and tilted off any sensible grid.",
+      "Every set gets at least one prop at a visibly wrong scale — too big, proudly so.",
+      "Colour does the talking: lean on the palette's accent role wherever legal.",
+      "Nothing matches anything else on purpose."
+    ]
+  },
+  "performance": {
+    "register": [
+      "Everyone is upbeat about things nobody should be upbeat about.",
+      "Enthusiasm escalates; it never resolves.",
+      "Characters interrupt themselves with better ideas mid-sentence.",
+      "Bad news is delivered like a prize announcement."
+    ],
+    "restingExpression": "JOY"
+  },
+  "editorial": {
+    "pacing": [
+      "Keep pauses short and frequent, like the show can barely wait for itself.",
+      "Land one abrupt full stop where the energy suddenly dies, once per scene."
+    ]
+  },
+  "audio": {},
+  "variation": {
+    "locks": []
+  }
+}

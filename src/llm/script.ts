@@ -1,5 +1,7 @@
 import { Ollama } from './ollama.ts';
 import { parseScript } from '../parse/index.ts';
+import { activeIdentity } from '../show/context.ts';
+import type { ShowIdentity } from '../schema/identity.ts';
 
 /**
  * Premise -> script.
@@ -8,11 +10,18 @@ import { parseScript } from '../parse/index.ts';
  * animates people standing in a room talking; ask it for a car chase and you
  * get two people *describing* a car chase. Writing to what it does well is the
  * difference between a scene that plays and one that doesn't.
+ *
+ * The *voice* of the writing — register and pacing — comes from the show's
+ * identity profile, in the show's own words. Deliberately never "write like
+ * <existing show>": imitation prompts produce imitation, and the profile is
+ * where a show states what it actually is.
  */
 
-const SYSTEM = `You write short scripts for a limited-animation engine, in the register of
-Adult Swim shows like Aqua Teen Hunger Force and Sealab 2021: deadpan, mundane,
-absurd, and unhurried.
+function systemPrompt(identity: ShowIdentity): string {
+  const register = identity.performance.register.map((r) => `- ${r}`).join('\n');
+  const pacing = identity.editorial.pacing.map((r) => `- ${r}`).join('\n');
+
+  return `You write short scripts for a limited-animation engine.
 
 FORMAT — output the script and nothing else. No preamble, no commentary, no code fences.
 
@@ -26,23 +35,30 @@ FORMAT — output the script and nothing else. No preamble, no commentary, no co
 
 PARENTHETICALS drive both the drawn face and the vocal performance, so put one on
 most lines. They are matched by keyword — use these:
-  deadpan, flat, monotone, blank   -> the default; use it most
+  deadpan, flat, monotone, blank
+  exhausted, weary, drained
   sad, defeated, deflated, quiet
+  suspicious, sceptical, doubtful
   confused, puzzled, unsure
-  cheerful, bright, warm, friendly
+  warm, friendly, calm
   smug, pleased, satisfied
+  delighted, grinning, excited
   angry, annoyed, irritated, snaps
   shocked, surprised, alarmed
 
-HARD CONSTRAINTS
+THE SHOW'S REGISTER — every line obeys these:
+${register || '- Plain, natural dialogue.'}
+
+PACING:
+${pacing || '- Use [BEAT ...] where a pause serves the scene.'}
+- Use [BEAT ...] liberally and vary the lengths, 800 to 2000.
+
+HARD CONSTRAINTS (engine limits, not style):
 - The characters can only stand in one room and talk. No action, no props being
   handled, no movement between places, no physical comedy. If something happens,
   a character mentions it.
-- Everyone stays in the room for the whole scene.
-- Use [BEAT ...] liberally and vary the lengths, 800 to 2000. The pause is where
-  the joke lands; do not write a punchline where a silence would do.
-- Deadpan is the baseline. Characters under-react to enormous things.
-- Never explain the joke. End on an understatement, not a summary.`;
+- Everyone stays in the room for the whole scene.`;
+}
 
 export interface WriteOptions {
   premise: string;
@@ -92,7 +108,7 @@ export async function generateScript(opts: WriteOptions): Promise<WriteResult> {
   for (let attempt = 1; attempt <= 2; attempt++) {
     const raw = await ollama.generate({
       model: opts.model,
-      system: SYSTEM,
+      system: systemPrompt(activeIdentity()),
       prompt: buildPrompt(opts, correction),
       temperature: 0.9,
     });

@@ -1,0 +1,42 @@
+{
+  "id": "dry-institutional",
+  "name": "Dry Institutional",
+  "version": "1.0.0",
+  "seed": 101,
+  "description": "Evaluation fixture A: thin restrained linework, blank faces, glacial pacing. Everything is fine. Nothing is fine.",
+  "visual": {
+    "style": {
+      "lineWidth": 3.2,
+      "lineWidthJitter": 0.12,
+      "wobble": 1.1,
+      "wobbleSegments": 2,
+      "fillOffset": [0.8, -0.6],
+      "grain": 0.02
+    },
+    "setNotes": [
+      "Rooms are under-furnished and over-lit. Two props where five would fit.",
+      "Perfect symmetry is allowed here, because institutions love it and it reads as dread.",
+      "Nothing personal is visible anywhere: no posters, no plants, no colour accents.",
+      "Every surface is a regulation surface."
+    ]
+  },
+  "performance": {
+    "register": [
+      "Nobody raises their voice, ever. The worse the news, the quieter the delivery.",
+      "Dialogue is procedural language: forms, policies, scheduled outcomes.",
+      "Feelings are referred to in the third person, if at all.",
+      "Jokes are never acknowledged as jokes."
+    ],
+    "restingExpression": "DEADPAN"
+  },
+  "editorial": {
+    "pacing": [
+      "Long silences are the default punctuation; let them run past comfortable.",
+      "One pause per exchange should be noticeably too long."
+    ]
+  },
+  "audio": {},
+  "variation": {
+    "locks": []
+  }
+}

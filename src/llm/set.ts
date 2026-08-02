@@ -1,4 +1,5 @@
 import { Ollama } from './ollama.ts';
+import { activeIdentity } from '../show/context.ts';
 import { SetDescriptor } from '../sets/schema.ts';
 import { validateSet, lintSet, tidySet } from '../sets/index.ts';
 import { PROP_KEYS, propManifest } from '../sets/props/index.ts';
@@ -68,7 +69,11 @@ function catalogue(): string {
     .join('\n');
 }
 
-const SYSTEM = `You design flat-vector stage sets for a limited-animation engine by
+function systemPrompt(): string {
+  const identity = activeIdentity();
+  const notes = identity.visual.setNotes.map((n) => `  - ${n}`).join('\n');
+
+  return `You design flat-vector stage sets for a limited-animation engine by
 emitting a JSON descriptor. You never draw; you place props from a fixed catalogue.
 
 THE STAGE is 1280 wide by 720 tall. Characters stand on the floor at about y=698,
@@ -89,26 +94,9 @@ COMPOSITION: leave the middle of the stage (x 350-950) reasonably clear so the
 characters are not buried. Six to twelve props is plenty. Do not stack props at the
 same x.
 
-THE HOUSE STYLE. Everything is drawn with heavy uneven marker outlines, flat fills
-that print slightly out of register, and a paper grain over the frame. It is a
-cheap late-night cartoon, not an architectural render. Design to that:
-
-  Asymmetry. A set with a matching prop either side of centre reads as a stage
-  flat. Weight one side and leave the other sparse.
-
-  Too few, too big. Three large props beat nine small ones. Small props read as
-  clutter at this line weight, and clutter reads as nothing.
-
-  One wrong object. Every room gets a single item that does not belong or that
-  someone clearly gave up on — a lone traffic cone indoors, a plant beside a
-  filing cabinet, a poster in an empty corridor. That object is the joke, and it
-  is what stops the room being generic.
-
-  Rooms that have been used. Push things off centre and off the grid. Nothing is
-  aligned, nothing is new, nobody tidied up before the scene.
-
-  Depth by layer, not by detail. Get the read from what is in "back" versus
-  "mid" versus "fore", not from adding more objects to any one of them.`;
+THE SHOW'S VISUAL RULES — design every room to these:
+${notes || '  - Plain, functional rooms.'}`;
+}
 
 const propCount = (s: SetDescriptorType): number =>
   s.layers.back.length + s.layers.mid.length + s.layers.fore.length;
@@ -156,7 +144,7 @@ Name the set "${opts.name}". Pick the palette that best matches the mood.`;
 
     const raw = await ollama.generate({
       model: opts.model,
-      system: SYSTEM,
+      system: systemPrompt(),
       prompt,
       format: setJsonSchema(),
       // Lower than script writing: this is a layout task, not a creative one,

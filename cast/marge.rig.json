@@ -1,5 +1,6 @@
 {
   "name": "marge",
+  "locks": [],
   "canvas": {
     "width": 200,
     "height": 400
@@ -522,5 +523,11 @@
   "voice": "David",
   "voiceRate": 1,
   "voiceRef": null,
-  "svg": "marge.svg"
+  "svg": "marge.svg",
+  "charId": "marge",
+  "identity": {
+    "id": "house",
+    "version": "1.0.0",
+    "hash": "faa90d6e4611"
+  }
 }

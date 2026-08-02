@@ -1,5 +1,7 @@
 import { Rng, deriveSeed } from '../core/rng.ts';
+import { streamSeed, STREAMS } from '../core/streams.ts';
 import { Look, BUILDS, SKINS, SHIRTS, HAIRS, TROUSERS, type Build } from '../schema/look.ts';
+import type { ShowIdentity } from '../schema/identity.ts';
 
 /**
  * Rolling a default appearance.
@@ -79,18 +81,37 @@ const BROW_WEIGHTS = [['thin', 10], ['thick', 8], ['bushy', 5], ['sparse', 4], [
 const EAR_WEIGHTS = [['small', 12], ['large', 6], ['stuck-out', 4], ['none', 3]] as const;
 
 /**
- * A character's default appearance, derived from their name.
+ * A character's appearance, rolled from their stable id under the show's seed.
  *
- * Stable across machines and runs, so "steve" is the same guy everywhere, and
- * two characters in a scene are visually distinct without anyone choosing.
+ * This is the identity-correct path: the stream keys off `charId`, so renaming
+ * the character — or the show gaining new variation streams — changes nothing
+ * about how they look. `salt` exists for the reroll button, which wants a
+ * *different* face on each press without disturbing the unsalted default.
+ */
+export function rollLookFor(charId: string, identity: ShowIdentity, salt = ''): Look {
+  return rollFrom(new Rng(deriveSeed(streamSeed(identity, STREAMS.look, charId), salt)));
+}
+
+/**
+ * A character's appearance, derived from their name.
+ *
+ * The legacy and ephemeral path: scripts can name characters who have never
+ * been saved to disk, and those placeholders still need a stable face on every
+ * machine. Anything that persists gets a `charId` and uses `rollLookFor`;
+ * migration materialises this roll into pre-identity rigs so decoupling from
+ * the name never changes anyone who already exists.
+ */
+export function rollLook(name: string): Look {
+  return rollFrom(new Rng(deriveSeed(0x5eed, name.toLowerCase())));
+}
+
+/**
  * Every field is rolled unconditionally, even ones the chosen style will not
  * use — a bald character still draws a hair colour, because skipping it would
  * shift every later choice and quietly recast everyone the moment a hairstyle
  * is added to the table.
  */
-export function rollLook(name: string): Look {
-  const rng = new Rng(deriveSeed(0x5eed, name.toLowerCase()));
-
+function rollFrom(rng: Rng): Look {
   return Look.parse({
     build: rng.pick(BUILDS),
     head: weighted(rng, HEAD_WEIGHTS),

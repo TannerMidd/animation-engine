@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { IdentityStamp } from '../schema/identity.ts';
 
 /**
  * Set descriptors.
@@ -63,6 +64,10 @@ export type SetLayout = z.infer<typeof SetLayout>;
 
 export const SetDescriptor = z.object({
   name: z.string().min(1),
+  /** Stable id, independent of the name. Assigned at creation or by migrate. */
+  setId: z.string().optional(),
+  /** Which identity profile last wrote this set, for drift detection. */
+  identity: IdentityStamp.optional(),
   /** Named palette. Retinting the whole set is a one-word change. */
   palette: z.string().default('office-fluorescent'),
   layout: SetLayout.default({}),

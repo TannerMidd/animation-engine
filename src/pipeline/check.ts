@@ -2,7 +2,8 @@ import { parseScript } from '../parse/index.ts';
 import { autoDirect, buildCapabilityManifest, validateShotList } from '../direct/index.ts';
 import { estimateLineMs } from '../compile/scene.ts';
 import { buildPlaceholderRig, buildPlaceholderSvg } from '../cast/placeholder.ts';
-import { loadRig, listRigs, saveRig, type LoadedRig } from '../cast/store.ts';
+import { createRig } from '../cast/authoring.ts';
+import { loadRig, listRigs, type LoadedRig } from '../cast/store.ts';
 import type { Screenplay, ShotList } from '../schema/script.ts';
 
 /**
@@ -68,16 +69,17 @@ export async function checkScript(source: string, opts: CheckOptions): Promise<C
   const newCharacters = names.filter((n) => !onDisk.has(n));
 
   // Stand in for missing characters so a check never has a side effect unless
-  // asked. Both branches produce the same rig for a given name.
+  // asked. Both branches draw the same face for a given name — persisting only
+  // adds the stable id and identity stamp — so the puppet someone previewed is
+  // the puppet that gets cast.
   const rigs = new Map<string, LoadedRig>();
   for (const name of names) {
     if (onDisk.has(name)) {
       rigs.set(name, await loadRig(name));
+    } else if (opts.createMissingCast) {
+      rigs.set(name, await createRig(name));
     } else {
-      const rig = buildPlaceholderRig(name);
-      const svg = buildPlaceholderSvg(name);
-      if (opts.createMissingCast) await saveRig(rig, svg);
-      rigs.set(name, { rig, svg });
+      rigs.set(name, { rig: buildPlaceholderRig(name), svg: buildPlaceholderSvg(name) });
     }
   }
 
@@ -88,7 +90,8 @@ export async function checkScript(source: string, opts: CheckOptions): Promise<C
       seed: opts.seed ?? 7,
       fps: opts.fps ?? 24,
       characterFps: opts.characterFps ?? 12,
-      resting: opts.resting ?? 'DEADPAN',
+      // Undefined falls through to the identity profile's resting expression.
+      resting: opts.resting,
       set: opts.set ?? null,
     });
   } catch (err) {

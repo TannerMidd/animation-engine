@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { IdentityStamp } from './identity.ts';
 
 /**
  * Screenplay and shot list schemas.
@@ -122,6 +123,8 @@ export type ShotBeat = z.infer<typeof ShotBeat>;
 
 export const ShotList = z.object({
   scene: z.string().min(1),
+  /** Which identity profile directed this scene, for drift detection. */
+  identity: IdentityStamp.optional(),
   set: z.string().nullable().default(null),
   fps: z.number().int().positive().default(24),
   characterFps: z.number().int().positive().default(12),

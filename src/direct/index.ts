@@ -1,4 +1,6 @@
 import { Rng, deriveSeed } from '../core/rng.ts';
+import { activeIdentity } from '../show/context.ts';
+import { stampOf } from '../schema/identity.ts';
 import type { LoadedRig } from '../cast/store.ts';
 import {
   SHOTS,
@@ -135,7 +137,10 @@ export function autoDirect(
 ): ShotList {
   const seed = opts.seed ?? 7;
   const rng = new Rng(deriveSeed(seed, 'director'));
-  const resting = opts.resting ?? 'DEADPAN';
+  // The baseline face comes from the show, not from a hardcoded engine
+  // preference — a warm show and a deadpan show differ here before any
+  // parenthetical is written.
+  const resting = opts.resting ?? activeIdentity().performance.restingExpression;
 
   const names = screenplay.characters.map((c) => c.toLowerCase());
 
@@ -280,6 +285,7 @@ export function autoDirect(
 
   return {
     scene: opts.scene,
+    identity: stampOf(activeIdentity()),
     set: opts.set ?? null,
     fps: opts.fps ?? 24,
     characterFps: opts.characterFps ?? 12,

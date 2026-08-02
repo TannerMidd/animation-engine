@@ -33,6 +33,9 @@ import { findRhubarb } from '../voice/rhubarb.ts';
 import { ffmpegVersion } from '../render/encode.ts';
 import { compileScene, DEFAULT_PLAN } from '../compile/index.ts';
 import { Ollama, freeVramForRender, pickModel, SUGGESTED_MODELS } from '../llm/ollama.ts';
+import { initShow, listProfiles, loadProfile, activeProfileId, setActiveProfileId, compareProfiles } from '../show/store.ts';
+import { setActiveIdentity, activeIdentity } from '../show/context.ts';
+import { ShowIdentity, identityHash, stampOf } from '../schema/identity.ts';
 import { generateScript } from '../llm/script.ts';
 import { generateSet } from '../llm/set.ts';
 
@@ -147,6 +150,47 @@ router.get('/api/health', async ({ res }) => {
     cast,
     activeJob: activeJob() ? jobSummary(activeJob()!) : null,
   });
+});
+
+// --- show identity ---
+
+router.get('/api/show', async ({ res }) => {
+  const identity = activeIdentity();
+  json(res, {
+    active: { ...stampOf(identity), name: identity.name },
+    profiles: await listProfiles(),
+  });
+});
+
+router.get('/api/show/profile/:id', async ({ res, params }) => {
+  json(res, await loadProfile(params['id']!));
+});
+
+router.put('/api/show/active', async ({ req, res }) => {
+  const body = await readJson<{ id: string }>(req);
+  if (!body.id) throw new HttpError(400, 'expected { id }');
+  await setActiveProfileId(body.id);
+  setActiveIdentity(await loadProfile(body.id));
+  json(res, { ok: true, active: stampOf(activeIdentity()) });
+});
+
+router.put('/api/show/profile/:id', async ({ req, res, params }) => {
+  const body = await readJson<{ identity: unknown }>(req);
+  const identity = ShowIdentity.parse(body.identity);
+  if (identity.id !== params['id']) throw new HttpError(400, 'profile id in body must match the URL');
+
+  const { saveProfile } = await import('../show/store.ts');
+  await saveProfile(identity);
+  // Editing the active profile takes effect immediately — previews after a
+  // save must render with what was saved, not with a stale copy.
+  if ((await activeProfileId()) === identity.id) setActiveIdentity(identity);
+  json(res, { ok: true, hash: identityHash(identity) });
+});
+
+router.post('/api/show/compare', async ({ req, res }) => {
+  const body = await readJson<{ a: string; b: string }>(req);
+  if (!body.a || !body.b) throw new HttpError(400, 'expected { a, b }');
+  json(res, { diffs: compareProfiles(await loadProfile(body.a), await loadProfile(body.b)) });
 });
 
 router.get('/api/vocab', ({ res }) => {
@@ -802,7 +846,11 @@ export function createServer(): http.Server {
   });
 }
 
-export function startServer(port: number): Promise<{ port: number; close: () => void }> {
+export async function startServer(port: number): Promise<{ port: number; close: () => void }> {
+  // The active identity governs style, prompts and directing defaults for every
+  // request, so it loads before the first one can arrive.
+  await initShow();
+
   return new Promise((resolve, reject) => {
     const server = createServer();
     server.on('error', reject);

@@ -1,0 +1,46 @@
+{
+  "id": "house",
+  "name": "House",
+  "version": "1.0.0",
+  "seed": 7,
+  "description": "The default identity: marker-and-misprint linework, deadpan register, unhurried cutting.",
+  "visual": {
+    "style": {
+      "lineWidth": 4.4,
+      "lineWidthJitter": 0.32,
+      "wobble": 2.6,
+      "wobbleSegments": 3,
+      "fillOffset": [
+        2.6,
+        -1.9
+      ],
+      "grain": 0.05
+    },
+    "setNotes": [
+      "Asymmetry: a set with a matching prop either side of centre reads as a stage flat. Weight one side and leave the other sparse.",
+      "Too few, too big: three large props beat nine small ones. Small props read as clutter at this line weight.",
+      "One wrong object: every room gets a single item that does not belong — a lone traffic cone indoors, a plant beside a filing cabinet. That object is the joke.",
+      "Rooms that have been used: push things off centre and off the grid. Nothing is aligned, nothing is new, nobody tidied up.",
+      "Depth by layer, not by detail: get the read from back versus mid versus fore, not from adding more objects."
+    ]
+  },
+  "performance": {
+    "register": [
+      "Deadpan is the baseline. Characters under-react to enormous things.",
+      "Dialogue is mundane, absurd, and unhurried; the absurdity is treated as paperwork.",
+      "Never explain the joke. End on an understatement, not a summary.",
+      "Characters speak in ordinary workplace language, whatever is happening to them."
+    ],
+    "restingExpression": "DEADPAN"
+  },
+  "editorial": {
+    "pacing": [
+      "The pause is where the joke lands; do not write a punchline where a silence would do.",
+      "Vary pause lengths; let long silences sit on the person the line landed on."
+    ]
+  },
+  "audio": {},
+  "variation": {
+    "locks": []
+  }
+}

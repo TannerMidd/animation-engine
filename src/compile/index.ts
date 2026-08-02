@@ -76,7 +76,9 @@ interface ActorRuntime {
 }
 
 function prepareActor(plan: ActorPlan, rig: Rig, seed: number): ActorRuntime {
-  const rng = new Rng(deriveSeed(seed, `actor:${plan.id}`));
+  // Keyed by the rig's stable id when it has one, so a rename never reshuffles
+  // seeded behaviour; the scene-local id covers ephemeral placeholders.
+  const rng = new Rng(deriveSeed(seed, `actor:${rig.charId ?? plan.id}`));
 
   const base = new Map<string, IRTransform>();
   const pose = findPose(rig, plan.pose);
@@ -133,7 +135,7 @@ export function compileScene(plan: ScenePlan, rigs: Map<string, LoadedRig>): Sce
     const loaded = rigs.get(a.rig);
     if (!loaded) throw new Error(`compileScene: actor "${a.id}" needs rig "${a.rig}", which is not loaded`);
     const rt = prepareActor(a, loaded.rig, plan.seed);
-    const rng = new Rng(deriveSeed(plan.seed, `blink:${a.id}`));
+    const rng = new Rng(deriveSeed(plan.seed, `blink:${loaded.rig.charId ?? a.id}`));
     // Characters are sampled at characterFps, so a blink shorter than one
     // character frame can fall between two samples and silently never render.
     // Clamp it to just over one frame so every scheduled blink is always seen.

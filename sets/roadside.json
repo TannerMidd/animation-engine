@@ -115,5 +115,11 @@
         }
       }
     ]
+  },
+  "setId": "roadside",
+  "identity": {
+    "id": "house",
+    "version": "1.0.0",
+    "hash": "faa90d6e4611"
   }
 }

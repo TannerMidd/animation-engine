@@ -1,6 +1,6 @@
 import type {
   CastSummary, CheckResult, FacePlate, Health, JobEvent, JobSummary, LlmStatus, Look, PreviewInfo,
-  PropDefInfo, RigDoc, SceneDetail, SceneSummary, SetDescriptor, SetSummary, ShotList, Vocab,
+  PropDefInfo, RigDoc, SceneDetail, SceneSummary, SetDescriptor, SetSummary, ShotList, ShowInfo, Vocab,
 } from './types.ts';
 
 /** Thin typed wrappers over the engine server. */
@@ -26,6 +26,8 @@ const del = <T>(url: string) => call<T>(url, { method: 'DELETE' });
 export const api = {
   health: () => call<Health>('/api/health'),
   vocab: () => call<Vocab>('/api/vocab'),
+  show: () => call<ShowInfo>('/api/show'),
+  setActiveShow: (id: string) => put<{ ok: true }>('/api/show/active', { id }),
 
   scenes: () => call<SceneSummary[]>('/api/scenes'),
   scene: (name: string) => call<SceneDetail>(`/api/scenes/${name}`),

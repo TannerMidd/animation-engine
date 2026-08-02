@@ -1,5 +1,6 @@
 {
   "name": "doug",
+  "locks": [],
   "canvas": {
     "width": 200,
     "height": 400
@@ -522,5 +523,11 @@
   "voice": "Zira",
   "voiceRate": -2,
   "voiceRef": null,
-  "svg": "doug.svg"
+  "svg": "doug.svg",
+  "charId": "doug",
+  "identity": {
+    "id": "house",
+    "version": "1.0.0",
+    "hash": "faa90d6e4611"
+  }
 }

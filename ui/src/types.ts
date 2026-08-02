@@ -116,6 +116,12 @@ export interface LlmStatus {
   recommended: string | null;
 }
 
+/** The active identity profile and the alternatives on disk. */
+export interface ShowInfo {
+  active: { id: string; version: string; hash: string; name: string };
+  profiles: Array<{ id: string; name: string; version: string; hash: string }>;
+}
+
 export interface Health {
   ffmpeg: string | null;
   rhubarb: string | null;

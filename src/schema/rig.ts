@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { Look } from './look.ts';
+import { IdentityStamp } from './identity.ts';
 
 /**
  * Rhubarb Lip Sync's mouth shape alphabet.
@@ -104,6 +105,23 @@ export type IdleConfig = z.infer<typeof IdleConfig>;
  */
 const RigShape = z.object({
   name: z.string().min(1),
+  /**
+   * Stable identity, independent of the name.
+   *
+   * Every seeded stream that concerns this character — look rolls, voice
+   * minting, acting profile, per-scene blink phases — keys off this, so
+   * renaming a character changes their label and nothing else. Absent only on
+   * rigs that predate identity profiles; `anim migrate` assigns one.
+   */
+  charId: z.string().optional(),
+  /**
+   * Frozen properties, as dotted paths ("look.hair", "voice"). A locked path
+   * survives every regeneration: rerolls, migrations, and model proposals all
+   * copy the locked value forward instead of replacing it.
+   */
+  locks: z.array(z.string()).default([]),
+  /** Which identity profile last wrote this rig, for drift detection. */
+  identity: IdentityStamp.optional(),
   /** Puppet-local drawing box. Staging scales from this. */
   canvas: z.object({ width: z.number().positive(), height: z.number().positive() }),
   /** Origin point for staging — normally between the feet. */

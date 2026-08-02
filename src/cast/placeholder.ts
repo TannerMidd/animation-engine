@@ -380,6 +380,7 @@ export function buildPlaceholderRig(name: string, look?: Look): Rig {
     anchor: [W / 2, H],
     focus: [p.headCx, p.headCy],
     look: resolved,
+    locks: [],
     parts: buildParts(p),
     swapSets: [
       {

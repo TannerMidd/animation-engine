@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api.ts';
-import type { CastSummary, Health, SceneSummary, Vocab } from './types.ts';
+import type { CastSummary, Health, SceneSummary, ShowInfo, Vocab } from './types.ts';
 import { SceneView } from './components/SceneView.tsx';
 import { SetDesigner } from './components/SetDesigner.tsx';
 import { CastEditor } from './components/CastEditor.tsx';
@@ -35,6 +35,7 @@ export default function App() {
   const [cast, setCast] = useState<CastSummary[]>([]);
   const [vocab, setVocab] = useState<Vocab | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
+  const [show, setShow] = useState<ShowInfo | null>(null);
   const [booting, setBooting] = useState(true);
 
   const refreshScenes = useCallback(async () => {
@@ -48,8 +49,9 @@ export default function App() {
   useEffect(() => {
     void (async () => {
       try {
-        const [v] = await Promise.all([api.vocab(), refreshScenes(), refreshCast()]);
+        const [v, s] = await Promise.all([api.vocab(), api.show(), refreshScenes(), refreshCast()]);
         setVocab(v);
+        setShow(s);
       } finally {
         setBooting(false);
       }
@@ -57,6 +59,16 @@ export default function App() {
       void api.health().then(setHealth).catch(() => {});
     })();
   }, [refreshScenes, refreshCast]);
+
+  /**
+   * Switching the show identity re-derives everything downstream of it —
+   * previews, prompts, directing defaults — so the cheapest correct response
+   * is a full reload rather than chasing every stale panel by hand.
+   */
+  const switchShow = async (id: string) => {
+    await api.setActiveShow(id);
+    window.location.reload();
+  };
 
   // The engine probe finishes in the background — poll briefly until it lands.
   useEffect(() => {
@@ -97,6 +109,27 @@ export default function App() {
       <div className="w-48 shrink-0 flex flex-col border-r border-edge bg-panel">
         <div className="px-3 py-2.5 border-b border-edge">
           <div className="text-[12px] font-medium tracking-wide">animation engine</div>
+          {show && (
+            show.profiles.length > 1 ? (
+              <select
+                value={show.active.id}
+                onChange={(e) => void switchShow(e.target.value)}
+                title="Active show identity — governs style, register, and directing defaults"
+                className="mt-1 w-full bg-transparent text-[10px] text-ink-faint border border-edge rounded px-1 py-0.5 outline-none hover:text-ink"
+              >
+                {show.profiles.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name} v{p.version}</option>
+                ))}
+              </select>
+            ) : (
+              <div
+                className="mt-0.5 text-[10px] text-ink-faint truncate"
+                title={`Identity ${show.active.id}@${show.active.hash} — every render is stamped with this`}
+              >
+                show: {show.active.name}
+              </div>
+            )
+          )}
         </div>
 
         <nav className="flex gap-0.5 p-1 border-b border-edge">

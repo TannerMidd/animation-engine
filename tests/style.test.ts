@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { STYLES, getStyle, activeStyle } from '../src/style/index.ts';
+import { CLEAN, activeStyle } from '../src/style/index.ts';
 import { wobbleShape, amplitudeFor, rectPoints, ellipsePoints, drawShape } from '../src/style/wobble.ts';
 import { buildPlaceholderSvg } from '../src/cast/placeholder.ts';
 
-const marker = STYLES['marker']!;
-const clean = STYLES['clean']!;
+// The default identity's treatment — the house marker look, now profile-owned.
+const marker = activeStyle();
+const clean = CLEAN;
 
 /**
  * The wobble must be a pure function of geometry.
@@ -98,12 +99,14 @@ describe('puppets carry the style', () => {
   });
 });
 
-describe('style registry', () => {
-  it('defaults to the house style', () => {
-    expect(activeStyle().name).toBe('marker');
+describe('style ownership', () => {
+  it('takes the treatment from the active identity profile', () => {
+    expect(activeStyle().name).toBe('house');
+    expect(activeStyle().wobble).toBeGreaterThan(0);
   });
 
-  it('names the options on an unknown style', () => {
-    expect(() => getStyle('watercolour')).toThrow(/marker/);
+  it('keeps the clean baseline available for diffing', () => {
+    expect(CLEAN.wobble).toBe(0);
+    expect(CLEAN.grain).toBe(0);
   });
 });

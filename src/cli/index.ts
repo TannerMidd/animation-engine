@@ -17,6 +17,10 @@ import { checkScript, loadRigsForShotList } from '../pipeline/check.ts';
 import { renderScene } from '../pipeline/render.ts';
 import { readShotList, writeShotList, shotlistPath, writeScript } from '../pipeline/scene.ts';
 import { Ollama, pickModel } from '../llm/ollama.ts';
+import { initShow, loadProfile, listProfiles, activeProfileId, setActiveProfileId, compareProfiles } from '../show/store.ts';
+import { setActiveIdentity } from '../show/context.ts';
+import { identityHash, type ShowIdentity } from '../schema/identity.ts';
+import { planMigration, applyMigration } from '../show/migrate.ts';
 import { generateScript } from '../llm/script.ts';
 import { generateSet } from '../llm/set.ts';
 import { renderFrames } from '../render/capture.ts';
@@ -799,6 +803,99 @@ async function cmdDoctor() {
   console.log(`cast       ${names.length ? names.join(', ') : '(none yet)'}`);
 }
 
+// --- show identity --------------------------------------------------------
+
+async function cmdShowList(active: ShowIdentity) {
+  const profiles = await listProfiles();
+  const activeId = await activeProfileId();
+
+  if (!profiles.length) {
+    console.log(`No identity profiles yet — running on the built-in "${active.id}" defaults.`);
+    console.log(`Create the project profile with:  npm run anim -- migrate --apply`);
+    return;
+  }
+  for (const p of profiles) {
+    const marker = p.id === activeId ? '*' : ' ';
+    console.log(`${marker} ${p.id.padEnd(20)} ${p.name.padEnd(24)} v${p.version}  ${p.hash}`);
+  }
+  console.log(`\n* active. Switch with:  anim show use <id>`);
+}
+
+async function cmdShowUse(args: Args) {
+  const id = args._[0];
+  if (!id) throw new Error('usage: anim show use <id>');
+  await setActiveProfileId(id);
+  const identity = await loadProfile(id);
+  console.log(`Active show is now "${identity.name}" (${id} v${identity.version}, ${identityHash(identity)}).`);
+}
+
+async function cmdShowValidate() {
+  const profiles = await listProfiles();
+  if (!profiles.length) {
+    console.log('No profiles to validate.');
+    return;
+  }
+  // listProfiles already drops anything that fails to parse; loading each one
+  // again surfaces the errors it swallowed.
+  let bad = 0;
+  for (const p of profiles) {
+    try {
+      await loadProfile(p.id);
+      console.log(`ok   ${p.id}  v${p.version}  ${p.hash}`);
+    } catch (err) {
+      bad++;
+      console.log(`FAIL ${p.id}: ${(err as Error).message}`);
+    }
+  }
+  if (bad) process.exitCode = 1;
+}
+
+async function cmdShowCompare(args: Args) {
+  const [a, b] = args._;
+  if (!a || !b) throw new Error('usage: anim show compare <idA> <idB>   (fixtures/<id> works too)');
+  const diffs = compareProfiles(await loadProfile(a), await loadProfile(b));
+  if (!diffs.length) {
+    console.log('Identical.');
+    return;
+  }
+  for (const d of diffs) {
+    console.log(`${d.path}`);
+    console.log(`  ${a}: ${JSON.stringify(d.a)}`);
+    console.log(`  ${b}: ${JSON.stringify(d.b)}`);
+  }
+  console.log(`\n${diffs.length} differing field${diffs.length === 1 ? '' : 's'}.`);
+}
+
+/**
+ * Bring a pre-identity project under a profile.
+ *
+ * Dry-run by default; --apply writes. With git in the tree the visible diff and
+ * the rollback are both `git` — which is exactly why the repo exists.
+ */
+async function cmdMigrate(args: Args) {
+  const plan = await planMigration();
+
+  if (!plan.changes.length) {
+    console.log('Nothing to migrate — everything is already under the active identity.');
+    return;
+  }
+
+  console.log(`Migration against "${plan.identity.name}" (${plan.identity.id} v${plan.identity.version}):\n`);
+  for (const change of plan.changes) {
+    console.log(`  ${change.kind.padEnd(9)} ${change.target}`);
+    for (const action of change.actions) console.log(`             - ${action}`);
+  }
+
+  if (!args.flags['apply']) {
+    console.log(`\nDry run — nothing written. Apply with:  anim migrate --apply`);
+    return;
+  }
+
+  await applyMigration(plan);
+  console.log(`\nApplied ${plan.changes.length} change${plan.changes.length === 1 ? '' : 's'}.`);
+  console.log('Review with:  git diff    Roll back with:  git checkout -- .');
+}
+
 const HELP = `anim — script to limited-animation scene
 
   write "<premise>"      write a scene with the local model (needs Ollama)
@@ -828,6 +925,12 @@ const HELP = `anim — script to limited-animation scene
                          "sets preview <name>" renders it with characters in it
   voices                 list installed SAPI voices
   doctor                 check the toolchain
+  show                   list identity profiles; "show use <id>" switches,
+                         "show compare <a> <b>" diffs two, "show validate" checks all.
+                         Any command takes --show <id> for a one-off override
+                         (fixtures/<id> reaches the evaluation profiles).
+  migrate                bring a pre-identity project under a profile.
+                         Dry-run by default; --apply writes (review via git diff)
 
 Run via:  npm run anim -- <command>
 `;
@@ -839,7 +942,27 @@ async function main() {
 
   await fs.mkdir(OUT_DIR, { recursive: true });
 
+  // Identity first: everything downstream — style, prompts, directing defaults,
+  // seed streams — reads the active profile synchronously.
+  const identity = await initShow();
+  // `--show fixtures/<id>` (or any profile id) overrides for one invocation,
+  // which is how the evaluation renders the same scene under two identities.
+  if (typeof rest.flags['show'] === 'string') {
+    setActiveIdentity(await loadProfile(rest.flags['show']));
+  }
+
   switch (cmd) {
+    case 'show': {
+      const sub = rest._[0];
+      const subArgs = { _: rest._.slice(1), flags: rest.flags };
+      if (sub === 'list' || sub === undefined) return cmdShowList(identity);
+      if (sub === 'use') return cmdShowUse(subArgs);
+      if (sub === 'validate') return cmdShowValidate();
+      if (sub === 'compare') return cmdShowCompare(subArgs);
+      throw new Error(`unknown: anim show ${sub}`);
+    }
+    case 'migrate':
+      return cmdMigrate(rest);
     case 'cast': {
       const sub = rest._[0];
       const subArgs = { _: rest._.slice(1), flags: rest.flags };

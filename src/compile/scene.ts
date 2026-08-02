@@ -124,7 +124,11 @@ function buildTimeline(shots: ShotList, timings: Map<number, LineTiming>): Timed
 
 function prepareActor(shots: ShotList, member: ShotList['cast'][number], loaded: LoadedRig): ActorRt {
   const rig = loaded.rig;
-  const rng = new Rng(deriveSeed(shots.seed, `actor:${member.id}`));
+  // Streams key off the rig's stable id when it has one, so renaming a
+  // character — in the script and on disk — does not reshuffle their breathing
+  // phase or anything else seeded here. The scene-local id is only the
+  // fallback for ephemeral placeholders that were never saved.
+  const rng = new Rng(deriveSeed(shots.seed, `actor:${rig.charId ?? member.id}`));
 
   const x = shots.width * MARKS[member.mark];
   const y = shots.height * 0.97;
@@ -201,7 +205,7 @@ export function compileShotList(
 
   const durationSec = durationMs / 1000;
   for (const actor of actors) {
-    const rng = new Rng(deriveSeed(shots.seed, `blink:${actor.id}`));
+    const rng = new Rng(deriveSeed(shots.seed, `blink:${actor.rig.charId ?? actor.id}`));
     // A blink shorter than one character frame could fall between two samples
     // and silently never render, so clamp it to just over one.
     const blinkDur = Math.max(actor.rig.idle.blinkDuration, 1.001 / shots.characterFps);
