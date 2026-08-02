@@ -52,7 +52,7 @@ function foleyShots(scene: string, cards: boolean) {
         { type: 'enter', actor: 'alice', durationFrames: 6, to: { mark: 'SL' } },
         { type: 'move', actor: 'alice', to: { mark: 'SR' } },
       ]),
-      actionBeat('Alice sits.', 500, [{ type: 'sit', actor: 'alice' }]),
+      actionBeat('Alice sits.', 500, [{ type: 'sit', actor: 'alice', floor: true }]),
       actionBeat('Alice stands.', 500, [{ type: 'stand', actor: 'alice' }]),
       actionBeat('Alice looks left.', 300, [{ type: 'look', actor: 'alice', direction: 'left' }]),
       actionBeat('Alice exits.', 700, [{ type: 'exit', actor: 'alice' }]),
@@ -77,6 +77,7 @@ const standingState: CompiledStageState = {
   lookDirection: null,
   turnTarget: null,
   turnDirection: null,
+  seatedOn: null,
   heldPropId: null,
   heldHand: null,
 };

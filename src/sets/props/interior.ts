@@ -1,6 +1,22 @@
 import { type PropDef, num, str, rect, ellipse, line, poly, stroke, r } from './types.ts';
 import { escapeXml } from './structure.ts';
 
+function chairInteraction(params: Record<string, number | string | boolean>) {
+  const height = typeof params['height'] === 'number' && Number.isFinite(params['height'])
+    ? params['height']
+    : 90;
+  const width = typeof params['width'] === 'number' && Number.isFinite(params['width'])
+    ? params['width']
+    : 112;
+  return {
+    portable: false,
+    bounds: { x: -width / 2, y: -height - 90, width, height: height + 90 },
+    handles: [
+      { id: 'seat', label: 'Seat cushion', kind: 'seat' as const, x: 0, y: -height - 6, radius: width * 0.42, normal: { x: 0, y: -1 } },
+    ],
+  };
+}
+
 /**
  * Interior furniture: office, home and bar.
  *
@@ -82,17 +98,28 @@ export const INTERIOR_PROPS: Record<string, PropDef> = {
 
   chair: {
     label: 'Office chair',
-    tags: ['office', 'interior'],
-    params: [{ key: 'height', label: 'Seat height', type: 'number', default: 90, min: 40, max: 180, step: 5 }],
+    tags: ['office', 'interior', 'seat'],
+    params: [
+      { key: 'height', label: 'Seat height', type: 'number', default: 90, min: 40, max: 180, step: 5 },
+      { key: 'width', label: 'Seat width', type: 'number', default: 112, min: 70, max: 180, step: 4 },
+    ],
+    interaction: chairInteraction({ height: 90, width: 112 }),
+    interactionFor: chairInteraction,
     render(ctx) {
       const { palette: p } = ctx;
       const seat = num(ctx, 'height', 90);
-      const w = 74;
+      const w = num(ctx, 'width', 112);
 
       let out = line(p, -34, 0, 34, 0, p.metalDark, 5);
       out += rect(p, -5, -seat, 10, seat, p.metalDark);
       out += rect(p, -w / 2, -seat - 14, w, 16, p.fabric, { rx: 6 });
-      out += rect(p, -w / 2 + 6, -seat - 90, w - 12, 78, p.fabric, { rx: 8 });
+      out += rect(p, -w / 2 + 10, -seat - 90, w - 20, 78, p.fabric, { rx: 8 });
+      // Arm rests remain visible around a seated torso, making the chair/actor
+      // relationship legible even though mid-layer furniture renders behind.
+      out += line(p, -w / 2 + 8, -seat - 48, -w / 2 + 8, -seat - 16, p.metalDark, 6);
+      out += line(p, -w / 2 + 8, -seat - 48, -w / 2 + 31, -seat - 48, p.metalDark, 6);
+      out += line(p, w / 2 - 8, -seat - 48, w / 2 - 8, -seat - 16, p.metalDark, 6);
+      out += line(p, w / 2 - 31, -seat - 48, w / 2 - 8, -seat - 48, p.metalDark, 6);
       return out;
     },
   },

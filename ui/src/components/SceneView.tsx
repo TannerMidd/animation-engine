@@ -152,6 +152,9 @@ export function SceneView({
   const setPropInstances = setDescriptor && setDescriptor.name === setName
     ? Object.values(setDescriptor.layers).flat()
     : [];
+  const seatablePropInstances = setDescriptor && setDescriptor.name === setName
+    ? [...setDescriptor.layers.back, ...setDescriptor.layers.mid]
+    : [];
   const propTypeCounts = new Map<string, number>();
   for (const instance of setPropInstances) {
     propTypeCounts.set(instance.prop, (propTypeCounts.get(instance.prop) ?? 0) + 1);
@@ -159,11 +162,22 @@ export function SceneView({
   const addressablePropRef = (instance: (typeof setPropInstances)[number]): string | null =>
     instance.id ?? (propTypeCounts.get(instance.prop) === 1 ? instance.prop : null);
   const propTargets = setPropInstances
-    .filter((instance) => propDefs.find((def) => def.key === instance.prop)?.interaction)
+    .filter((instance) => propDefs.find((def) => def.key === instance.prop)?.interaction?.handles.some((handle) =>
+      handle.kind === 'contact' || handle.kind === 'control' || handle.kind === 'grip'))
     .map(addressablePropRef)
     .filter((ref): ref is string => Boolean(ref));
   const portablePropTargets = setPropInstances
     .filter((instance) => propDefs.find((def) => def.key === instance.prop)?.interaction?.portable)
+    .map(addressablePropRef)
+    .filter((ref): ref is string => Boolean(ref));
+  const placementTargets = setPropInstances
+    .filter((instance) => propDefs.find((def) => def.key === instance.prop)?.interaction?.handles.some((handle) =>
+      handle.kind === 'placement'))
+    .map(addressablePropRef)
+    .filter((ref): ref is string => Boolean(ref));
+  const seatTargets = seatablePropInstances
+    .filter((instance) => propDefs.find((def) => def.key === instance.prop)?.interaction?.handles.some((handle) =>
+      handle.kind === 'seat'))
     .map(addressablePropRef)
     .filter((ref): ref is string => Boolean(ref));
 
@@ -594,6 +608,8 @@ ${summary}`)) return;
                 vocab={vocab}
                 propTargets={propTargets}
                 portablePropTargets={portablePropTargets}
+                placementTargets={placementTargets}
+                seatTargets={seatTargets}
                 expressionsFor={expressionsFor}
                 onChange={(i, next) => void editBeat(i, next)}
                 onCastChange={(actorId, changes) => void editCastMember(actorId, changes)}

@@ -6,13 +6,14 @@ const EDITABLE_ACTIONS = [
   'reach', 'pick_up', 'put_down', 'tap',
 ] as const;
 
-function newAction(type: StageAction['type'], actor: string, propRef = 'prop-id'): StageAction {
+function newAction(type: StageAction['type'], actor: string, propRef?: string): StageAction {
   if (type === 'move') return { type, actor, to: { mark: 'CENTER' } };
   if (type === 'enter') return { type, actor, to: { mark: 'CENTER' } };
+  if (type === 'sit') return propRef ? { type, actor, seat: propRef } : { type, actor };
   if (type === 'look' || type === 'turn') return { type, actor, direction: 'front' };
-  if (type === 'reach') return { type, actor, target: propRef };
-  if (type === 'pick_up' || type === 'put_down') return { type, actor, prop: propRef };
-  if (type === 'tap') return { type, actor, target: propRef, count: 1 };
+  if (type === 'reach') return { type, actor, target: propRef ?? 'prop-id' };
+  if (type === 'pick_up' || type === 'put_down') return { type, actor, prop: propRef ?? 'prop-id' };
+  if (type === 'tap') return { type, actor, target: propRef ?? 'prop-id', count: 1 };
   return { type, actor };
 }
 
@@ -24,7 +25,7 @@ function newAction(type: StageAction['type'], actor: string, propRef = 'prop-id'
  * vocal delivery, since the voice engine's emotion controls are driven from it.
  */
 export function BeatInspector({
-  beat, index, cast, vocab, propTargets = [], portablePropTargets = [], expressionsFor, onChange, onCastChange,
+  beat, index, cast, vocab, propTargets = [], portablePropTargets = [], placementTargets = [], seatTargets = [], expressionsFor, onChange, onCastChange,
 }: {
   beat: Beat | null;
   index: number | null;
@@ -34,6 +35,9 @@ export function BeatInspector({
   propTargets?: string[];
   /** Addressable contact props that may be attached to an actor. */
   portablePropTargets?: string[];
+  placementTargets?: string[];
+  /** Addressable set props with a semantic seat handle. */
+  seatTargets?: string[];
   /** Expressions the given actor's rig actually has. */
   expressionsFor: (actorId: string) => string[];
   onChange: (index: number, next: Beat) => void;
@@ -124,8 +128,13 @@ export function BeatInspector({
                       options={EDITABLE_ACTIONS}
                       onChange={(value) => {
                         const type = value as StageAction['type'];
-                        const refs = type === 'pick_up' || type === 'put_down' ? portablePropTargets : propTargets;
-                        editAction(actionIndex, newAction(type, action.actor, refs[0]));
+                        const refs = type === 'sit'
+                          ? seatTargets
+                          : type === 'pick_up' || type === 'put_down'
+                            ? portablePropTargets
+                            : propTargets;
+                        const ref = type === 'sit' && refs.length !== 1 ? undefined : refs[0];
+                        editAction(actionIndex, newAction(type, action.actor, ref));
                       }}
                     />
                     <Select
@@ -167,6 +176,17 @@ export function BeatInspector({
                     </div>
                   )}
 
+                  {action.type === 'sit' && (
+                    <Select
+                      value={action.floor ? '@floor' : (action.seat ?? '')}
+                      options={['', ...seatTargets, '@floor']}
+                      onChange={(seat) => editAction(actionIndex, seat === '@floor'
+                        ? { ...action, seat: undefined, floor: true }
+                        : { ...action, seat: seat || undefined, floor: undefined })}
+                      className="w-full"
+                    />
+                  )}
+
                   {(action.type === 'reach' || action.type === 'tap') && (
                     propTargets.length ? (
                       <Select
@@ -202,15 +222,28 @@ export function BeatInspector({
                   )}
 
                   {action.type === 'put_down' && (
-                    <Select
-                      value={action.to?.mark ?? ''}
-                      options={['', ...(vocab?.marks ?? ['FAR_L', 'SL', 'CENTER', 'SR', 'FAR_R'])]}
-                      onChange={(mark) => editAction(actionIndex, {
-                        ...action,
-                        to: mark ? { mark: mark as CastMember['mark'] } : undefined,
-                      })}
-                      className="w-full"
-                    />
+                    <div className="grid grid-cols-2 gap-1">
+                      <Select
+                        value={action.target ?? ''}
+                        options={['', ...placementTargets]}
+                        onChange={(target) => editAction(actionIndex, {
+                          ...action,
+                          target: target || undefined,
+                          to: target ? undefined : action.to,
+                        })}
+                        className="w-full"
+                      />
+                      <Select
+                        value={action.target ? '' : (action.to?.mark ?? '')}
+                        options={['', ...(vocab?.marks ?? ['FAR_L', 'SL', 'CENTER', 'SR', 'FAR_R'])]}
+                        onChange={(mark) => editAction(actionIndex, {
+                          ...action,
+                          target: mark ? undefined : action.target,
+                          to: mark ? { mark: mark as CastMember['mark'] } : undefined,
+                        })}
+                        className="w-full"
+                      />
+                    </div>
                   )}
 
                   {action.type === 'tap' && (
@@ -286,7 +319,9 @@ export function BeatInspector({
                     <Select
                       value={member.pose ?? 'IDLE'}
                       options={['IDLE', 'SIT']}
-                      onChange={(pose) => onCastChange?.(member.id, { pose })}
+                      onChange={(pose) => onCastChange?.(member.id, pose === 'SIT'
+                        ? { pose, seat: seatTargets.length === 1 ? seatTargets[0] : null }
+                        : { pose, seat: null })}
                     />
                     <NumberInput
                       value={member.depth ?? 0}
@@ -296,6 +331,16 @@ export function BeatInspector({
                       onChange={(depth) => onCastChange?.(member.id, { depth: Math.max(-1, Math.min(1, depth)) })}
                     />
                   </div>
+                  {member.pose === 'SIT' && (
+                    <div className="mt-1">
+                      <Select
+                        value={member.seat ?? ''}
+                        options={['', ...seatTargets]}
+                        onChange={(seat) => onCastChange?.(member.id, { seat: seat || null })}
+                        className="w-full"
+                      />
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-1 mt-1">
                     <Select
                       value={member.heldProp ?? ''}

@@ -24,6 +24,24 @@ For interaction-heavy proof scenes, select the checked-in `production-office` se
 `work-surface` contact handle; screenplay references to “the table” resolve to the single
 desk only when no direct table match exists.
 
+Seating is always explicit. A screenplay direction such as `VERN sits in chair-host.`
+lowers to `{ "type": "sit", "actor": "vern", "seat": "chair-host" }`; standing must
+occur before that actor moves or exits. Use `sits on the floor` only when floor-seating is
+intentional. Phrases such as `sits at the desk` do not guess which nearby chair was meant and
+will fail validation until the creator selects a seat in the Beat inspector. Foreground seats
+are excluded because the current whole-prop depth model would draw them over the performer.
+
+Surface placement is explicit too. `MEL puts down the mug on the desk.` binds the release to
+the desk's semantic placement handle, so the mug lands on the desktop instead of a generic
+floor-adjacent fallback. The Beat inspector exposes valid placement targets separately from
+the portable prop being carried.
+
+Blocking may use named marks or explicit stage coordinates. For exact proof-scene staging,
+`VERN moves to x 760.` preserves the actor's current Y while placing the root at that authored
+X. `x 845, y 572, depth -1` also authors an upstage perspective move. The same position remains
+directly editable or draggable in the scene UI, and carried props accept explicit `(x, y)`
+release coordinates when a creator needs a particular clear spot on a surface.
+
 ## 2. Perform the dialogue
 
 Select a line and open **Perform**.

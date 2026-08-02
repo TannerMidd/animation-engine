@@ -16,7 +16,7 @@ import { activeIdentity } from '../show/context.ts';
 import { saveRig, loadRig, listRigs, validateRig, type LoadedRig } from '../cast/store.ts';
 import { compileScene, DEFAULT_PLAN, type ActorPlan, type ScenePlan } from '../compile/index.ts';
 import { estimateLineMs } from '../compile/scene.ts';
-import { checkScript, loadRigsForShotList } from '../pipeline/check.ts';
+import { checkScript, loadRigsForShotList, validateCompiledStaging } from '../pipeline/check.ts';
 import {
   runProductionPreflight,
   type ProductionPreflightNote,
@@ -451,6 +451,7 @@ async function cmdCheck(args: Args) {
     scene,
     seed: num(args.flags, 'seed', 7),
     resting: typeof args.flags['resting'] === 'string' ? args.flags['resting'] : 'DEADPAN',
+    set: typeof args.flags['set'] === 'string' ? args.flags['set'] : null,
   });
 
   const counts = { line: 0, pause: 0, action: 0 };
@@ -468,6 +469,7 @@ async function cmdCheck(args: Args) {
   console.log(`  runtime  ~${(ms / 1000).toFixed(0)}s estimated\n`);
 
   const errors = validateShotList(shots, buildCapabilityManifest(rigs));
+  if (!errors.length) errors.push(...await validateCompiledStaging(shots, rigs));
   if (errors.length) {
     console.log('  NOT RENDERABLE:');
     for (const e of errors) console.log(`    - ${e}`);
@@ -489,7 +491,10 @@ async function cmdCheck(args: Args) {
   });
 
   console.log(`\n  Looks renderable. Next:`);
-  console.log(`    npm run anim -- render ${path.basename(scriptPath)} --set office`);
+  console.log(
+    `    npm run anim -- render ${path.basename(scriptPath)} --set ` +
+    `${typeof args.flags['set'] === 'string' ? args.flags['set'] : 'office'}`,
+  );
 }
 
 /**

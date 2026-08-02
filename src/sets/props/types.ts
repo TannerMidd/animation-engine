@@ -52,7 +52,7 @@ export interface PropLocalBounds {
   height: number;
 }
 
-export type PropHandleKind = 'grip' | 'contact' | 'placement' | 'control';
+export type PropHandleKind = 'grip' | 'contact' | 'placement' | 'control' | 'seat';
 
 /**
  * A stable interaction point in the prop's authored local coordinates.
@@ -87,6 +87,8 @@ export interface PropDef {
   spanning?: boolean;
   /** Optional local-space bounds and stable handles for staging/contact authoring. */
   interaction?: PropInteractionGeometry;
+  /** Resolve parameter-bound geometry for a concrete set instance. */
+  interactionFor?(params: Record<string, ParamValue>): PropInteractionGeometry;
   render(ctx: PropContext): string;
 }
 

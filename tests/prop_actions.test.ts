@@ -75,6 +75,28 @@ function frameAt(scene: CompiledScene, ms: number) {
 }
 
 describe('structured dynamic prop actions', () => {
+  it('places a held prop on a semantic surface target', () => {
+    const set = propSet([
+      { id: 'desk-main', prop: 'desk', x: 640, y: 540 },
+      { id: 'hero-mug', prop: 'mug', x: 640, y: 540 },
+    ]);
+    const shots = shotsFor([
+      actionBeat('pickup-surface', 'Alice picks up the mug.', 1_000, [
+        { type: 'pick_up', actor: 'alice', prop: 'hero-mug' },
+      ]),
+      actionBeat('putdown-surface', 'Alice puts the mug on the desk.', 1_000, [
+        { type: 'put_down', actor: 'alice', prop: 'hero-mug', target: 'desk-main' },
+      ]),
+    ]);
+    const compiled = compileShotList(shots, testRigs(['alice']), new Map(), null, set);
+    expect(frameAt(compiled, 1_950).props?.['hero-mug']).toMatchObject({
+      mode: 'world',
+      heldBy: null,
+      x: 640,
+      y: 444,
+    });
+  });
+
   it('supports a hidden actor entering with an initially carried stable prop', () => {
     const set = propSet([{ id: 'hero-mug', prop: 'mug', x: 640, y: 540 }]);
     const base = shotsFor([

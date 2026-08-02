@@ -9,9 +9,9 @@
     "marginY": 220,
     "walkable": {
       "x": 120,
-      "y": 590,
+      "y": 566,
       "width": 1040,
-      "height": 130
+      "height": 154
     }
   },
   "layers": {

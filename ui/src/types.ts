@@ -15,6 +15,7 @@ export interface CastMember {
   position?: { x: number; y: number } | null;
   depth?: number;
   pose?: string;
+  seat?: string | null;
   heldProp?: string | null;
   heldHand?: 'left' | 'right' | null;
   resting: string;
@@ -42,6 +43,10 @@ export interface StageAction {
   from?: { mark?: Mark; x?: number; y?: number; depth?: number };
   to?: { mark?: Mark; x?: number; y?: number; depth?: number };
   target?: string;
+  /** Addressable set prop with a semantic seat handle. */
+  seat?: string;
+  /** Explicit intentional floor-seating. */
+  floor?: boolean;
   direction?: 'left' | 'right' | 'front';
   prop?: string;
   count?: number;
@@ -214,7 +219,7 @@ export interface PropDefInfo {
     handles: Array<{
       id: string;
       label: string;
-      kind: 'grip' | 'contact' | 'placement' | 'control';
+      kind: 'grip' | 'contact' | 'placement' | 'control' | 'seat';
       x: number;
       y: number;
       radius: number;

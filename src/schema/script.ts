@@ -104,7 +104,14 @@ export const StageAction = z.discriminatedUnion('type', [
   z.object({ type: z.literal('enter'), ...ActorAction, from: StagePosition.optional(), to: StagePosition.optional() }),
   z.object({ type: z.literal('exit'), ...ActorAction, to: StagePosition.optional() }),
   z.object({ type: z.literal('move'), ...ActorAction, to: StagePosition }),
-  z.object({ type: z.literal('sit'), ...ActorAction }),
+  z.object({
+    type: z.literal('sit'),
+    ...ActorAction,
+    /** Stable set-prop id (or unambiguous prop kind) that declares a seat handle. */
+    seat: z.string().min(1).optional(),
+    /** Explicitly preserve floor-seating when a furnished set also contains seats. */
+    floor: z.boolean().optional(),
+  }),
   z.object({ type: z.literal('stand'), ...ActorAction }),
   z.object({ type: z.literal('look'), ...ActorAction, ...AttentionTarget }),
   z.object({ type: z.literal('turn'), ...ActorAction, ...AttentionTarget }),
@@ -114,6 +121,8 @@ export const StageAction = z.discriminatedUnion('type', [
     type: z.literal('put_down'),
     ...ActorAction,
     prop: z.string().min(1),
+    /** Addressable set prop with a semantic placement handle (for example, a desk). */
+    target: z.string().min(1).optional(),
     /** Optional authored placement; omitted uses a reachable point beside the actor. */
     to: StagePosition.optional(),
   }),
@@ -178,6 +187,8 @@ export const ShotCastMember = z.object({
   depth: z.number().min(-1).max(1).default(0),
   /** Persistent base pose beneath speech gestures. */
   pose: z.string().min(1).default('IDLE'),
+  /** Addressable seat occupied at frame zero; requires the virtual SIT pose. */
+  seat: z.string().min(1).nullable().default(null),
   /** Optional portable set prop already carried when the scene begins or the actor enters. */
   heldProp: z.string().min(1).nullable().default(null),
   heldHand: z.enum(['left', 'right']).nullable().default(null),

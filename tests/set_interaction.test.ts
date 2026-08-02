@@ -63,6 +63,7 @@ describe('production office proof set', () => {
     const set = await loadSet('production-office');
     expect(set.name).toBe('production-office');
     expect(validateSet(set)).toEqual([]);
+    expect(set.layout.walkable).toMatchObject({ y: 566, height: 154 });
 
     const props = resolveSetProps(set);
     expect(props.every((prop) => prop.stableId)).toBe(true);
@@ -83,6 +84,16 @@ describe('production office proof set', () => {
     expect(byId.get('mug-hero')?.interaction?.portable).toBe(true);
     expect(byId.get('laptop-main')?.interaction?.portable).toBe(true);
     expect(byId.get('monitor-main')?.interaction?.portable).toBe(false);
+    const hostChair = byId.get('chair-host')!;
+    const guestChair = byId.get('chair-guest')!;
+    const hostSeat = interactionHandle(hostChair, 'seat', 'production office seating');
+    const guestSeat = interactionHandle(guestChair, 'seat', 'production office seating');
+    expect(propHandlePoint(hostChair, hostSeat)).toEqual({ x: 845, y: 470 });
+    expect(propHandlePoint(guestChair, guestSeat)).toEqual({ x: 430, y: 515.5 });
+    expect(hostChair.interaction?.bounds).toMatchObject({ x: -56, width: 112 });
+    expect(hostSeat.radius).toBeCloseTo(47.04, 5);
+    expect(() => interactionHandle(resolvePropReference('desk-main', props, 'desk seating'), 'seat', 'desk seating'))
+      .toThrow(/no seat handle/i);
 
     const rendered = renderSet(set);
     expect(rendered.back).toContain('data-prop-id="desk-main"');

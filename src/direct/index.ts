@@ -16,6 +16,7 @@ import {
   type ShotPurpose,
   type Mark,
   type StageAction,
+  type StagePosition,
   type CapabilityManifest,
 } from '../schema/script.ts';
 
@@ -199,7 +200,8 @@ interface ParsedStageActions {
 function actionCoverage(actions: ParsedStageActions): { shot: Shot; focus: string[] } {
   const actors = [...new Set(actions.stage.map((action) => action.actor))];
   const spatial = actions.stage.some((action) =>
-    action.type === 'enter' || action.type === 'exit' || action.type === 'move');
+    action.type === 'enter' || action.type === 'exit' || action.type === 'move' ||
+    action.type === 'sit' || action.type === 'stand');
   if (actions.unsupported.length || spatial || actors.length !== 1) {
     return { shot: 'WIDE', focus: [] };
   }
@@ -252,9 +254,23 @@ function markIn(text: string): Mark | undefined {
   return undefined;
 }
 
+function coordinatesIn(text: string): StagePosition | undefined {
+  const pair = text.match(/\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)/);
+  if (pair) return { x: Number(pair[1]), y: Number(pair[2]) };
+  const x = text.match(/\bx\s*=?\s*(-?\d+(?:\.\d+)?)/i);
+  const y = text.match(/\by\s*=?\s*(-?\d+(?:\.\d+)?)/i);
+  const depth = text.match(/\bdepth\s*=?\s*(-?\d+(?:\.\d+)?)/i);
+  if (!x && !y && !depth) return undefined;
+  return {
+    ...(x ? { x: Number(x[1]) } : {}),
+    ...(y ? { y: Number(y[1]) } : {}),
+    ...(depth ? { depth: Number(depth[1]) } : {}),
+  };
+}
+
 function objectIn(tail: string): string {
   const cleaned = tail
-    .replace(/^\s*(?:at|for|toward|towards|to|the|a|an|his|her|their|down|up|on)\s+/i, '')
+    .replace(/^\s*(?:(?:at|for|toward|towards|to|in|into|the|a|an|his|her|their|down|up|on)\s+)+/i, '')
     .split(/[.,;!?]/, 1)[0]!
     // Placement language describes where the object goes, not part of its
     // identity. "puts down the mug on the desk" must still resolve `mug`.
@@ -262,6 +278,20 @@ function objectIn(tail: string): string {
     .replace(/\b(?:twice|three times|once)\b.*$/i, '')
     .trim();
   return cleaned.split(/\s+/).slice(0, 5).join(' ') || 'object';
+}
+
+function seatingIn(tail: string): Pick<Extract<StageAction, { type: 'sit' }>, 'seat' | 'floor'> {
+  if (/\b(?:floor|ground)\b/i.test(tail)) return { floor: true };
+  if (!/\b(?:in|into|on|at)\b/i.test(tail)) return {};
+  const seat = objectIn(tail);
+  return seat === 'object' ? {} : { seat };
+}
+
+function placementTargetIn(tail: string): string | undefined {
+  const match = tail.match(/\b(?:on|onto|at)\s+(.+?)(?=\s+(?:and|then)\b|[.,;!?]|$)/i);
+  if (!match?.[1]) return undefined;
+  const target = objectIn(match[1]);
+  return target === 'object' ? undefined : target;
 }
 
 /**
@@ -321,15 +351,16 @@ export function stageActionsFor(
         stage.push({ type: 'exit', actor });
         break;
       case 'move': {
+        const coordinates = coordinatesIn(tail);
         const toward = targetActor ? marks.get(targetActor) : undefined;
         const current = marks.get(actor) ?? 'CENTER';
         const mark = markIn(tail) ?? toward ?? (current === 'CENTER' ? 'SL' : 'CENTER');
-        stage.push({ type: 'move', actor, to: { mark } });
-        marks.set(actor, mark);
+        stage.push({ type: 'move', actor, to: coordinates ?? { mark } });
+        if (!coordinates) marks.set(actor, mark);
         break;
       }
       case 'sit':
-        stage.push({ type: 'sit', actor });
+        stage.push({ type: 'sit', actor, ...seatingIn(tail) });
         break;
       case 'stand':
         stage.push({ type: 'stand', actor });
@@ -346,9 +377,18 @@ export function stageActionsFor(
       case 'pick_up':
         stage.push({ type: 'pick_up', actor, prop: objectIn(tail) });
         break;
-      case 'put_down':
-        stage.push({ type: 'put_down', actor, prop: objectIn(tail) });
+      case 'put_down': {
+        const to = coordinatesIn(tail);
+        const target = to ? undefined : placementTargetIn(tail);
+        stage.push({
+          type: 'put_down',
+          actor,
+          prop: objectIn(tail),
+          ...(target ? { target } : {}),
+          ...(to ? { to } : {}),
+        });
         break;
+      }
       case 'tap':
         stage.push({
           type: 'tap',
@@ -646,6 +686,7 @@ export function autoDirect(
     position: null,
     depth: 0,
     pose: 'IDLE',
+    seat: null,
     heldProp: null,
     heldHand: null,
     resting,
@@ -654,6 +695,8 @@ export function autoDirect(
   const authoredMarks = new Map(cast.map((member) => [member.id, member.mark]));
   /** Actors seen before an ENTER; used to derive correct initial visibility. */
   const appeared = new Set<string>();
+  /** Visibility after the most recently directed stage action. */
+  const visibleNow = new Set(names);
 
   const beats: ShotBeat[] = [];
   let lastSpeaker: string | null = null;
@@ -664,8 +707,8 @@ export function autoDirect(
   const rhythm = activeIdentity().editorial.rhythm;
   /** The expression of the previous line beat, for the aftershock pause. */
   let lastLineExpression: string | null = null;
-  /** Everyone who isn't speaking, for reaction shots. */
-  const others = (speaker: string) => names.filter((n) => n !== speaker);
+  /** On-screen listeners only; exited cast must not receive reaction coverage. */
+  const others = (speaker: string) => names.filter((n) => n !== speaker && visibleNow.has(n));
 
   for (const el of screenplay.elements) {
     switch (el.kind) {
@@ -683,6 +726,8 @@ export function autoDirect(
             const member = cast.find((c) => c.id === action.actor);
             if (member) member.visible = false;
           }
+          if (action.type === 'enter') visibleNow.add(action.actor);
+          if (action.type === 'exit') visibleNow.delete(action.actor);
           appeared.add(action.actor);
         }
         beats.push({
@@ -713,8 +758,8 @@ export function autoDirect(
         // before the current speaker, so prefer them; picking any non-speaker
         // lands the reaction on a bystander instead of on the target.
         const target =
-          (priorSpeaker && priorSpeaker !== lastSpeaker ? priorSpeaker : null) ??
-          (lastSpeaker ? others(lastSpeaker)[0] : names[0]);
+          (priorSpeaker && priorSpeaker !== lastSpeaker && visibleNow.has(priorSpeaker) ? priorSpeaker : null) ??
+          (lastSpeaker ? (others(lastSpeaker)[0] ?? (visibleNow.has(lastSpeaker) ? lastSpeaker : null)) : names.find((name) => visibleNow.has(name)));
 
         // The aftershock: a pause following a loud line stretches, and the
         // camera goes to whoever the line landed on. The silence after the
@@ -843,7 +888,11 @@ export function validateShotList(shots: ShotList, manifest: CapabilityManifest):
     if (!caps.expressions.includes(member.resting)) {
       errors.push(`"${member.id}" resting expression "${member.resting}" does not exist on rig "${member.rig}"`);
     }
-    if (!caps.poses.includes(member.pose)) {
+    if (member.pose === 'SIT') {
+      if (!member.seat) errors.push(`"${member.id}" starts in SIT without an initial seat target`);
+    } else if (member.seat) {
+      errors.push(`"${member.id}" has initial seat "${member.seat}" but pose "${member.pose}" is not SIT`);
+    } else if (!caps.poses.includes(member.pose)) {
       errors.push(`"${member.id}" initial pose "${member.pose}" does not exist on rig "${member.rig}"`);
     }
   }
@@ -911,6 +960,14 @@ export function validateShotList(shots: ShotList, manifest: CapabilityManifest):
             errors.push(`${actionAt} needs a cast target or direction`);
           } else if (action.target && !ids.has(action.target)) {
             errors.push(`${actionAt} targets "${action.target}", who is not in the cast`);
+          }
+        }
+
+        if (action.type === 'sit') {
+          if (action.seat && action.floor) {
+            errors.push(`${actionAt} cannot target both seat "${action.seat}" and the floor`);
+          } else if (!action.seat && !action.floor) {
+            errors.push(`${actionAt} needs an explicit seat target or floor=true`);
           }
         }
 

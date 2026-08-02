@@ -1,10 +1,12 @@
 import { parseScript } from '../parse/index.ts';
 import { autoDirect, buildCapabilityManifest, validateShotList } from '../direct/index.ts';
-import { estimateLineMs } from '../compile/scene.ts';
+import { compileShotList, estimateLineMs, LINE_TAIL_MS } from '../compile/scene.ts';
 import { buildPlaceholderRig, buildPlaceholderSvg } from '../cast/placeholder.ts';
 import { createRig } from '../cast/authoring.ts';
 import { loadRig, listRigs, type LoadedRig } from '../cast/store.ts';
 import type { Screenplay, ShotList } from '../schema/script.ts';
+import { loadSet } from '../sets/index.ts';
+import type { LineTiming } from '../voice/index.ts';
 
 /**
  * Parse, direct and validate — without rendering anything.
@@ -98,14 +100,46 @@ export async function checkScript(source: string, opts: CheckOptions): Promise<C
     return { ...empty, newCharacters, rigs, errors: [(err as Error).message] };
   }
 
+  const errors = validateShotList(shots, buildCapabilityManifest(rigs));
+  if (!errors.length) errors.push(...await validateCompiledStaging(shots, rigs));
   return {
     ...empty,
     shots,
     rigs,
     newCharacters,
-    errors: validateShotList(shots, buildCapabilityManifest(rigs)),
+    errors,
     ...summarise(shots),
   };
+}
+
+/** Run the real staging compiler with cheap estimated speech clocks. */
+export async function validateCompiledStaging(
+  shots: ShotList,
+  rigs: Map<string, LoadedRig>,
+): Promise<string[]> {
+  let set = null;
+  if (shots.set) {
+    try {
+      set = await loadSet(shots.set);
+    } catch (error) {
+      return [(error as Error).message];
+    }
+  }
+  const timings = new Map<number, LineTiming>();
+  shots.beats.forEach((beat, index) => {
+    if (beat.kind !== 'line') return;
+    timings.set(index, {
+      audio: '',
+      durationMs: Math.max(1, estimateLineMs(beat.text) - LINE_TAIL_MS),
+      cues: [],
+    });
+  });
+  try {
+    compileShotList(shots, rigs, timings, null, set);
+    return [];
+  } catch (error) {
+    return [(error as Error).message];
+  }
 }
 
 /** Beat counts and an estimated runtime, for a shot list from any source. */

@@ -2,7 +2,9 @@
 
 INT. SOFTWARE TEAM OFFICE - MORNING
 
-VERN sits down at the desk.
+VERN moves to x 845, y 572, depth -1.
+
+VERN sits in chair-host.
 
 MEL enters and moves to center.
 
@@ -28,7 +30,7 @@ MEL
 (smug)
 Leadership can no longer see what engineering does.
 
-MEL puts down the mug on the desk and taps the monitor twice.
+MEL puts down the mug at (535, 470) and taps the monitor twice.
 
 MEL
 (cheerful)
@@ -64,8 +66,10 @@ That's why it's proactive.
 
 MEL exits.
 
-VERN moves to center and taps the laptop three times.
+VERN stands up, moves to x 730, and taps the laptop three times.
 
 VERN
 (deadpan)
 Scheduling incident.
+
+[BEAT 900]

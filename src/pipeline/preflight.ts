@@ -870,10 +870,13 @@ export function evaluateProductionPreflight(input: ProductionPreflightInput): Pr
   inspectWalkableBlocking(input, notes);
 
   const hasPropActions = shots.beats.some((beat) => (
-    beat.kind === 'action' && beat.stage.some((action) => PROP_STAGE_ACTIONS.has(action.type))
+    beat.kind === 'action' && beat.stage.some((action) =>
+      PROP_STAGE_ACTIONS.has(action.type) || (action.type === 'sit' && Boolean(action.seat)),
+    )
   ));
   const hasInitialHeldProps = shots.cast.some((member) => member.heldProp !== null);
-  if (hasPropActions || hasInitialHeldProps) {
+  const hasInitialSeats = shots.cast.some((member) => member.seat !== null);
+  if (hasPropActions || hasInitialHeldProps || hasInitialSeats) {
     if (!shots.set) {
       note(notes, 'error', 'prop-action-set-missing', 'structured prop actions and initial carried props require an active set');
     } else if (input.setError) {

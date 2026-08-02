@@ -56,7 +56,7 @@ export function resolveSetProps(set: SetDescriptor): ResolvedSetProp[] {
         y: instance.y ?? geo.horizonY,
         scale: instance.scale,
         flip: instance.flip,
-        interaction: def.interaction ?? null,
+        interaction: def.interactionFor?.(instance.params) ?? def.interaction ?? null,
       });
     });
   }
@@ -129,7 +129,7 @@ export function propHasReference(prop: ResolvedSetProp, reference: string): bool
 /** Pick a stable catalogue handle for one semantic interaction. */
 export function interactionHandle(
   prop: ResolvedSetProp,
-  kind: 'grip' | 'contact' | 'placement',
+  kind: 'grip' | 'contact' | 'placement' | 'seat',
   context: string,
 ): PropInteractionHandle {
   const geometry = prop.interaction;
@@ -141,7 +141,9 @@ export function interactionHandle(
     ? geometry.handles.find((handle) => handle.kind === 'control' || handle.kind === 'grip')
     : kind === 'placement'
       ? geometry.handles.find((handle) => handle.kind === 'contact')
-      : geometry.handles.find((handle) => handle.kind === 'contact');
+      : kind === 'grip'
+        ? geometry.handles.find((handle) => handle.kind === 'contact')
+        : undefined;
   const handle = preferred ?? fallback;
   if (!handle) throw new Error(`${context} targets "${prop.id}" (${prop.prop}), which has no ${kind} handle`);
   return handle;

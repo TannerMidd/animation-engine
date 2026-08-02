@@ -9,6 +9,7 @@ import type {
   IRActor,
   IRTransform,
   IRPropState,
+  PartTransform,
 } from '../schema/index.ts';
 import {
   MARKS,
@@ -172,6 +173,8 @@ export interface CompiledStageState {
   lookDirection: LookDirection | null;
   turnTarget: string | null;
   turnDirection: LookDirection | null;
+  /** Stable seat id while physically bound to seat geometry. */
+  seatedOn: string | null;
   /** One portable prop at a time in this milestone; null means both hands are free. */
   heldPropId: string | null;
   heldHand: 'left' | 'right' | null;
@@ -266,10 +269,21 @@ const SUPPORTED_STAGE_ACTION_SET = new Set<string>(SUPPORTED_STAGE_ACTIONS);
 const DEPTH_SCALE = 0.14;
 
 /** A rig-independent seated fallback for puppets that predate a dedicated SIT pose. */
-const SEATED_PARTS = {
+const CHAIR_SEATED_PARTS = {
   torso: { y: 62 },
-  leg_L: { rot: -72 },
-  leg_R: { rot: 72 },
+  // Placeholder rigs only have one rigid segment per leg.  A wide rotation
+  // therefore reads as a split, not a bent knee.  Short, nearly vertical legs
+  // give the useful limited-animation silhouette instead: hips on the cushion,
+  // shins hanging below it and shoes close to the floor.
+  leg_L: { rot: 8, scale: 0.58 },
+  leg_R: { rot: -8, scale: 0.58 },
+} as const;
+
+/** Explicit floor sitting keeps a broader silhouette than a chair sit. */
+const FLOOR_SEATED_PARTS = {
+  torso: { y: 62 },
+  leg_L: { rot: 72 },
+  leg_R: { rot: -72 },
 } as const;
 
 export interface AudioPlacement {
@@ -696,6 +710,7 @@ function prepareActor(shots: ShotList, member: ShotList['cast'][number], loaded:
       lookDirection: null,
       turnTarget: null,
       turnDirection: null,
+      seatedOn: member.seat,
       heldPropId: member.heldProp,
       heldHand: member.heldHand,
     },
@@ -833,14 +848,68 @@ function validateReach(
   }
 }
 
+function seatedRigAnchor(actor: ActorRt, context: string): { x: number; y: number } {
+  const torso = actor.rig.parts.find((part) => part.id === 'torso');
+  if (!torso) throw new Error(`${context} needs torso rig geometry to align the performer with a seat`);
+  const authored = actor.poses.get('SIT')?.parts['torso'];
+  const fallback: { x?: number; y?: number } = CHAIR_SEATED_PARTS.torso;
+  return {
+    x: torso.pivot[0] + (authored?.x ?? fallback.x ?? 0),
+    y: torso.pivot[1] + (authored?.y ?? fallback.y ?? 0),
+  };
+}
+
+/** Place the rig's seated hip anchor on the catalogue seat point. */
+function stateAtSeat(
+  actor: ActorRt,
+  state: StageState,
+  point: { x: number; y: number },
+  set: SetDescriptor,
+  context: string,
+): StageState {
+  const local = seatedRigAnchor(actor, context);
+  const scale = scaledForDepth(actor, state);
+  const direction = state.flip ? -1 : 1;
+  const next = {
+    ...state,
+    x: point.x - (local.x - actor.rig.anchor[0]) * scale * direction,
+    y: point.y - (local.y - actor.rig.anchor[1]) * scale,
+    pose: 'SIT',
+  };
+  const area = set.layout.walkable;
+  // The root is a foot anchor, while an upstage chair can sit just above the
+  // authored walkable band.  Allow a small rig-relative perspective margin;
+  // the seat handle itself has already been validated against set geometry.
+  const tolerance = Math.max(2, actor.rig.canvas.height * scale * 0.06);
+  if (
+    next.x < area.x - tolerance || next.x > area.x + area.width + tolerance ||
+    next.y < area.y - tolerance || next.y > area.y + area.height + tolerance
+  ) {
+    throw new Error(
+      `${context} aligns "${actor.id}" outside the set walkable area at ` +
+      `${Math.round(next.x)},${Math.round(next.y)}; move or rescale the seat`,
+    );
+  }
+  return next;
+}
+
 function placementFor(
   action: Extract<StageAction, { type: 'put_down' }>,
   actor: ActorRt,
   state: StageState,
   shots: ShotList,
   set: SetDescriptor,
+  resolvedProps: ResolvedSetProp[],
   context: string,
 ): { x: number; y: number } {
+  if (action.target) {
+    const surface = resolvePropReference(action.target, resolvedProps, context);
+    if (surface.id === state.heldPropId) {
+      throw new Error(`${context} cannot place "${surface.id}" on itself`);
+    }
+    const handle = interactionHandle(surface, 'placement', context);
+    return propHandlePoint(surface, handle);
+  }
   if (action.to?.depth !== undefined) {
     throw new Error(`${context} cannot use depth for prop placement; author x/y or a mark`);
   }
@@ -884,12 +953,47 @@ function buildStageTransitions(
   const current = new Map(actors.map((actor) => [actor.id, cloneStage(actor.initialStage)]));
   const compiled: CompiledStageAction[] = [];
   const resolvedProps = set ? resolveSetProps(set) : [];
+  const standingPlacements = new Map<string, Pick<StageState, 'y' | 'depth' | 'pose'>>();
+  const seatOccupants = new Map<string, string>();
   const propCurrent = new Map<string, PropContinuityState>();
   const propRuntime = new Map<string, PropRt>();
   for (const prop of resolvedProps) {
     const initial = { location: 'set' as const, x: prop.x, y: prop.y, holder: null };
     propCurrent.set(prop.id, initial);
     propRuntime.set(prop.id, { prop, initial: clonePropState(initial), transitions: [] });
+  }
+
+  for (const actor of actors) {
+    const reference = actor.initialStage.seatedOn;
+    if (actor.initialStage.pose === 'SIT' && !reference) {
+      throw new Error(`initial SIT pose for "${actor.id}" needs an initial seat target`);
+    }
+    if (actor.initialStage.pose !== 'SIT' && reference) {
+      throw new Error(`initial seat "${reference}" for "${actor.id}" requires pose SIT`);
+    }
+    if (!reference) continue;
+    if (!set) throw new Error(`initial seat "${reference}" for "${actor.id}" requires an active set descriptor`);
+    const context = `initial seat for "${actor.id}"`;
+    const seat = resolvePropReference(reference, resolvedProps, context);
+    if (!seat.stableId) throw new Error(`${context} needs a stable set-instance id`);
+    if (seat.layer === 'fore') {
+      throw new Error(`${context} targets foreground seat "${seat.id}"; use a mid-layer seat so the actor is not occluded`);
+    }
+    const occupiedBy = seatOccupants.get(seat.id);
+    if (occupiedBy) throw new Error(`${context} targets seat "${seat.id}" already occupied by "${occupiedBy}"`);
+    const handle = interactionHandle(seat, 'seat', context);
+    const point = propHandlePoint(seat, handle);
+    standingPlacements.set(actor.id, {
+      y: actor.initialStage.y,
+      depth: actor.initialStage.depth,
+      pose: 'IDLE',
+    });
+    actor.initialStage = {
+      ...stateAtSeat(actor, actor.initialStage, point, set, context),
+      seatedOn: seat.id,
+    };
+    current.set(actor.id, cloneStage(actor.initialStage));
+    seatOccupants.set(seat.id, actor.id);
   }
 
   const initiallyHeld = new Set<string>();
@@ -982,6 +1086,17 @@ function buildStageTransitions(
           `action beat "${beat.id}" ${action.type.toUpperCase()} targets unknown actor "${action.target}"`,
         );
       }
+      if ((action.type === 'move' || action.type === 'exit') && state.pose === 'SIT') {
+        throw new Error(
+          `action beat "${beat.id}" makes seated actor "${actor.id}" ${action.type}; add STAND first`,
+        );
+      }
+      if (action.type === 'sit' && state.pose === 'SIT') {
+        throw new Error(`action beat "${beat.id}" makes "${actor.id}" sit while already seated`);
+      }
+      if (action.type === 'stand' && state.pose !== 'SIT') {
+        throw new Error(`action beat "${beat.id}" makes "${actor.id}" stand while not seated`);
+      }
 
       let before = cloneStage(state);
       let after = cloneStage(state);
@@ -1003,12 +1118,69 @@ function buildStageTransitions(
         case 'move':
           after = placeAt(after, action.to, shots);
           break;
-        case 'sit':
+        case 'sit': {
+          if (action.seat && action.floor) {
+            throw new Error(`${context} cannot target a seat and the floor at the same time`);
+          }
+          if (action.seat) {
+            if (!set) throw new Error(`${context} targets seat "${action.seat}" but has no active set descriptor`);
+            const seat = resolvePropReference(action.seat, resolvedProps, context);
+            if (seat.layer === 'fore') {
+              throw new Error(`${context} targets foreground seat "${seat.id}"; use a mid-layer seat so the actor is not occluded`);
+            }
+            const occupiedBy = seatOccupants.get(seat.id);
+            if (occupiedBy) throw new Error(`${context} targets seat "${seat.id}" already occupied by "${occupiedBy}"`);
+            const handle = interactionHandle(seat, 'seat', context);
+            const point = propHandlePoint(seat, handle);
+            const seated = stateAtSeat(actor, after, point, set, context);
+            const maxApproach = actor.rig.canvas.width * scaledForDepth(actor, state) * 0.12;
+            const approach = Math.hypot(seated.x - state.x, seated.y - state.y);
+            if (approach > maxApproach) {
+              throw new Error(
+                `${context} seat "${seat.id}" is too far from "${actor.id}" ` +
+                `(${Math.round(approach)} > ${Math.round(maxApproach)}); MOVE closer first`,
+              );
+            }
+            standingPlacements.set(actor.id, { y: state.y, depth: state.depth, pose: state.pose });
+            after = { ...seated, seatedOn: seat.id };
+            seatOccupants.set(seat.id, actor.id);
+            stateChangeProgress = 0.62;
+            break;
+          }
+          const availableSeats = resolvedProps.filter((prop) =>
+            prop.interaction?.handles.some((handle) => handle.kind === 'seat'),
+          );
+          if (!action.floor) {
+            const candidates = availableSeats.length
+              ? ` Available seats: ${availableSeats.map((prop) => prop.id).join(', ')}.`
+              : '';
+            throw new Error(
+              `${context} needs an explicit seat target or floor=true for intentional floor-seating.${candidates}`,
+            );
+          }
+          standingPlacements.set(actor.id, { y: state.y, depth: state.depth, pose: state.pose });
           after.pose = 'SIT';
+          after.seatedOn = null;
+          stateChangeProgress = 0.62;
           break;
-        case 'stand':
-          after.pose = 'IDLE';
+        }
+        case 'stand': {
+          const standing = standingPlacements.get(actor.id);
+          after.pose = standing?.pose ?? 'IDLE';
+          // A performer standing from a real chair is now at the chair's stage
+          // depth.  Restoring the pre-sit foreground Y made them pop downward
+          // before every subsequent move.  Floor sits do restore their original
+          // placement because they never changed physical location.
+          if (standing && !state.seatedOn) {
+            after.y = standing.y;
+            after.depth = standing.depth;
+          }
+          standingPlacements.delete(actor.id);
+          if (state.seatedOn) seatOccupants.delete(state.seatedOn);
+          after.seatedOn = null;
+          stateChangeProgress = 0.32;
           break;
+        }
         case 'look':
           after.lookTarget = action.target ?? null;
           after.lookDirection = action.direction ?? null;
@@ -1097,7 +1269,7 @@ function buildStageTransitions(
           if (continuity.location !== 'held' || continuity.holder !== actor.id) {
             throw new Error(`${context} has invalid pickup/putdown continuity for prop "${held.id}"`);
           }
-          const placement = placementFor(action, actor, state, shots, set, context);
+          const placement = placementFor(action, actor, state, shots, set, resolvedProps, context);
           const handle = interactionHandle(held, 'grip', context);
           const placedProp = { ...held, x: placement.x, y: placement.y };
           const point = propHandlePoint(placedProp, handle);
@@ -1225,6 +1397,23 @@ function stageStateAt(actor: ActorRt, ms: number): StageState {
         depth: transition.before.depth + (transition.after.depth - transition.before.depth) * progress,
       };
     }
+    if (transition.type === 'sit') {
+      // Move to the chair during the preparation, then let the pose blend lower
+      // the body onto the cushion.  Keeping these phases distinct avoids the
+      // old single-frame root teleport and crossed-leg silhouette.
+      const approach = ease(Math.min(1, rawProgress / 0.38));
+      return {
+        ...transition.before,
+        x: transition.before.x + (transition.after.x - transition.before.x) * approach,
+        y: transition.before.y + (transition.after.y - transition.before.y) * approach,
+        depth: transition.before.depth + (transition.after.depth - transition.before.depth) * approach,
+      };
+    }
+    if (transition.type === 'stand') {
+      // The part-pose blend performs the rise.  Root placement remains fixed at
+      // the chair until the actor is fully standing and a later MOVE begins.
+      return cloneStage(transition.before);
+    }
     return rawProgress < transition.stateChangeProgress
       ? cloneStage(transition.before)
       : cloneStage(transition.after);
@@ -1343,6 +1532,88 @@ function activeInteraction(actor: ActorRt, ms: number): StageTransition | null {
   )) ?? null;
 }
 
+function posePartsFor(
+  actor: ActorRt,
+  poseName: string,
+  seatedOn: string | null = null,
+): Record<string, IRTransform> {
+  const target: Record<string, IRTransform> = {};
+  const pose = actor.poses.get(poseName);
+  if (pose) {
+    for (const [id, transform] of Object.entries(pose.parts)) {
+      target[id] = add(IDENTITY, transform);
+    }
+    return target;
+  }
+  if (poseName !== 'SIT') {
+    throw new Error(`rig "${actor.rig.name}" has no pose "${poseName}"`);
+  }
+  const idlePose = actor.poses.get('IDLE');
+  if (!idlePose) throw new Error(`rig "${actor.rig.name}" needs IDLE for the SIT fallback`);
+  for (const [id, transform] of Object.entries(idlePose.parts)) {
+    target[id] = add(IDENTITY, transform);
+  }
+  const fallback = seatedOn ? CHAIR_SEATED_PARTS : FLOOR_SEATED_PARTS;
+  for (const [id, transform] of Object.entries(fallback)) {
+    target[id] = add(target[id] ?? IDENTITY, transform);
+  }
+  return target;
+}
+
+function activeSeatingPose(
+  actor: ActorRt,
+  ms: number,
+): { parts: Record<string, IRTransform>; key: string } | null {
+  const transition = actor.stageTransitions.find((candidate) => (
+    (candidate.type === 'sit' || candidate.type === 'stand') &&
+    ms >= candidate.startMs && ms < candidate.endMs
+  ));
+  if (!transition) return null;
+  const span = Math.max(0.001, transition.endMs - transition.startMs);
+  const raw = Math.max(0, Math.min(1, (ms - transition.startMs) / span));
+  const blend = transition.type === 'sit'
+    ? ease(Math.max(0, Math.min(1, (raw - 0.38) / 0.5)))
+    : ease(Math.max(0, Math.min(1, raw / 0.58)));
+  const from = posePartsFor(actor, transition.before.pose, transition.before.seatedOn);
+  const to = posePartsFor(actor, transition.after.pose, transition.after.seatedOn);
+  const parts: Record<string, IRTransform> = {};
+  const ids = new Set([...Object.keys(from), ...Object.keys(to)]);
+  for (const id of ids) parts[id] = lerp(from[id] ?? IDENTITY, to[id] ?? IDENTITY, blend);
+  return { parts, key: `seat-${transition.type}` };
+}
+
+function locomotionPoseAt(
+  actor: ActorRt,
+  state: StageState,
+  ms: number,
+): { parts: Record<string, Partial<PartTransform>>; key: string } | null {
+  const transition = actor.stageTransitions.find((candidate) => (
+    ms >= candidate.startMs && ms < candidate.endMs &&
+    (candidate.type === 'enter' || candidate.type === 'exit' || candidate.type === 'move' || candidate.type === 'sit')
+  ));
+  if (!transition) return null;
+  const span = Math.max(0.001, transition.endMs - transition.startMs);
+  const raw = Math.max(0, Math.min(1, (ms - transition.startMs) / span));
+  const progress = transition.type === 'sit' ? raw / 0.38 : raw;
+  if (progress < 0 || progress >= 1) return null;
+  const dx = transition.after.x - transition.before.x;
+  const dy = transition.after.y - transition.before.y;
+  if (Math.hypot(dx, dy) < 0.5) return null;
+  const wave = Math.sin(progress * Math.PI * 4);
+  const stride = wave * 13;
+  const localDirection = Math.sign(dx || 1) * (state.flip ? -1 : 1);
+  return {
+    key: `walk-${transition.type}`,
+    parts: {
+      torso: { rot: localDirection * 2.2, y: -Math.abs(wave) * 2.5, scale: 1 },
+      leg_L: { rot: stride, scale: 1 },
+      leg_R: { rot: -stride, scale: 1 },
+      arm_L_upper: { rot: -stride * 0.45, scale: 1 },
+      arm_R_upper: { rot: stride * 0.45, scale: 1 },
+    },
+  };
+}
+
 function normalizedDegrees(value: number): number {
   let out = value;
   while (out > 180) out -= 360;
@@ -1443,6 +1714,25 @@ function applyPartPoint(
   return { x: x + translateX, y: y + translateY };
 }
 
+/** Resolve the same nested rig transforms the browser applies for one rig-space point. */
+function renderedPartPointWorld(
+  actor: ActorRt,
+  placement: IRActor,
+  partId: string,
+  localPoint: readonly [number, number],
+): { x: number; y: number } {
+  const start = actor.rig.parts.find((part) => part.id === partId);
+  if (!start) throw new Error(`actor "${actor.id}" is missing rig part "${partId}"`);
+  const byId = new Map(actor.rig.parts.map((part) => [part.id, part]));
+  let point = { x: localPoint[0], y: localPoint[1] };
+  let part: typeof start | undefined = start;
+  while (part) {
+    point = applyPartPoint(point, part.pivot, placement.parts[part.id]);
+    part = part.parent ? byId.get(part.parent) : undefined;
+  }
+  return pointFromPlacement(actor, placement, [point.x, point.y]);
+}
+
 /** Resolve the same nested rig transforms the browser applies, then place the wrist in set space. */
 function renderedHandWorld(
   actor: ActorRt,
@@ -1450,17 +1740,12 @@ function renderedHandWorld(
   hand: 'left' | 'right',
 ): { x: number; y: number } {
   const suffix = hand === 'right' ? 'R' : 'L';
-  const start = actor.rig.parts.find((part) => part.id === `arm_${suffix}_fore`);
-  if (!start) throw new Error(`actor "${actor.id}" is missing ${hand} forearm while holding a prop`);
-  const byId = new Map(actor.rig.parts.map((part) => [part.id, part]));
-  const endpoint = restHandLocal(actor, hand);
-  let point = { x: endpoint[0], y: endpoint[1] };
-  let part: typeof start | undefined = start;
-  while (part) {
-    point = applyPartPoint(point, part.pivot, placement.parts[part.id]);
-    part = part.parent ? byId.get(part.parent) : undefined;
-  }
-  return pointFromPlacement(actor, placement, [point.x, point.y]);
+  return renderedPartPointWorld(
+    actor,
+    placement,
+    `arm_${suffix}_fore`,
+    restHandLocal(actor, hand),
+  );
 }
 
 function propIrState(
@@ -1561,14 +1846,14 @@ function attentionDirection(state: StageState, states: Map<string, StageState>):
 }
 
 function actorFrameInfo(actor: ActorRt, state: IRActor): ActorFrameInfo {
-  const dir = state.flip ? -1 : 1;
+  const head = renderedPartPointWorld(actor, state, 'head', actor.rig.focus);
   return {
     id: actor.id,
     x: state.x,
     y: state.y,
     scale: state.scale,
-    headX: state.x + (actor.rig.focus[0] - actor.rig.anchor[0]) * state.scale * dir,
-    headY: state.y - (actor.rig.anchor[1] - actor.rig.focus[1]) * state.scale,
+    headX: head.x,
+    headY: head.y,
     headR: (faceBox(actor.rig).h / 2) * state.scale,
   };
 }
@@ -1826,24 +2111,12 @@ export function compileShotList(
         const expr = actor.expressions.get(exprName);
         if (!expr) throw new Error(`rig "${actor.rig.name}" has no expression "${exprName}"`);
 
-        const target: Record<string, IRTransform> = {};
-        const basePose = actor.poses.get(actorStage.pose);
-        if (basePose) {
-          for (const [id, transform] of Object.entries(basePose.parts)) {
-            target[id] = add(IDENTITY, transform);
-          }
-        } else if (actorStage.pose === 'SIT') {
-          const idlePose = actor.poses.get('IDLE');
-          if (!idlePose) throw new Error(`rig "${actor.rig.name}" needs IDLE for the SIT fallback`);
-          for (const [id, transform] of Object.entries(idlePose.parts)) {
-            target[id] = add(IDENTITY, transform);
-          }
-          for (const [id, transform] of Object.entries(SEATED_PARTS)) {
-            target[id] = add(target[id] ?? IDENTITY, transform);
-          }
-        } else {
-          throw new Error(`rig "${actor.rig.name}" has no pose "${actorStage.pose}"`);
-        }
+        const seatingPose = activeSeatingPose(actor, charMs);
+        const target: Record<string, IRTransform> = seatingPose?.parts ?? posePartsFor(
+          actor,
+          actorStage.pose,
+          actorStage.seatedOn,
+        );
 
         if (speechPoseName) {
           const speechPose = actor.poses.get(speechPoseName);
@@ -1869,6 +2142,13 @@ export function compileShotList(
           }
         }
 
+        const locomotionPose = locomotionPoseAt(actor, { ...actorStage, flip }, charMs);
+        if (locomotionPose) {
+          for (const [id, transform] of Object.entries(locomotionPose.parts)) {
+            target[id] = add(target[id] ?? IDENTITY, transform);
+          }
+        }
+
         // The small held head cant makes LOOK legible even when the rig's
         // one side-eye swap points in the opposite local direction.
         if (attention) {
@@ -1878,14 +2158,15 @@ export function compileShotList(
         // One intermediate frame on a pose change, so the snap reads as a snap
         // rather than a teleport.
         let parts = target;
-        if (actor.lastPoseKey && actor.lastPoseKey !== poseKey) {
+        const resolvedPoseKey = `${poseKey}|${seatingPose?.key ?? '-'}|${locomotionPose?.key ?? '-'}`;
+        if (actor.lastPoseKey && actor.lastPoseKey !== resolvedPoseKey && !seatingPose) {
           parts = {};
           const keys = new Set([...Object.keys(target), ...Object.keys(actor.lastParts)]);
           for (const id of keys) {
             parts[id] = lerp(actor.lastParts[id] ?? IDENTITY, target[id] ?? IDENTITY, SNAP_BLEND);
           }
         }
-        actor.lastPoseKey = poseKey;
+        actor.lastPoseKey = resolvedPoseKey;
         actor.lastParts = target;
 
         const swaps = { ...actor.defaultSwaps, ...expr.swaps };
