@@ -1,5 +1,12 @@
 {
   "name": "kevin",
+  "charId": "kevin",
+  "locks": [],
+  "identity": {
+    "id": "house",
+    "version": "1.0.0",
+    "hash": "247eac48398b"
+  },
   "canvas": {
     "width": 200,
     "height": 400
@@ -44,7 +51,6 @@
     "shoes": "boot",
     "accent": "#a04f4f"
   },
-  "locks": [],
   "parts": [
     {
       "id": "torso",
@@ -523,6 +529,12 @@
       "suppressBlink": false
     }
   ],
+  "idle": {
+    "breathAmplitude": 3,
+    "breathPeriod": 4,
+    "blinkRateHz": 0.45,
+    "blinkDuration": 0.12
+  },
   "voice": "David",
   "voiceRate": -2,
   "voiceRef": "kevin.ref.wav",
@@ -531,26 +543,14 @@
     "seed": 956588265,
     "hash": "ce0a35531941cc2f88f3b0fe5abd47b7baa1b093"
   },
-  "voicePersona": {
-    "energy": 1,
-    "pace": 1
-  },
-  "idle": {
-    "breathAmplitude": 3,
-    "breathPeriod": 4,
-    "blinkRateHz": 0.45,
-    "blinkDuration": 0.12
-  },
   "acting": {
     "reactionMs": 184,
     "gestureBias": 1.24,
     "fidgetAmp": 1.4
   },
-  "svg": "kevin.svg",
-  "charId": "kevin",
-  "identity": {
-    "id": "house",
-    "version": "1.0.0",
-    "hash": "db5f40c8a297"
-  }
+  "voicePersona": {
+    "energy": 1,
+    "pace": 1
+  },
+  "svg": "kevin.svg"
 }

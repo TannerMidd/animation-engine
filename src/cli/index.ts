@@ -1,6 +1,7 @@
 #!/usr/bin/env -S npx tsx
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import { ROOT, OUT_DIR, CAST_DIR, SCRIPTS_DIR, SETS_DIR, sceneDir } from '../core/paths.ts';
 import { MODELS_ROOT, HF_CACHE, OLLAMA_MODELS, strayCacheLocations } from '../core/models.ts';
 import { loadSet, saveSet, listSets, validateSet, setPath, renderSet } from '../sets/index.ts';
@@ -912,6 +913,59 @@ async function cmdMigrate(args: Args) {
   console.log('Review with:  git diff    Roll back with:  git checkout -- .');
 }
 
+/**
+ * The identity comparison reel: the same script rendered under two identity
+ * profiles, stacked into one video. The whole Phase-3 claim in one file — if
+ * the two halves don't read as two different shows, the system isn't done.
+ */
+async function cmdReel(args: Args) {
+  const script = args._[0] ?? path.join(SCRIPTS_DIR, 'eval-identity.md');
+  const a = typeof args.flags['a'] === 'string' ? args.flags['a'] : 'fixtures/dry-institutional';
+  const b = typeof args.flags['b'] === 'string' ? args.flags['b'] : 'fixtures/loud-cartoon';
+
+  const outputs: string[] = [];
+  for (const profileId of [a, b]) {
+    setActiveIdentity(await loadProfile(profileId));
+    const slug = profileId.replace(/[^\w-]/g, '-');
+    const sceneName = `reel-${slug}`;
+
+    console.log(`\n== rendering under ${profileId} ==`);
+    const source = await fs.readFile(path.resolve(script), 'utf8');
+    await writeScript(sceneName, source);
+
+    const result = await checkScript(source, { scene: sceneName, createMissingCast: true });
+    if (!result.shots) throw new Error(`direct failed under ${profileId}: ${result.errors.join('; ')}`);
+    await writeShotList(sceneName, result.shots);
+
+    const rigs = await loadRigsForShotList(result.shots);
+    const rendered = await renderScene(result.shots, rigs, {
+      scene: sceneName,
+      engine: 'chatterbox',
+      onStage: (p) => process.stdout.write(`\r  ${p.stage} ${p.done}/${p.total}    `),
+    });
+    console.log(`\n  ${path.relative(process.cwd(), rendered.mp4)} (${(rendered.durationMs / 1000).toFixed(1)}s)`);
+    outputs.push(rendered.mp4);
+  }
+
+  // Stack the two renders. Padding to even dimensions keeps yuv420p happy.
+  const out = path.join(OUT_DIR, 'identity-reel.mp4');
+  await new Promise<void>((resolve, reject) => {
+    const proc = spawn(ffmpegPath(), [
+      '-y', '-i', outputs[0]!, '-i', outputs[1]!,
+      '-filter_complex', '[0:v]scale=1280:720[a];[1:v]scale=1280:720[b];[a][b]vstack=inputs=2[v];[0:a][1:a]concat=n=2:v=0:a=1[audio_discard];[v]null[vo]',
+      '-map', '[vo]', '-map', '0:a',
+      '-c:v', 'libx264', '-crf', '18', '-pix_fmt', 'yuv420p',
+      out,
+    ], { stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    proc.stderr.on('data', (d) => (stderr += String(d)));
+    proc.on('error', reject);
+    proc.on('close', (code) => (code === 0 ? resolve() : reject(new Error(stderr.split('\n').slice(-8).join('\n')))));
+  });
+
+  console.log(`\nWrote ${path.relative(process.cwd(), out)} — top: ${a}, bottom: ${b}.`);
+}
+
 const HELP = `anim — script to limited-animation scene
 
   write "<premise>"      write a scene with the local model (needs Ollama)
@@ -947,6 +1001,9 @@ const HELP = `anim — script to limited-animation scene
                          (fixtures/<id> reaches the evaluation profiles).
   migrate                bring a pre-identity project under a profile.
                          Dry-run by default; --apply writes (review via git diff)
+  reel [script]          render the same script under two identity profiles and
+                         stack them into out/identity-reel.mp4
+                           --a fixtures/dry-institutional --b fixtures/loud-cartoon
 
 Run via:  npm run anim -- <command>
 `;
@@ -979,6 +1036,8 @@ async function main() {
     }
     case 'migrate':
       return cmdMigrate(rest);
+    case 'reel':
+      return cmdReel(rest);
     case 'cast': {
       const sub = rest._[0];
       const subArgs = { _: rest._.slice(1), flags: rest.flags };

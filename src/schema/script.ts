@@ -22,7 +22,7 @@ export const SHOTS = ['WIDE', 'MID', 'CU', 'ECU', 'OTS', 'TWO_SHOT'] as const;
 export const Shot = z.enum(SHOTS);
 export type Shot = z.infer<typeof Shot>;
 
-export const CAMERA_MOVES = ['HOLD', 'PUSH_IN', 'PULL_OUT', 'PAN_L', 'PAN_R', 'SHAKE'] as const;
+export const CAMERA_MOVES = ['HOLD', 'PUSH_IN', 'PULL_OUT', 'PAN_L', 'PAN_R', 'SHAKE', 'SNAP_IN'] as const;
 export const CameraMove = z.enum(CAMERA_MOVES);
 export type CameraMove = z.infer<typeof CameraMove>;
 
@@ -95,6 +95,12 @@ const Framing = {
   /** Who the shot is on. Empty means everyone. */
   focus: z.array(z.string()).default([]),
   camera: CameraMove.default('HOLD'),
+  /**
+   * A locked beat survives every director rerun exactly as it stands. This is
+   * the difference between "the director proposes" and "the director owns your
+   * edits" — set it on any beat whose timing or staging you fixed by hand.
+   */
+  locked: z.boolean().default(false),
 };
 
 export const ShotBeat = z.discriminatedUnion('kind', [
@@ -133,6 +139,14 @@ export const ShotList = z.object({
   scene: z.string().min(1),
   /** Which identity profile directed this scene, for drift detection. */
   identity: IdentityStamp.optional(),
+  /**
+   * Title and end cards around the scene. On by default — the card rhythm is
+   * part of the show. Frame counts and treatment come from the identity
+   * profile; this is only the per-scene switch and wording.
+   */
+  cards: z.boolean().default(true),
+  title: z.string().nullable().default(null),
+  subtitle: z.string().nullable().default(null),
   set: z.string().nullable().default(null),
   fps: z.number().int().positive().default(24),
   characterFps: z.number().int().positive().default(12),

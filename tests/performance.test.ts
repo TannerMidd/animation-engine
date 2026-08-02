@@ -97,6 +97,8 @@ describe('compiled performance', () => {
   const shotsFor = (over: object = {}) =>
     ShotList.parse({
       scene: 'perf-test',
+      // These tests pin the scene body; the card packaging has its own suite.
+      cards: false,
       cast: [
         { id: 'alice', rig: 'alice', mark: 'SL', flip: false, scale: 1.25, resting: 'DEADPAN' },
         { id: 'bob', rig: 'bob', mark: 'SR', flip: true, scale: 1.25, resting: 'DEADPAN' },

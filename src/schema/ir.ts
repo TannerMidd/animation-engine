@@ -49,6 +49,12 @@ export const IRFrame = z.object({
   camera: IRCamera,
   /** Actor id -> state. */
   actors: z.record(z.string(), IRActor),
+  /**
+   * Which card this frame shows instead of the stage. A key into the card art
+   * in `meta.cards` rather than inline SVG, so forty held title frames cost
+   * forty short strings, not forty copies of the artwork.
+   */
+  card: z.enum(['title', 'end']).optional(),
 });
 export type IRFrame = z.infer<typeof IRFrame>;
 
@@ -72,6 +78,13 @@ export const IRMeta = z.object({
   audio: z.string().nullable().default(null),
   /** Background SVG path, relative to the sets directory. */
   set: z.string().nullable().default(null),
+  /** Card artwork, referenced by frames via their `card` key. */
+  cards: z
+    .object({
+      titleSvg: z.string().optional(),
+      endSvg: z.string().optional(),
+    })
+    .optional(),
 });
 export type IRMeta = z.infer<typeof IRMeta>;
 

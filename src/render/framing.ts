@@ -1,5 +1,6 @@
 import type { IRCamera } from '../schema/index.ts';
 import type { Shot, CameraMove } from '../schema/script.ts';
+import { activeIdentity } from '../show/context.ts';
 
 /**
  * Shot names to camera viewBoxes.
@@ -189,6 +190,22 @@ export function applyMove(
         x: cam.x + shakeOffset(frame, 0) * amp,
         y: cam.y + shakeOffset(frame, 1) * amp,
       };
+    }
+    case 'SNAP_IN': {
+      // The stepped punch-in. Deliberately NO easing anywhere: the frame is one
+      // size, then it is instantly another size, then it holds. The steps land
+      // early in the beat so the line plays inside the tightened frame.
+      const snap = activeIdentity().editorial.snapIn;
+      const stepAt = (i: number) => 0.06 + i * 0.1;
+      let taken = 0;
+      for (let i = 0; i < snap.steps; i++) {
+        if (t >= stepAt(i)) taken = i + 1;
+      }
+      if (taken === 0) return cam;
+      const k = 1 - (snap.amount * taken) / snap.steps;
+      const w = cam.w * k;
+      const h = cam.h * k;
+      return { x: cam.x + (cam.w - w) / 2, y: cam.y + (cam.h - h) / 2, w, h };
     }
     default:
       return cam;

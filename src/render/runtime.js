@@ -114,10 +114,24 @@
     return t;
   }
 
+  var cardEls = { title: null, end: null };
+  var shownCard = null;
+
+  function applyCard(name) {
+    if (name === shownCard) return;
+    if (shownCard && cardEls[shownCard]) cardEls[shownCard].style.display = 'none';
+    if (name && cardEls[name]) cardEls[name].style.display = '';
+    shownCard = name;
+    // The stage hides under a card so nothing half-set shows through the paper.
+    root.style.visibility = name ? 'hidden' : '';
+  }
+
   window.__seek = function (index) {
     if (!ir) throw new Error('runtime: no IR loaded');
     var frame = ir.frames[index];
     if (!frame) throw new Error('runtime: frame ' + index + ' out of range (0..' + (ir.frames.length - 1) + ')');
+
+    applyCard(frame.card || null);
 
     var cam = frame.camera;
     root.setAttribute('viewBox', cam.x + ' ' + cam.y + ' ' + cam.w + ' ' + cam.h);
@@ -174,6 +188,9 @@
     window.__frame = index;
     return index;
   };
+
+  cardEls.title = document.getElementById('card-title');
+  cardEls.end = document.getElementById('card-end');
 
   if (!window.__IR) throw new Error('runtime: window.__IR was not set before the runtime loaded');
   build(window.__IR);

@@ -1,5 +1,12 @@
 {
   "name": "wanda",
+  "charId": "wanda",
+  "locks": [],
+  "identity": {
+    "id": "house",
+    "version": "1.0.0",
+    "hash": "247eac48398b"
+  },
   "canvas": {
     "width": 200,
     "height": 400
@@ -44,7 +51,6 @@
     "shoes": "round",
     "accent": "#8c7a3f"
   },
-  "locks": [],
   "parts": [
     {
       "id": "torso",
@@ -523,30 +529,24 @@
       "suppressBlink": false
     }
   ],
-  "voice": "David",
-  "voiceRate": -2,
-  "voiceRef": null,
-  "voiceProvenance": null,
-  "voicePersona": {
-    "energy": 1,
-    "pace": 1
-  },
   "idle": {
     "breathAmplitude": 3,
     "breathPeriod": 4,
     "blinkRateHz": 0.45,
     "blinkDuration": 0.12
   },
+  "voice": "David",
+  "voiceRate": -2,
+  "voiceRef": null,
+  "voiceProvenance": null,
   "acting": {
     "reactionMs": 145,
     "gestureBias": 0.79,
     "fidgetAmp": 1.3
   },
-  "svg": "wanda.svg",
-  "charId": "wanda",
-  "identity": {
-    "id": "house",
-    "version": "1.0.0",
-    "hash": "db5f40c8a297"
-  }
+  "voicePersona": {
+    "energy": 1,
+    "pace": 1
+  },
+  "svg": "wanda.svg"
 }

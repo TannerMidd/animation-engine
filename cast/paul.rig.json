@@ -1,5 +1,12 @@
 {
   "name": "paul",
+  "charId": "paul",
+  "locks": [],
+  "identity": {
+    "id": "house",
+    "version": "1.0.0",
+    "hash": "247eac48398b"
+  },
   "canvas": {
     "width": 200,
     "height": 400
@@ -44,7 +51,6 @@
     "shoes": "round",
     "accent": "#a04f4f"
   },
-  "locks": [],
   "parts": [
     {
       "id": "torso",
@@ -523,6 +529,12 @@
       "suppressBlink": false
     }
   ],
+  "idle": {
+    "breathAmplitude": 3,
+    "breathPeriod": 4,
+    "blinkRateHz": 0.45,
+    "blinkDuration": 0.12
+  },
   "voice": "Zira",
   "voiceRate": 0,
   "voiceRef": "paul.ref.wav",
@@ -531,26 +543,14 @@
     "seed": 549324037,
     "hash": "58af4d74d851125fdbc860577276e9d3304d2cc8"
   },
-  "voicePersona": {
-    "energy": 1,
-    "pace": 1
-  },
-  "idle": {
-    "breathAmplitude": 3,
-    "breathPeriod": 4,
-    "blinkRateHz": 0.45,
-    "blinkDuration": 0.12
-  },
   "acting": {
     "reactionMs": 473,
     "gestureBias": 0.84,
     "fidgetAmp": 1.1
   },
-  "svg": "paul.svg",
-  "charId": "paul",
-  "identity": {
-    "id": "house",
-    "version": "1.0.0",
-    "hash": "db5f40c8a297"
-  }
+  "voicePersona": {
+    "energy": 1,
+    "pace": 1
+  },
+  "svg": "paul.svg"
 }

@@ -1,5 +1,12 @@
 {
   "name": "dolores",
+  "charId": "dolores",
+  "locks": [],
+  "identity": {
+    "id": "house",
+    "version": "1.0.0",
+    "hash": "247eac48398b"
+  },
   "canvas": {
     "width": 200,
     "height": 400
@@ -44,7 +51,6 @@
     "shoes": "round",
     "accent": "#a04f4f"
   },
-  "locks": [],
   "parts": [
     {
       "id": "torso",
@@ -523,6 +529,12 @@
       "suppressBlink": false
     }
   ],
+  "idle": {
+    "breathAmplitude": 3,
+    "breathPeriod": 4,
+    "blinkRateHz": 0.45,
+    "blinkDuration": 0.12
+  },
   "voice": "David",
   "voiceRate": -2,
   "voiceRef": "dolores.ref.wav",
@@ -531,26 +543,14 @@
     "seed": 352576135,
     "hash": "9c243c6132c71e6ec7a0cdb679bfcef9db30e08f"
   },
-  "voicePersona": {
-    "energy": 1,
-    "pace": 1
-  },
-  "idle": {
-    "breathAmplitude": 3,
-    "breathPeriod": 4,
-    "blinkRateHz": 0.45,
-    "blinkDuration": 0.12
-  },
   "acting": {
     "reactionMs": 322,
     "gestureBias": 0.9,
     "fidgetAmp": 3
   },
-  "svg": "dolores.svg",
-  "charId": "dolores",
-  "identity": {
-    "id": "house",
-    "version": "1.0.0",
-    "hash": "db5f40c8a297"
-  }
+  "voicePersona": {
+    "energy": 1,
+    "pace": 1
+  },
+  "svg": "dolores.svg"
 }

@@ -184,6 +184,16 @@ export function autoDirect(
   let priorSpeaker: string | null = null;
   let sameSpeakerRun = 0;
   let lastShot: Shot | null = null;
+  /** SNAP_IN bookkeeping: it is punctuation, so it is rationed. */
+  const snap = activeIdentity().editorial.snapIn;
+  const rhythm = activeIdentity().editorial.rhythm;
+  let snapsUsed = 0;
+  let beatsSinceSnap = Infinity;
+  /** The expression of the previous line beat, for the aftershock pause. */
+  let lastLineExpression: string | null = null;
+  let lastLineSpeaker: string | null = null;
+  /** Length of the current run of very short lines, for ping-pong cutting. */
+  let shortRun = 0;
 
   /** Everyone who isn't speaking, for reaction shots. */
   const others = (speaker: string) => names.filter((n) => n !== speaker);
@@ -206,8 +216,10 @@ export function autoDirect(
           focus: [],
           camera: 'HOLD',
           reactions: {},
+          locked: false,
         });
         lastShot = 'WIDE';
+        beatsSinceSnap++;
         break;
       }
 
@@ -223,16 +235,25 @@ export function autoDirect(
         const target =
           (priorSpeaker && priorSpeaker !== lastSpeaker ? priorSpeaker : null) ??
           (lastSpeaker ? others(lastSpeaker)[0] : names[0]);
+
+        // The aftershock: a pause following a loud line stretches, and the
+        // camera goes to whoever the line landed on. The silence after the
+        // shout is where the shout actually happens.
+        const aftershock = lastLineExpression === 'ANGRY' || lastLineExpression === 'SHOCKED';
+        const ms = aftershock ? Math.round(el.ms * rhythm.aftershockBoost) : el.ms;
+
         beats.push({
           kind: 'pause',
-          ms: el.ms,
-          shot: el.ms >= 1200 ? 'CU' : 'MID',
+          ms,
+          shot: aftershock || ms >= 1200 ? 'CU' : 'MID',
           focus: target ? [target] : [],
           // A slow push on a long pause makes the awkwardness worse, correctly.
-          camera: el.ms >= 1500 ? 'PUSH_IN' : 'HOLD',
+          camera: ms >= 1500 ? 'PUSH_IN' : 'HOLD',
           reactions: {},
+          locked: false,
         });
         lastShot = 'CU';
+        beatsSinceSnap++;
         break;
       }
 
@@ -245,8 +266,13 @@ export function autoDirect(
         const expression = face(speaker, expressionFor(el.parenthetical, resting));
         const words = el.text.split(/\s+/).length;
 
+        // Runs of terse lines cut as alternating close-ups — the ping-pong
+        // rally. The run resets the moment anyone says something long.
+        shortRun = words <= 4 ? shortRun + 1 : 0;
+
         let shot: Shot;
-        if (words <= 4) shot = 'CU';
+        if (rhythm.pingPongCu && shortRun >= 2) shot = 'CU';
+        else if (words <= 4) shot = 'CU';
         else if (words >= 22) shot = 'MID';
         else if (sameSpeakerRun >= 1 && lastShot === 'MID') shot = rng.chance(0.6) ? 'CU' : 'OTS';
         else if (names.length >= 2 && rng.chance(0.15)) shot = 'TWO_SHOT';
@@ -264,6 +290,24 @@ export function autoDirect(
           reactions[other] = face(other, want);
         }
 
+        // Camera punctuation. SHAKE for the shout; SNAP_IN for the dramatic
+        // realisation — rationed by the show's quota and cooldown, because a
+        // snap that happens twice a minute is a tic, not a joke.
+        let camera: ShotBeat['camera'] = 'HOLD';
+        if (expression === 'ANGRY' && /!$/.test(el.text)) {
+          camera = 'SHAKE';
+        } else if (
+          snap.enabled &&
+          expression === 'SHOCKED' &&
+          /[!?]$/.test(el.text) &&
+          snapsUsed < snap.maxPerScene &&
+          beatsSinceSnap >= snap.cooldownBeats
+        ) {
+          camera = 'SNAP_IN';
+          snapsUsed++;
+          beatsSinceSnap = -1;
+        }
+
         beats.push({
           kind: 'line',
           speaker,
@@ -272,11 +316,15 @@ export function autoDirect(
           gesture: gestureFor(el.text, expression, rng, rigs.get(speaker)?.rig.acting?.gestureBias ?? 1),
           shot,
           focus: shot === 'TWO_SHOT' ? [] : [speaker],
-          camera: expression === 'ANGRY' && /!$/.test(el.text) ? 'SHAKE' : 'HOLD',
+          camera,
           reactions,
+          locked: false,
         });
 
         lastShot = shot;
+        lastLineExpression = expression;
+        lastLineSpeaker = speaker;
+        beatsSinceSnap++;
         if (speaker !== lastSpeaker) priorSpeaker = lastSpeaker;
         lastSpeaker = speaker;
         break;
@@ -289,6 +337,11 @@ export function autoDirect(
   return {
     scene: opts.scene,
     identity: stampOf(activeIdentity()),
+    cards: true,
+    // The screenplay's own words: its title on the card, the first heading as
+    // the subtitle. Both editable in the shot list afterwards.
+    title: screenplay.title || opts.scene.replace(/-/g, ' '),
+    subtitle: screenplay.elements.find((e) => e.kind === 'heading')?.text ?? null,
     set: opts.set ?? null,
     fps: opts.fps ?? 24,
     characterFps: opts.characterFps ?? 12,

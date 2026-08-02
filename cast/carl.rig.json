@@ -1,5 +1,12 @@
 {
   "name": "carl",
+  "charId": "carl",
+  "locks": [],
+  "identity": {
+    "id": "house",
+    "version": "1.0.0",
+    "hash": "247eac48398b"
+  },
   "canvas": {
     "width": 200,
     "height": 400
@@ -44,7 +51,6 @@
     "shoes": "round",
     "accent": "#6b4f7a"
   },
-  "locks": [],
   "parts": [
     {
       "id": "torso",
@@ -523,30 +529,24 @@
       "suppressBlink": false
     }
   ],
-  "voice": "Zira",
-  "voiceRate": -1,
-  "voiceRef": null,
-  "voiceProvenance": null,
-  "voicePersona": {
-    "energy": 1,
-    "pace": 1
-  },
   "idle": {
     "breathAmplitude": 3,
     "breathPeriod": 4,
     "blinkRateHz": 0.45,
     "blinkDuration": 0.12
   },
+  "voice": "Zira",
+  "voiceRate": -1,
+  "voiceRef": null,
+  "voiceProvenance": null,
   "acting": {
     "reactionMs": 286,
     "gestureBias": 0.71,
     "fidgetAmp": 1.8
   },
-  "svg": "carl.svg",
-  "charId": "carl",
-  "identity": {
-    "id": "house",
-    "version": "1.0.0",
-    "hash": "db5f40c8a297"
-  }
+  "voicePersona": {
+    "energy": 1,
+    "pace": 1
+  },
+  "svg": "carl.svg"
 }

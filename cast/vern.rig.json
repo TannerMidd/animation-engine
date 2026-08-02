@@ -1,6 +1,6 @@
 {
-  "name": "marge",
-  "charId": "marge",
+  "name": "vern",
+  "charId": "26ef9c2d51",
   "locks": [],
   "identity": {
     "id": "house",
@@ -17,39 +17,39 @@
   ],
   "focus": [
     100,
-    60.3279998304695
+    68.65858673364185
   ],
   "look": {
-    "build": "pear",
-    "head": "egg",
-    "nose": "wide",
-    "ears": "large",
-    "hair": "side-part",
+    "build": "round",
+    "head": "square",
+    "nose": "button",
+    "ears": "none",
+    "hair": "combover",
     "facialHair": "none",
-    "glasses": "none",
-    "eyes": "beady",
-    "brows": "thick",
-    "skin": "#b8825c",
-    "shirt": "#6b8f5a",
-    "hairColour": "#c4a86b",
-    "trousers": "#2f3a44",
+    "glasses": "square",
+    "eyes": "oval",
+    "brows": "sparse",
+    "skin": "#a86f4a",
+    "shirt": "#a04f4f",
+    "hairColour": "#767268",
+    "trousers": "#45403a",
     "line": "#1a1a1a",
-    "headSize": 1.032649569027126,
-    "bodyWidth": 1.0389106486458333,
-    "bodyHeight": 1.0368519804254175,
-    "limbLength": 0.9882803489640355,
-    "limbWidth": 0.9311500082956627,
-    "eyeSize": 0.8711699890205636,
-    "eyeSpread": 0.979339398322627
+    "headSize": 0.9956032587867231,
+    "bodyWidth": 1.017969771255739,
+    "bodyHeight": 1.0582163519132883,
+    "limbLength": 1.0643861457007007,
+    "limbWidth": 0.996386783127673,
+    "eyeSize": 1.1041598285431973,
+    "eyeSpread": 1.0309510402241722
   },
   "outfit": {
     "sleeves": "short",
-    "collar": "turtleneck",
-    "neckwear": "bowtie",
-    "pattern": "stripes",
-    "hat": "none",
-    "shoes": "boot",
-    "accent": "#4a5f8c"
+    "collar": "flat",
+    "neckwear": "none",
+    "pattern": "pocket",
+    "hat": "brim",
+    "shoes": "round",
+    "accent": "#8c7a3f"
   },
   "parts": [
     {
@@ -57,7 +57,7 @@
       "parent": null,
       "pivot": [
         100,
-        272.10730036081236
+        243.19552232348315
       ],
       "z": 0
     },
@@ -65,8 +65,8 @@
       "id": "leg_L",
       "parent": "torso",
       "pivot": [
-        79.36100105400187,
-        272.10730036081236
+        73.52627094081475,
+        243.19552232348315
       ],
       "z": -1
     },
@@ -74,8 +74,8 @@
       "id": "leg_R",
       "parent": "torso",
       "pivot": [
-        120.63899894599813,
-        272.10730036081236
+        126.47372905918525,
+        243.19552232348315
       ],
       "z": -1
     },
@@ -83,8 +83,8 @@
       "id": "arm_L_upper",
       "parent": "torso",
       "pivot": [
-        56.85952631905208,
-        125.89007968467328
+        42.96731176384465,
+        141.38497132457385
       ],
       "z": 1
     },
@@ -92,8 +92,8 @@
       "id": "arm_L_fore",
       "parent": "arm_L_upper",
       "pivot": [
-        56.85952631905208,
-        184.71252605501266
+        42.96731176384465,
+        192.85868533065974
       ],
       "z": 1
     },
@@ -101,8 +101,8 @@
       "id": "arm_R_upper",
       "parent": "torso",
       "pivot": [
-        143.14047368094793,
-        125.89007968467328
+        157.03268823615537,
+        141.38497132457385
       ],
       "z": 1
     },
@@ -110,8 +110,8 @@
       "id": "arm_R_fore",
       "parent": "arm_R_upper",
       "pivot": [
-        143.14047368094793,
-        184.71252605501266
+        157.03268823615537,
+        192.85868533065974
       ],
       "z": 1
     },
@@ -120,7 +120,7 @@
       "parent": "torso",
       "pivot": [
         100,
-        101.89007968467328
+        117.38497132457385
       ],
       "z": 2
     }
@@ -530,23 +530,23 @@
     }
   ],
   "idle": {
-    "breathAmplitude": 3,
-    "breathPeriod": 4,
-    "blinkRateHz": 0.45,
+    "breathAmplitude": 3.1,
+    "breathPeriod": 4.7,
+    "blinkRateHz": 0.32,
     "blinkDuration": 0.12
   },
-  "voice": "David",
-  "voiceRate": 1,
+  "voice": "Zira",
+  "voiceRate": -2,
   "voiceRef": null,
   "voiceProvenance": null,
   "acting": {
-    "reactionMs": 420,
-    "gestureBias": 0.89,
-    "fidgetAmp": 2.7
+    "reactionMs": 267,
+    "gestureBias": 0.83,
+    "fidgetAmp": 3.1
   },
   "voicePersona": {
-    "energy": 1,
-    "pace": 1
+    "energy": 0.9,
+    "pace": 1.1
   },
-  "svg": "marge.svg"
+  "svg": "vern.svg"
 }

@@ -96,6 +96,13 @@ export async function buildPage(opts: PageOptions): Promise<string> {
       `${grainOverlay(style, 'paper-grain', 0, 0, ir.meta.width, ir.meta.height)}</svg>`
     : '';
 
+  // Cards are frame-locked overlays like the grain — they ignore the camera
+  // entirely. The runtime shows one whenever the current frame names it; each
+  // card carries its own grain, so it sits above the global overlay.
+  const cards =
+    (ir.meta.cards?.titleSvg ? `<div id="card-title" class="card" style="display:none">${ir.meta.cards.titleSvg}</div>` : '') +
+    (ir.meta.cards?.endSvg ? `<div id="card-end" class="card" style="display:none">${ir.meta.cards.endSvg}</div>` : '');
+
   return `<!doctype html>
 <html>
 <head>
@@ -125,6 +132,16 @@ export async function buildPage(opts: PageOptions): Promise<string> {
     inset: 0;
     pointer-events: none;
   }
+  .card {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+  .card svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
 </style>
 </head>
 <body>
@@ -134,6 +151,7 @@ export async function buildPage(opts: PageOptions): Promise<string> {
     ${setFore}
 </svg>
 ${grain}
+${cards}
 <script>
 window.__IR = ${JSON.stringify(ir)};
 window.__RIGS = ${JSON.stringify(rigData)};

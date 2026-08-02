@@ -37,7 +37,20 @@ export const api = {
     post<CheckResult>(`/api/scenes/${name}/check`, body),
 
   direct: (name: string, body: { source?: string; seed?: number; resting?: string; set?: string | null }) =>
-    post<{ shots: ShotList; errors: string[]; newCharacters: string[] }>(`/api/scenes/${name}/direct`, body),
+    post<{
+      proposed: ShotList;
+      diff: Array<{ index: number; kind: string; change: string; summary: string }>;
+      keptLocked: number;
+      droppedLocked: number;
+      errors: string[];
+      newCharacters: string[];
+    }>(`/api/scenes/${name}/direct`, body),
+  applyDirect: (name: string, shots: ShotList) =>
+    post<{ ok: true }>(`/api/scenes/${name}/direct/apply`, { shots }),
+  preflight: (name: string) =>
+    call<{ ok: boolean; notes: Array<{ level: 'error' | 'warn' | 'info'; message: string }> }>(
+      `/api/scenes/${name}/preflight`,
+    ),
 
   saveShotList: (name: string, shots: ShotList) =>
     put<{ ok: true }>(`/api/scenes/${name}/shotlist`, { shots }),

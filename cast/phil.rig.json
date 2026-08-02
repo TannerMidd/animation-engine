@@ -1,5 +1,12 @@
 {
   "name": "phil",
+  "charId": "phil",
+  "locks": [],
+  "identity": {
+    "id": "house",
+    "version": "1.0.0",
+    "hash": "247eac48398b"
+  },
   "canvas": {
     "width": 200,
     "height": 400
@@ -44,7 +51,6 @@
     "shoes": "round",
     "accent": "#3f6b6b"
   },
-  "locks": [],
   "parts": [
     {
       "id": "torso",
@@ -523,30 +529,24 @@
       "suppressBlink": false
     }
   ],
-  "voice": "Zira",
-  "voiceRate": 1,
-  "voiceRef": null,
-  "voiceProvenance": null,
-  "voicePersona": {
-    "energy": 1,
-    "pace": 1
-  },
   "idle": {
     "breathAmplitude": 3,
     "breathPeriod": 4,
     "blinkRateHz": 0.45,
     "blinkDuration": 0.12
   },
+  "voice": "Zira",
+  "voiceRate": 1,
+  "voiceRef": null,
+  "voiceProvenance": null,
   "acting": {
     "reactionMs": 391,
     "gestureBias": 1.11,
     "fidgetAmp": 2.4
   },
-  "svg": "phil.svg",
-  "charId": "phil",
-  "identity": {
-    "id": "house",
-    "version": "1.0.0",
-    "hash": "db5f40c8a297"
-  }
+  "voicePersona": {
+    "energy": 1,
+    "pace": 1
+  },
+  "svg": "phil.svg"
 }

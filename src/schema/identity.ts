@@ -134,8 +134,32 @@ export type PerformanceBible = z.infer<typeof PerformanceBible>;
 export const EditorialBible = z.object({
   /** Cutting and rhythm rules, in the show's own words. Consumed by prompts. */
   pacing: z.array(z.string()).default([]),
-  // M21 extends: shot grammar, shot-size budgets, cut cadence, camera
-  // punctuation (SNAP_IN et al) with quotas, title/end sequences.
+  /**
+   * The snap zoom: an instant stepped punch-in on a dramatic beat. Quota'd and
+   * cooled down because it is punctuation — a show that snaps on everything is
+   * shouting, and shouting constantly is silence.
+   */
+  snapIn: z
+    .object({
+      enabled: z.boolean().default(true),
+      /** Total tightening across the move, as a fraction of frame size. */
+      amount: z.number().min(0.05).max(0.5).default(0.24),
+      /** Instant steps the tightening lands in. */
+      steps: z.number().int().min(1).max(4).default(2),
+      /** Beats that must pass between snaps. */
+      cooldownBeats: z.number().int().min(0).default(6),
+      maxPerScene: z.number().int().min(0).default(2),
+    })
+    .default({}),
+  /** Deterministic rhythm heuristics the director applies. */
+  rhythm: z
+    .object({
+      /** Stretch the pause after an ANGRY/SHOCKED line, and put a CU on its target. */
+      aftershockBoost: z.number().min(1).max(2).default(1.25),
+      /** Cut runs of very short lines as alternating close-ups. */
+      pingPongCu: z.boolean().default(true),
+    })
+    .default({}),
 });
 export type EditorialBible = z.infer<typeof EditorialBible>;
 

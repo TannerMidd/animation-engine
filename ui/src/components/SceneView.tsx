@@ -109,12 +109,29 @@ export function SceneView({
   }, [source, detail, scene, setName]);
 
   // --- actions ---
+  /**
+   * Directing is propose-then-apply: the director returns a proposal and a
+   * diff, and locked beats survive the merge. The confirm names what changes,
+   * so accepting is a decision rather than a habit.
+   */
   const runDirect = async () => {
     setBusy('direct');
     try {
       await api.saveScript(scene, source);
       const res = await api.direct(scene, { source, set: setName });
-      setShots(res.shots);
+
+      const changes = res.diff.filter((d) => d.change !== 'kept-locked').length;
+      const summary =
+        `${changes} beat${changes === 1 ? '' : 's'} change` +
+        (res.keptLocked ? `; ${res.keptLocked} locked beat${res.keptLocked === 1 ? '' : 's'} kept` : '') +
+        (res.droppedLocked ? `; ${res.droppedLocked} locked beat${res.droppedLocked === 1 ? '' : 's'} no longer match the script and would be dropped` : '');
+
+      if (shots && !window.confirm(`Apply the director's proposal?
+
+${summary}`)) return;
+
+      await api.applyDirect(scene, res.proposed);
+      setShots(res.proposed);
       setSelected(null);
       setError(res.errors.length ? res.errors.join('; ') : null);
       onSceneChanged();
@@ -236,7 +253,7 @@ export function SceneView({
         <Button onClick={() => setWriting(true)} disabled={!!busy} title="Write this scene from a premise using the local model.">
           Write…
         </Button>
-        <Button onClick={runDirect} disabled={!!busy} title="Re-run the director. Replaces beat edits.">
+        <Button onClick={runDirect} disabled={!!busy} title="Propose new direction. Locked beats survive; you confirm before anything is written.">
           {busy === 'direct' ? <Spinner /> : 'Direct'}
         </Button>
         <Button onClick={() => void runJob('voices')} disabled={!!busy || !shots}>

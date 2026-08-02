@@ -1,6 +1,6 @@
 {
-  "name": "marge",
-  "charId": "marge",
+  "name": "mel",
+  "charId": "e01d73c4c6",
   "locks": [],
   "identity": {
     "id": "house",
@@ -17,39 +17,39 @@
   ],
   "focus": [
     100,
-    60.3279998304695
+    47.019488561044426
   ],
   "look": {
-    "build": "pear",
-    "head": "egg",
-    "nose": "wide",
-    "ears": "large",
-    "hair": "side-part",
-    "facialHair": "none",
+    "build": "lanky",
+    "head": "wide",
+    "nose": "button",
+    "ears": "stuck-out",
+    "hair": "tall",
+    "facialHair": "beard",
     "glasses": "none",
-    "eyes": "beady",
+    "eyes": "googly",
     "brows": "thick",
-    "skin": "#b8825c",
-    "shirt": "#6b8f5a",
-    "hairColour": "#c4a86b",
-    "trousers": "#2f3a44",
+    "skin": "#e8b98a",
+    "shirt": "#3f6b6b",
+    "hairColour": "#767268",
+    "trousers": "#3d3d4d",
     "line": "#1a1a1a",
-    "headSize": 1.032649569027126,
-    "bodyWidth": 1.0389106486458333,
-    "bodyHeight": 1.0368519804254175,
-    "limbLength": 0.9882803489640355,
-    "limbWidth": 0.9311500082956627,
-    "eyeSize": 0.8711699890205636,
-    "eyeSpread": 0.979339398322627
+    "headSize": 1.0834165107738227,
+    "bodyWidth": 0.9514095860393718,
+    "bodyHeight": 1.034622997059487,
+    "limbLength": 1.0216767640737816,
+    "limbWidth": 1.045620584259741,
+    "eyeSize": 1.092788555205334,
+    "eyeSpread": 1.1230853953491895
   },
   "outfit": {
-    "sleeves": "short",
-    "collar": "turtleneck",
-    "neckwear": "bowtie",
+    "sleeves": "long",
+    "collar": "pointed",
+    "neckwear": "lanyard",
     "pattern": "stripes",
-    "hat": "none",
-    "shoes": "boot",
-    "accent": "#4a5f8c"
+    "hat": "cap",
+    "shoes": "flat",
+    "accent": "#2b2f36"
   },
   "parts": [
     {
@@ -57,7 +57,7 @@
       "parent": null,
       "pivot": [
         100,
-        272.10730036081236
+        311.72348169162973
       ],
       "z": 0
     },
@@ -65,8 +65,8 @@
       "id": "leg_L",
       "parent": "torso",
       "pivot": [
-        79.36100105400187,
-        272.10730036081236
+        89.34687658319994,
+        311.72348169162973
       ],
       "z": -1
     },
@@ -74,8 +74,8 @@
       "id": "leg_R",
       "parent": "torso",
       "pivot": [
-        120.63899894599813,
-        272.10730036081236
+        110.65312341680006,
+        311.72348169162973
       ],
       "z": -1
     },
@@ -83,8 +83,8 @@
       "id": "arm_L_upper",
       "parent": "torso",
       "pivot": [
-        56.85952631905208,
-        125.89007968467328
+        80.63542043619034,
+        101.13624872354264
       ],
       "z": 1
     },
@@ -92,8 +92,8 @@
       "id": "arm_L_fore",
       "parent": "arm_L_upper",
       "pivot": [
-        56.85952631905208,
-        184.71252605501266
+        80.63542043619034,
+        188.5509126576954
       ],
       "z": 1
     },
@@ -101,8 +101,8 @@
       "id": "arm_R_upper",
       "parent": "torso",
       "pivot": [
-        143.14047368094793,
-        125.89007968467328
+        119.36457956380966,
+        101.13624872354264
       ],
       "z": 1
     },
@@ -110,8 +110,8 @@
       "id": "arm_R_fore",
       "parent": "arm_R_upper",
       "pivot": [
-        143.14047368094793,
-        184.71252605501266
+        119.36457956380966,
+        188.5509126576954
       ],
       "z": 1
     },
@@ -120,7 +120,7 @@
       "parent": "torso",
       "pivot": [
         100,
-        101.89007968467328
+        77.13624872354264
       ],
       "z": 2
     }
@@ -530,23 +530,23 @@
     }
   ],
   "idle": {
-    "breathAmplitude": 3,
-    "breathPeriod": 4,
+    "breathAmplitude": 3.6,
+    "breathPeriod": 3.2,
     "blinkRateHz": 0.45,
     "blinkDuration": 0.12
   },
   "voice": "David",
-  "voiceRate": 1,
+  "voiceRate": 0,
   "voiceRef": null,
   "voiceProvenance": null,
   "acting": {
-    "reactionMs": 420,
-    "gestureBias": 0.89,
-    "fidgetAmp": 2.7
+    "reactionMs": 151,
+    "gestureBias": 1.3,
+    "fidgetAmp": 1.5
   },
   "voicePersona": {
-    "energy": 1,
-    "pace": 1
+    "energy": 1.1,
+    "pace": 0.89
   },
-  "svg": "marge.svg"
+  "svg": "mel.svg"
 }

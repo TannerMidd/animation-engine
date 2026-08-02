@@ -19,6 +19,8 @@ import {
   actingOf, expressionSegments, valueAt, gestureReleaseMs, fidgetSchedule, fidgetAt,
   gazeTowardSpeaker, type ActingResolved, type FidgetShift,
 } from './performance.ts';
+import { activeIdentity } from '../show/context.ts';
+import { titleCardSvg, endCardSvg } from '../render/cards.ts';
 
 /**
  * Shot list + audio timing -> per-frame scene IR.
@@ -60,6 +62,24 @@ const TALK_SWAP_MS = 420;
  * is the classic two-step snap and costs one frame.
  */
 const SNAP_BLEND = 0.6;
+
+/**
+ * How many milliseconds of card sit before and after the scene body.
+ *
+ * The one place this arithmetic lives: the compiler splices frames with it and
+ * the soundtrack shifts placements with it, so picture and sound cannot
+ * disagree about where the scene starts.
+ */
+export function cardTiming(shots: Pick<ShotList, 'cards' | 'fps'>): { titleMs: number; endMs: number; titleFrames: number; endFrames: number } {
+  if (!shots.cards) return { titleMs: 0, endMs: 0, titleFrames: 0, endFrames: 0 };
+  const cards = activeIdentity().visual.cards;
+  return {
+    titleFrames: cards.titleFrames,
+    endFrames: cards.endFrames,
+    titleMs: (cards.titleFrames / shots.fps) * 1000,
+    endMs: (cards.endFrames / shots.fps) * 1000,
+  };
+}
 
 interface Timed {
   beat: ShotBeat;
@@ -109,7 +129,10 @@ export interface AudioPlacement {
 export interface CompiledScene {
   ir: SceneIR;
   audio: AudioPlacement[];
+  /** Full programme length, cards included. */
   durationMs: number;
+  /** Millisecond start of each beat on the final timeline (card-shifted). */
+  beatStarts: number[];
 }
 
 function buildTimeline(shots: ShotList, timings: Map<number, LineTiming>): Timed[] {
@@ -385,9 +408,37 @@ export function compileShotList(
     frames.push({ camera, actors: cachedActors });
   }
 
+  /**
+   * Cards splice AROUND the finished body.
+   *
+   * The body frames above were computed with time starting at the first real
+   * beat, so every blink, breath phase and reaction is byte-identical whether
+   * cards are on or off — the cards are packaging, not time. Audio placements
+   * shift by the same title duration from the same helper, so sync is
+   * arithmetic, not luck.
+   */
+  const cards = cardTiming(shots);
+  const fullStage = { x: 0, y: 0, w: stage.width, h: stage.height };
+  const identity = activeIdentity();
+
+  const spliced: IRFrame[] = [];
+  for (let i = 0; i < cards.titleFrames; i++) spliced.push({ camera: fullStage, actors: {}, card: 'title' });
+  spliced.push(...frames);
+  // The smash cut: the last body frame is a normal frame; the next is card.
+  for (let i = 0; i < cards.endFrames; i++) spliced.push({ camera: fullStage, actors: {}, card: 'end' });
+
+  const cardArt = cards.titleFrames || cards.endFrames
+    ? {
+        titleSvg: cards.titleFrames
+          ? titleCardSvg(identity, shots.title ?? shots.scene.replace(/-/g, ' '), shots.subtitle ?? undefined)
+          : undefined,
+        endSvg: cards.endFrames ? endCardSvg(identity) : undefined,
+      }
+    : undefined;
+
   const audio: AudioPlacement[] = timeline
     .filter((t) => t.timing)
-    .map((t) => ({ file: t.timing!.audio, startMs: t.startMs }));
+    .map((t) => ({ file: t.timing!.audio, startMs: t.startMs + cards.titleMs }));
 
   return {
     ir: {
@@ -399,11 +450,13 @@ export function compileShotList(
         seed: shots.seed,
         audio: 'dialogue.wav',
         set: shots.set,
+        cards: cardArt,
       },
       cast: shots.cast.map((c) => ({ id: c.id, rig: c.rig })),
-      frames,
+      frames: spliced,
     },
     audio,
-    durationMs,
+    durationMs: durationMs + cards.titleMs + cards.endMs,
+    beatStarts: timeline.map((t) => t.startMs + cards.titleMs),
   };
 }

@@ -49,15 +49,9 @@ export async function buildPreview(
     background: '#2b2f36',
   });
 
-  // Recompute beat starts the same way the compiler does, so a timeline click
-  // lands on exactly the frame the compiler put that beat at.
-  const beatStarts: number[] = [];
-  let cursor = 0;
-  for (let i = 0; i < shots.beats.length; i++) {
-    beatStarts.push(cursor);
-    const beat = shots.beats[i]!;
-    cursor += beat.kind === 'line' ? (resolved.get(i)?.durationMs ?? 0) + 160 : beat.ms;
-  }
-
-  return { ir: compiled.ir, html, durationMs: compiled.durationMs, beatStarts, estimated };
+  // Canonical beat starts come from the compiler — one timeline computation,
+  // card offsets included, so a timeline click lands on exactly the frame the
+  // compiler put that beat at. The old duplicate arithmetic here is what the
+  // roadmap calls a preview that lies.
+  return { ir: compiled.ir, html, durationMs: compiled.durationMs, beatStarts: compiled.beatStarts, estimated };
 }

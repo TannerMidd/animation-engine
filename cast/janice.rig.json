@@ -1,5 +1,12 @@
 {
   "name": "janice",
+  "charId": "janice",
+  "locks": [],
+  "identity": {
+    "id": "house",
+    "version": "1.0.0",
+    "hash": "247eac48398b"
+  },
   "canvas": {
     "width": 200,
     "height": 400
@@ -44,7 +51,6 @@
     "shoes": "round",
     "accent": "#4f7a5c"
   },
-  "locks": [],
   "parts": [
     {
       "id": "torso",
@@ -523,6 +529,12 @@
       "suppressBlink": false
     }
   ],
+  "idle": {
+    "breathAmplitude": 3,
+    "breathPeriod": 4,
+    "blinkRateHz": 0.45,
+    "blinkDuration": 0.12
+  },
   "voice": "David",
   "voiceRate": -1,
   "voiceRef": "janice.ref.wav",
@@ -531,26 +543,14 @@
     "seed": 834087563,
     "hash": "5651d70c1a0b8122b3ce7f551e7f80b68d515605"
   },
-  "voicePersona": {
-    "energy": 1,
-    "pace": 1
-  },
-  "idle": {
-    "breathAmplitude": 3,
-    "breathPeriod": 4,
-    "blinkRateHz": 0.45,
-    "blinkDuration": 0.12
-  },
   "acting": {
     "reactionMs": 430,
     "gestureBias": 0.7,
     "fidgetAmp": 2.5
   },
-  "svg": "janice.svg",
-  "charId": "janice",
-  "identity": {
-    "id": "house",
-    "version": "1.0.0",
-    "hash": "db5f40c8a297"
-  }
+  "voicePersona": {
+    "energy": 1,
+    "pace": 1
+  },
+  "svg": "janice.svg"
 }

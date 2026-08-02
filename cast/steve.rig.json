@@ -1,5 +1,12 @@
 {
   "name": "steve",
+  "charId": "steve",
+  "locks": [],
+  "identity": {
+    "id": "house",
+    "version": "1.0.0",
+    "hash": "247eac48398b"
+  },
   "canvas": {
     "width": 200,
     "height": 400
@@ -44,7 +51,6 @@
     "shoes": "round",
     "accent": "#a04f4f"
   },
-  "locks": [],
   "parts": [
     {
       "id": "torso",
@@ -523,6 +529,12 @@
       "suppressBlink": false
     }
   ],
+  "idle": {
+    "breathAmplitude": 3,
+    "breathPeriod": 4,
+    "blinkRateHz": 0.45,
+    "blinkDuration": 0.12
+  },
   "voice": "Zira",
   "voiceRate": -1,
   "voiceRef": "steve.ref.wav",
@@ -531,26 +543,14 @@
     "seed": 734621471,
     "hash": "3bb7327d1322b2c1a37ec709a9178aa9af442237"
   },
-  "voicePersona": {
-    "energy": 1,
-    "pace": 1
-  },
-  "idle": {
-    "breathAmplitude": 3,
-    "breathPeriod": 4,
-    "blinkRateHz": 0.45,
-    "blinkDuration": 0.12
-  },
   "acting": {
     "reactionMs": 397,
     "gestureBias": 0.79,
     "fidgetAmp": 0.8
   },
-  "svg": "steve.svg",
-  "charId": "steve",
-  "identity": {
-    "id": "house",
-    "version": "1.0.0",
-    "hash": "db5f40c8a297"
-  }
+  "voicePersona": {
+    "energy": 1,
+    "pace": 1
+  },
+  "svg": "steve.svg"
 }

@@ -10,6 +10,8 @@ import {
   exists, outputPath, scriptPath,
 } from '../pipeline/scene.ts';
 import { checkScript, summarise, loadRigsForShotList, applySceneOutfits } from '../pipeline/check.ts';
+import { mergeShotLists, diffShotLists } from '../pipeline/propose.ts';
+import { supportedText } from '../render/glyphs.ts';
 import { buildPreview } from '../pipeline/preview.ts';
 import { renderScene } from '../pipeline/render.ts';
 import { resolveTimings, mixSceneAudio } from '../pipeline/voices.ts';
@@ -281,7 +283,13 @@ router.post('/api/scenes/:name/check', async ({ req, res, params }) => {
   });
 });
 
-/** Re-run the director, replacing any hand edits to the shot list. */
+/**
+ * Run the director — as a proposal, never a replacement.
+ *
+ * Nothing is written. The response carries the proposed shot list, a beat
+ * diff against what exists, and the merge preview (how many locked beats
+ * survive). Applying is a second, explicit call.
+ */
 router.post('/api/scenes/:name/direct', async ({ req, res, params }) => {
   const body = await readJson<{ source?: string; seed?: number; resting?: string; set?: string | null }>(req);
   const scene = params['name']!;
@@ -296,8 +304,26 @@ router.post('/api/scenes/:name/direct', async ({ req, res, params }) => {
   });
 
   if (!result.shots) throw new HttpError(400, result.errors.join('; ') || 'could not direct this script');
-  await writeShotList(scene, result.shots);
-  json(res, { shots: result.shots, errors: result.errors, newCharacters: result.newCharacters });
+
+  const current = await readShotList(scene).catch(() => null);
+  const { merged, droppedLocked, keptLocked } = mergeShotLists(current, result.shots);
+
+  json(res, {
+    proposed: merged,
+    diff: diffShotLists(current, merged),
+    keptLocked,
+    droppedLocked: droppedLocked.length,
+    errors: result.errors,
+    newCharacters: result.newCharacters,
+  });
+});
+
+/** Write an accepted proposal. The body is what /direct returned as `proposed`. */
+router.post('/api/scenes/:name/direct/apply', async ({ req, res, params }) => {
+  const body = await readJson<{ shots: unknown }>(req);
+  const shots = ShotList.parse(body.shots);
+  await writeShotList(params['name']!, shots);
+  json(res, { ok: true, summary: summarise(shots) });
 });
 
 router.put('/api/scenes/:name/shotlist', async ({ req, res, params }) => {
@@ -384,6 +410,69 @@ router.post('/api/scenes/:name/render', async ({ req, res, params }) => {
  * since, playing the old audio against the new edit would be quietly wrong in
  * the way nobody catches. A 409 with "run Voices again" is the honest answer.
  */
+/**
+ * Everything that would go wrong with a long job, found before it starts.
+ *
+ * A render is minutes; every item here is milliseconds. The notes are levelled
+ * so the UI can distinguish "this will fail" from "this will be prepared
+ * automatically" from "worth knowing".
+ */
+router.get('/api/scenes/:name/preflight', async ({ res, params }) => {
+  const scene = params['name']!;
+  const notes: Array<{ level: 'error' | 'warn' | 'info'; message: string }> = [];
+
+  const shots = await readShotList(scene).catch(() => null);
+  if (!shots) {
+    json(res, { ok: false, notes: [{ level: 'error', message: 'the scene has not been directed yet' }] });
+    return;
+  }
+
+  const identity = activeIdentity();
+  if (shots.identity && shots.identity.hash !== stampOf(identity).hash) {
+    notes.push({
+      level: 'warn',
+      message: `directed under identity ${shots.identity.id}@${shots.identity.hash}, but ${identity.id}@${stampOf(identity).hash} is active — re-direct to pick up the current show`,
+    });
+  }
+
+  const onDisk = new Set(await listRigs());
+  for (const member of shots.cast) {
+    if (!onDisk.has(member.rig)) {
+      notes.push({ level: 'warn', message: `"${member.rig}" has no saved rig — a placeholder will be cast at render time` });
+      continue;
+    }
+    const { rig } = await loadRig(member.rig);
+    if (!rig.voiceRef) {
+      notes.push({ level: 'info', message: `"${member.rig}" has no voice yet — one will be minted during Voices` });
+    }
+  }
+
+  if (shots.set && !(await listSets()).includes(shots.set) && !BUILTIN_SETS[shots.set]) {
+    notes.push({ level: 'error', message: `set "${shots.set}" does not exist` });
+  }
+
+  if (shots.cards && shots.title) {
+    const drawable = supportedText(shots.title).trim();
+    if (!drawable) notes.push({ level: 'warn', message: 'the title contains no characters the card alphabet can draw' });
+  }
+
+  const rigs = await rigsFor(shots);
+  if (await exists(path.join(sceneDir(scene), 'dialogue.wav'))) {
+    if (!(await soundtrackIsCurrent(scene, shots, rigs))) {
+      notes.push({ level: 'warn', message: 'the rendered audio is stale — run Voices again before trusting playback' });
+    }
+  }
+
+  for (const beat of shots.beats) {
+    if (beat.locked) {
+      notes.push({ level: 'info', message: `${shots.beats.filter((b) => b.locked).length} locked beat(s) will survive director reruns` });
+      break;
+    }
+  }
+
+  json(res, { ok: !notes.some((n) => n.level === 'error'), notes });
+});
+
 router.get('/api/scenes/:name/audio', async ({ res, params, req }) => {
   const scene = params['name']!;
   const shots = await readShotList(scene).catch(() => null);

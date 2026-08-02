@@ -15,7 +15,8 @@ import { toBusSamples, fadeEdges, masterToWav, rmsDb, db, type BusClip } from '.
 import { renderAmbience, acousticProfileFor, ACOUSTIC_PROFILES, type AcousticProfile } from '../audio/ambience.ts';
 import { loadSet } from '../sets/index.ts';
 import { BUILTIN_SETS } from '../sets/builtins.ts';
-import { estimateLineMs } from '../compile/scene.ts';
+import { estimateLineMs, cardTiming } from '../compile/scene.ts';
+import { titleSting, endSting } from '../audio/stings.ts';
 import { exists, voPath } from './scene.ts';
 import { listRigs, loadRig } from '../cast/store.ts';
 import type { ShotList } from '../schema/script.ts';
@@ -163,6 +164,19 @@ export async function mixSceneAudio(
   const ambience = await sceneAmbience(shots, durationMs);
   if (ambience) clips.push(ambience);
 
+  // Card punctuation, from the same timing helper the compiler splices with.
+  const stings = identity.audio.stings;
+  if (stings.enabled && shots.cards) {
+    const cards = cardTiming(shots);
+    const gain = db(stings.levelDb);
+    if (cards.titleMs > 0) {
+      clips.push({ samples: titleSting(identity.seed), startMs: 0, gain });
+    }
+    if (cards.endMs > 0) {
+      clips.push({ samples: endSting(identity.seed), startMs: durationMs - cards.endMs, gain });
+    }
+  }
+
   await fs.writeFile(
     out,
     masterToWav(clips, {
@@ -230,6 +244,7 @@ export interface SoundtrackFingerprint {
   identity: { id: string; version: string; hash: string };
   placements: Array<{ key: string; startMs: number }>;
   ambience: { profile: string; levelDb: number; enabled: boolean };
+  cards: { enabled: boolean; titleMs: number; endMs: number; titleFrames: number; endFrames: number };
   mix: { targetRmsDb: number; ceilingDb: number };
 }
 
@@ -263,6 +278,7 @@ export async function soundtrackFingerprint(
       levelDb: identity.audio.ambience.levelDb,
       enabled: identity.audio.ambience.enabled,
     },
+    cards: { enabled: shots.cards, ...cardTiming(shots) },
     mix: identity.audio.mix,
   };
 }
@@ -326,6 +342,7 @@ export async function soundtrackIsCurrent(
   return (
     stored.identity.hash === now.identity.hash &&
     JSON.stringify(stored.ambience) === JSON.stringify(now.ambience) &&
+    JSON.stringify(stored.cards) === JSON.stringify(now.cards) &&
     JSON.stringify(stored.mix) === JSON.stringify(now.mix)
   );
 }

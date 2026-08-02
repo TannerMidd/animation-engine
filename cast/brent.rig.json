@@ -1,5 +1,12 @@
 {
   "name": "brent",
+  "charId": "brent",
+  "locks": [],
+  "identity": {
+    "id": "house",
+    "version": "1.0.0",
+    "hash": "247eac48398b"
+  },
   "canvas": {
     "width": 200,
     "height": 400
@@ -44,7 +51,6 @@
     "shoes": "flat",
     "accent": "#8c7a3f"
   },
-  "locks": [],
   "parts": [
     {
       "id": "torso",
@@ -523,6 +529,12 @@
       "suppressBlink": false
     }
   ],
+  "idle": {
+    "breathAmplitude": 3,
+    "breathPeriod": 4,
+    "blinkRateHz": 0.45,
+    "blinkDuration": 0.12
+  },
   "voice": "David",
   "voiceRate": 1,
   "voiceRef": "brent.ref.wav",
@@ -531,26 +543,14 @@
     "seed": 1067816518,
     "hash": "15b21e4d4243daa668e1df0cc147754d468b555a"
   },
-  "voicePersona": {
-    "energy": 1,
-    "pace": 1
-  },
-  "idle": {
-    "breathAmplitude": 3,
-    "breathPeriod": 4,
-    "blinkRateHz": 0.45,
-    "blinkDuration": 0.12
-  },
   "acting": {
     "reactionMs": 268,
     "gestureBias": 0.76,
     "fidgetAmp": 1.8
   },
-  "svg": "brent.svg",
-  "charId": "brent",
-  "identity": {
-    "id": "house",
-    "version": "1.0.0",
-    "hash": "db5f40c8a297"
-  }
+  "voicePersona": {
+    "energy": 1,
+    "pace": 1
+  },
+  "svg": "brent.svg"
 }
