@@ -29,11 +29,13 @@ export interface BuildSpec {
 }
 
 export const BUILD_SPECS: Record<Build, BuildSpec> = {
-  squat: { head: 1.28, bodyWidth: 1.22, bodyHeight: 0.8, limbLength: 0.72, limbWidth: 1.2, torso: 'round' },
-  lanky: { head: 0.8, bodyWidth: 0.76, bodyHeight: 1.18, limbLength: 1.28, limbWidth: 0.78, torso: 'rounded' },
-  boxy: { head: 1.02, bodyWidth: 1.16, bodyHeight: 1.0, limbLength: 0.94, limbWidth: 1.12, torso: 'boxy' },
-  round: { head: 1.12, bodyWidth: 1.3, bodyHeight: 0.88, limbLength: 0.8, limbWidth: 1.02, torso: 'round' },
-  pear: { head: 0.94, bodyWidth: 1.08, bodyHeight: 1.02, limbLength: 0.98, limbWidth: 0.94, torso: 'pear' },
+  // Contrast tuned against the silhouette test, not the colour render: flatten
+  // a cast to one ink and these five must still read as five different people.
+  squat: { head: 1.34, bodyWidth: 1.36, bodyHeight: 0.7, limbLength: 0.66, limbWidth: 1.26, torso: 'round' },
+  lanky: { head: 0.74, bodyWidth: 0.62, bodyHeight: 1.22, limbLength: 1.38, limbWidth: 0.72, torso: 'rounded' },
+  boxy: { head: 1.0, bodyWidth: 1.24, bodyHeight: 1.0, limbLength: 0.92, limbWidth: 1.16, torso: 'boxy' },
+  round: { head: 1.14, bodyWidth: 1.44, bodyHeight: 0.86, limbLength: 0.78, limbWidth: 1.04, torso: 'round' },
+  pear: { head: 0.9, bodyWidth: 1.1, bodyHeight: 1.04, limbLength: 0.96, limbWidth: 0.92, torso: 'pear' },
 };
 
 /**

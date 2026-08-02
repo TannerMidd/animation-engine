@@ -81,9 +81,14 @@ export interface Vocab {
   palettes: string[];
   engines: string[];
   look: LookVocab;
+  outfit: { choices: Record<OutfitKey, string[]>; accents: string[] };
   auditionLines: string[];
   referenceSeconds: { min: number; max: number };
 }
+
+export type OutfitKey = 'sleeves' | 'collar' | 'neckwear' | 'pattern' | 'hat' | 'shoes';
+
+export type Outfit = Record<OutfitKey, string> & { accent: string };
 
 /**
  * Everything the appearance editor needs to build its own controls.
@@ -220,6 +225,7 @@ export interface RigDoc {
   voiceRef: string | null;
   voiceProvenance?: { source: 'minted' | 'recorded' | 'uploaded' } | null;
   look?: Look;
+  outfit?: Outfit;
   expressions: { name: string }[];
   poses: { name: string }[];
   [key: string]: unknown;

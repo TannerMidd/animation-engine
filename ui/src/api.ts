@@ -1,6 +1,6 @@
 import type {
   CastSummary, CheckResult, FacePlate, Health, JobEvent, JobSummary, LlmStatus, Look, PreviewInfo,
-  PropDefInfo, RigDoc, SceneDetail, SceneSummary, SetDescriptor, SetSummary, ShotList, ShowInfo, Vocab,
+  Outfit, PropDefInfo, RigDoc, SceneDetail, SceneSummary, SetDescriptor, SetSummary, ShotList, ShowInfo, Vocab,
 } from './types.ts';
 
 /** Thin typed wrappers over the engine server. */
@@ -55,15 +55,15 @@ export const api = {
   newCharacter: (name: string) => post<{ name: string; look: Look }>('/api/cast', { name }),
   regenerateRig: (name: string) => post<{ rig: RigDoc; look: Look }>(`/api/cast/${name}/regenerate`),
 
-  saveLook: (name: string, look: Look) =>
-    put<{ rig: RigDoc; look: Look }>(`/api/cast/${name}/look`, { look }),
+  saveLook: (name: string, look: Look, outfit?: Outfit) =>
+    put<{ rig: RigDoc; look: Look }>(`/api/cast/${name}/look`, { look, outfit }),
   rollLook: (name: string, salt: string) =>
     call<{ look: Look }>(`/api/cast/${name}/look/roll?salt=${encodeURIComponent(salt)}`),
 
-  castPreview: (name: string, pose: string, expression: string, look?: Look) =>
-    post<{ previewId: string }>(`/api/cast/${name}/preview`, { pose, expression, look }),
-  faces: (name: string, look?: Look) =>
-    post<{ plates: FacePlate[] }>(`/api/cast/${name}/faces`, { look }),
+  castPreview: (name: string, pose: string, expression: string, look?: Look, outfit?: Outfit) =>
+    post<{ previewId: string }>(`/api/cast/${name}/preview`, { pose, expression, look, outfit }),
+  faces: (name: string, look?: Look, outfit?: Outfit) =>
+    post<{ plates: FacePlate[] }>(`/api/cast/${name}/faces`, { look, outfit }),
 
   uploadRef: (name: string, filename: string, dataBase64: string) =>
     put<{ ok: true; voiceRef: string; durationMs: number; warnings: string[] }>(

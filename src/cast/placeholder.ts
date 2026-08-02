@@ -1,8 +1,11 @@
 import { Rng, deriveSeed } from '../core/rng.ts';
-import { MOUTH_SHAPES, type Rig, type Part, type Pose, type Expression } from '../schema/index.ts';
+import { MOUTH_SHAPES, Outfit, type Rig, type Part, type Pose, type Expression } from '../schema/index.ts';
 import { activeStyle } from '../style/index.ts';
+import { activeIdentity } from '../show/context.ts';
 import { drawShape, drawStroke, rectPoints, ellipsePoints, type Point } from '../style/wobble.ts';
 import { BUILD_SPECS, rollLook, type Look } from './look.ts';
+import { defaultOutfit } from './ensemble.ts';
+import { torsoPattern, collar, neckwear, hat, shoe, hatHeadroom, type WardrobeGeometry } from './wardrobe.ts';
 
 /**
  * Placeholder puppet generator.
@@ -267,14 +270,19 @@ function proportionsFor(look: Look): Proportions {
  * that gets a generous guess instead — too wide is survivable, too tight cuts
  * someone's hair off.
  */
-export function faceBox(rig: { canvas: { width: number; height: number }; focus?: [number, number]; look?: Look }): {
-  x: number; y: number; w: number; h: number;
-} {
+export function faceBox(rig: {
+  canvas: { width: number; height: number };
+  focus?: [number, number];
+  look?: Look;
+  outfit?: Outfit;
+}): { x: number; y: number; w: number; h: number } {
   if (rig.look) {
     const p = proportionsFor(rig.look);
-    // Wide enough for stuck-out ears and a ponytail, tall enough for a topknot.
+    // Wide enough for stuck-out ears and a ponytail, tall enough for a topknot
+    // — and taller again when a hat adds real height above the crown.
     const half = p.headR * Math.max(p.sideW + 0.34, p.halfH + 0.5);
-    return { x: p.headCx - half, y: p.headCy - half, w: half * 2, h: half * 2 };
+    const above = rig.outfit ? hatHeadroom(rig.outfit, p.headR) : 0;
+    return { x: p.headCx - half, y: p.headCy - half - above, w: half * 2, h: half * 2 + above };
   }
   const [fx, fy] = rig.focus ?? [rig.canvas.width / 2, rig.canvas.height * 0.16];
   const half = rig.canvas.width * 0.5;
@@ -367,8 +375,9 @@ function buildExpressions(): Expression[] {
   ];
 }
 
-export function buildPlaceholderRig(name: string, look?: Look): Rig {
+export function buildPlaceholderRig(name: string, look?: Look, outfit?: Outfit): Rig {
   const resolved = look ?? rollLook(name);
+  const wardrobe = outfit ?? defaultOutfit(activeIdentity(), name);
   const p = proportionsFor(resolved);
   // Separate stream from the look, so changing the palette later can't silently
   // recast everyone's voice.
@@ -380,6 +389,7 @@ export function buildPlaceholderRig(name: string, look?: Look): Rig {
     anchor: [W / 2, H],
     focus: [p.headCx, p.headCy],
     look: resolved,
+    outfit: wardrobe,
     locks: [],
     parts: buildParts(p),
     swapSets: [
@@ -724,7 +734,7 @@ function ears(p: Proportions, head: Point[]): string {
  * follows whatever silhouette the character has rather than needing a variant
  * per head shape.
  */
-function hair(p: Proportions, head: Point[]): { back: string; front: string } {
+function hair(p: Proportions, head: Point[], underHat = false): { back: string; front: string } {
   const c = p.look;
   const style = activeStyle();
   const r = p.headR;
@@ -766,7 +776,16 @@ function hair(p: Proportions, head: Point[]): { back: string; front: string } {
   let back = '';
   let front = '';
 
-  switch (c.hair) {
+  // A hat covers the crown, so styles whose identity lives in decorations
+  // above it fall back to the plain cap — curls poking out around a beanie
+  // read as animal ears, not as hair. Side and back pieces (sideburns,
+  // ponytail) survive; they hang below the hat line.
+  const style_ = c.hair;
+  const hatted = underHat && ['spikes', 'bun', 'tall', 'curly', 'combover'].includes(style_)
+    ? 'crop'
+    : style_;
+
+  switch (hatted) {
     case 'receding': {
       front = cap(cy - r * p.halfH * 0.68);
       // Two temple wedges, which is what actually reads as receding — a high
@@ -997,28 +1016,56 @@ function torsoPoints(p: Proportions): Point[] {
 
   switch (BUILD_SPECS[p.look.build].torso) {
     case 'boxy':
-      return rectPoints(cx - hw, top, hw * 2, bot - top, hw * 0.14);
+      // Square shoulders with a slight ledge past the arms — reads as a crate
+      // in silhouette, which is the point of being boxy.
+      return [
+        [cx - hw * 1.06, top], [cx + hw * 1.06, top],
+        [cx + hw, top + (bot - top) * 0.2], [cx + hw, bot],
+        [cx - hw, bot], [cx - hw, top + (bot - top) * 0.2],
+      ];
     case 'round':
       return ellipsePoints(cx, (top + bot) / 2, hw, (bot - top) / 2, 16);
     case 'pear':
-      // Narrow at the shoulders, wide at the hips.
+      // Genuinely narrow at the shoulders, hips wider than the nominal width —
+      // the old 0.68/1.0 version flattened into a rectangle at thumbnail size.
       return [
-        [cx - hw * 0.68, top], [cx + hw * 0.68, top],
-        [cx + hw, bot - (bot - top) * 0.28], [cx + hw * 0.86, bot],
-        [cx - hw * 0.86, bot], [cx - hw, bot - (bot - top) * 0.28],
+        [cx - hw * 0.5, top], [cx + hw * 0.5, top],
+        [cx + hw * 1.14, bot - (bot - top) * 0.24], [cx + hw * 0.95, bot],
+        [cx - hw * 0.95, bot], [cx - hw * 1.14, bot - (bot - top) * 0.24],
       ];
     default:
       return rectPoints(cx - hw, top, hw * 2, bot - top, hw * 0.42);
   }
 }
 
-export function buildPlaceholderSvg(name: string, look?: Look): string {
+export function buildPlaceholderSvg(name: string, look?: Look, outfit?: Outfit): string {
   const c = look ?? rollLook(name);
+  const o = outfit ?? defaultOutfit(activeIdentity(), name);
   const p = proportionsFor(c);
   const j = joints(p);
   const lw = p.limbW;
   const style = activeStyle();
   const head = headPoints(p);
+
+  // Everything wardrobe needs to fit this particular body, measured once.
+  const geometry: WardrobeGeometry = {
+    look: c,
+    outfit: o,
+    headCx: p.headCx,
+    headCy: p.headCy,
+    headR: p.headR,
+    halfH: p.halfH,
+    neckTop: p.neckTop,
+    bodyTop: p.bodyTop,
+    bodyBottom: p.bodyBottom,
+    bodyHalfW: p.bodyHalfW,
+    hipY: p.hipY,
+    legLen: p.legLen,
+    limbW: p.limbW,
+    browY: p.browY,
+    torso: torsoPoints(p),
+    crownAt: (x) => outlineTop(head, x),
+  };
 
   // Limbs are drawn from half a limb-width above the joint and run half a
   // limb-width past the end, so the rounded caps sit centred on the pivots and
@@ -1026,13 +1073,11 @@ export function buildPlaceholderSvg(name: string, look?: Look): string {
   const limb = (x: number, jointY: number, len: number, fill: string) =>
     drawShape(rectPoints(x - lw / 2, jointY - lw / 2, lw, len + lw, lw / 2), style, fill, c.line);
 
-  // A foot at the end of each leg. Without one the character reads as balancing
-  // on two poles, and the ankle is where the eye expects the ground contact.
-  const foot = (x: number) =>
-    drawShape(ellipsePoints(x + lw * 0.28, p.hipY + p.legLen, lw * 0.82, lw * 0.42, 10), style, '#2b2f38', c.line);
-
   const hand = (x: number) =>
     drawShape(ellipsePoints(x, j.wristY, lw * 0.62, lw * 0.62, 10), style, c.skin, c.line);
+
+  // Long sleeves put the shirt on the forearm; the hand stays skin either way.
+  const foreFill = o.sleeves === 'long' ? c.shirt : c.skin;
 
   const mouths = [...MOUTH_SHAPES, ...REST_MOUTHS, 'flat']
     .map((s) => `        <g id="mouth_${s}">${mouthShape(s, p)}</g>`)
@@ -1041,25 +1086,28 @@ export function buildPlaceholderSvg(name: string, look?: Look): string {
   const eyes = EYE_VARIANTS.map((v) => `        <g id="eyes_${v}">${eyeSet(v, p)}</g>`).join('\n');
   const brows = BROW_VARIANTS.map((v) => `        <g id="brows_${v}">${browSet(v, p)}</g>`).join('\n');
 
-  const h = hair(p, head);
+  const h = hair(p, head, o.hat !== 'none');
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" data-rig="${name}" data-build="${c.build}">
   <g id="torso">
-    <g id="leg_L">${limb(j.hipL, p.hipY, p.legLen, c.trousers)}${foot(j.hipL)}</g>
-    <g id="leg_R">${limb(j.hipR, p.hipY, p.legLen, c.trousers)}${foot(j.hipR)}</g>
+    <g id="leg_L">${limb(j.hipL, p.hipY, p.legLen, c.trousers)}${shoe(geometry, j.hipL)}</g>
+    <g id="leg_R">${limb(j.hipR, p.hipY, p.legLen, c.trousers)}${shoe(geometry, j.hipR)}</g>
     ${drawShape(rectPoints(W / 2 - lw * 0.6, p.neckTop, lw * 1.2, p.bodyTop - p.neckTop + 18), style, c.skin, c.line)}
     ${drawShape(torsoPoints(p), style, c.shirt, c.line)}
+    ${torsoPattern(geometry)}
+    ${collar(geometry)}
+    ${neckwear(geometry)}
     <g id="arm_L_upper">
       ${limb(j.shoulderL, p.shoulderY, p.armUpperLen, c.shirt)}
       <g id="arm_L_fore">
-        ${limb(j.shoulderL, j.elbowY, p.armForeLen, c.skin)}
+        ${limb(j.shoulderL, j.elbowY, p.armForeLen, foreFill)}
         ${hand(j.shoulderL)}
       </g>
     </g>
     <g id="arm_R_upper">
       ${limb(j.shoulderR, p.shoulderY, p.armUpperLen, c.shirt)}
       <g id="arm_R_fore">
-        ${limb(j.shoulderR, j.elbowY, p.armForeLen, c.skin)}
+        ${limb(j.shoulderR, j.elbowY, p.armForeLen, foreFill)}
         ${hand(j.shoulderR)}
       </g>
     </g>
@@ -1068,6 +1116,7 @@ export function buildPlaceholderSvg(name: string, look?: Look): string {
       ${ears(p, head)}
       ${drawShape(head, style, c.skin, c.line)}
       <g id="hair_front">${h.front}</g>
+      <g id="headwear">${hat(geometry)}</g>
       ${facialHair(p, head)}
       ${nose(p)}
 ${brows}

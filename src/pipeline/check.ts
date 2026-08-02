@@ -125,5 +125,26 @@ export async function loadRigsForShotList(shots: ShotList): Promise<Map<string, 
   for (const member of shots.cast) {
     if (!rigs.has(member.rig)) rigs.set(member.rig, await loadRig(member.rig));
   }
+  return applySceneOutfits(shots, rigs);
+}
+
+/**
+ * Apply per-scene costume overrides by redrawing the puppet in that outfit.
+ *
+ * Only generator-drawn puppets can change clothes — their SVG is a function of
+ * (look, outfit) — so a hand-drawn rig with a scene outfit is left as drawn.
+ * The redraw is scene-local: nothing on disk changes, which is exactly what
+ * "costume continuity by default, override per scene" means.
+ */
+export function applySceneOutfits(shots: ShotList, rigs: Map<string, LoadedRig>): Map<string, LoadedRig> {
+  for (const member of shots.cast) {
+    if (!member.outfit) continue;
+    const loaded = rigs.get(member.rig);
+    if (!loaded?.rig.look) continue;
+    rigs.set(member.rig, {
+      rig: { ...loaded.rig, outfit: member.outfit },
+      svg: buildPlaceholderSvg(loaded.rig.name, loaded.rig.look, member.outfit),
+    });
+  }
   return rigs;
 }

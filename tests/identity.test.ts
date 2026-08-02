@@ -118,11 +118,14 @@ describe('profile-owned rendering', () => {
   it('draws the same character differently under different treatments', () => {
     const look = rollLook('steve');
 
-    setActiveIdentity(fixture({ id: 'thin', visual: { setNotes: [], style: { lineWidth: 3.2, lineWidthJitter: 0.12, wobble: 1.1, wobbleSegments: 2, fillOffset: [0.8, -0.6], grain: 0.02 } } }));
+    const visual = (style: object) =>
+      ShowIdentity.parse({ ...JSON.parse(JSON.stringify(DEFAULT_IDENTITY)), visual: { style } });
+
+    setActiveIdentity({ ...visual({ lineWidth: 3.2, lineWidthJitter: 0.12, wobble: 1.1, wobbleSegments: 2, fillOffset: [0.8, -0.6], grain: 0.02 }), id: 'thin' });
     const thin = buildPlaceholderSvg('steve', look);
     expect(activeStyle().name).toBe('thin');
 
-    setActiveIdentity(fixture({ id: 'heavy', visual: { setNotes: [], style: { lineWidth: 7.5, lineWidthJitter: 0.5, wobble: 5.2, wobbleSegments: 4, fillOffset: [5.5, -4], grain: 0.14 } } }));
+    setActiveIdentity({ ...visual({ lineWidth: 7.5, lineWidthJitter: 0.5, wobble: 5.2, wobbleSegments: 4, fillOffset: [5.5, -4], grain: 0.14 }), id: 'heavy' });
     const heavy = buildPlaceholderSvg('steve', look);
 
     expect(thin).not.toBe(heavy);

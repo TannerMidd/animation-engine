@@ -10,6 +10,8 @@ import { PALETTE_NAMES } from '../sets/palettes.ts';
 import { buildPlaceholderRig, buildPlaceholderSvg } from '../cast/placeholder.ts';
 import { facePlates, bodyPlate, sheetHtml, type Plate } from '../cast/sheet.ts';
 import { createRig, regenerateRig } from '../cast/authoring.ts';
+import { assignEnsemble } from '../cast/ensemble.ts';
+import { activeIdentity } from '../show/context.ts';
 import { saveRig, loadRig, listRigs, validateRig, type LoadedRig } from '../cast/store.ts';
 import { compileScene, DEFAULT_PLAN, type ActorPlan, type ScenePlan } from '../compile/index.ts';
 import { estimateLineMs } from '../compile/scene.ts';
@@ -154,11 +156,26 @@ async function cmdCastRegen(args: Args) {
   if (!names.length) throw new Error('no characters — run: anim cast new steve');
 
   const reroll = Boolean(args.flags['reroll']);
+  const redress = Boolean(args.flags['redress']);
+
+  // Re-dressing runs the whole cast through the ensemble assigner together, so
+  // family caps (two suits per scene, one walking wrong object) apply across
+  // the group rather than per character in isolation.
+  const wardrobe = redress
+    ? assignEnsemble(activeIdentity(), await Promise.all(names.map(async (n) => (await loadRig(n)).rig.charId ?? n)))
+    : null;
+
   for (const name of names) {
-    const { rig } = await regenerateRig(name, { reroll });
+    const charId = (await loadRig(name)).rig.charId ?? name;
+    const { rig } = await regenerateRig(name, {
+      reroll,
+      outfit: wardrobe?.get(charId)?.outfit,
+    });
     const l = rig.look;
+    const o = rig.outfit;
     console.log(
-      `ok   ${name.padEnd(12)} ${l ? `${l.build}/${l.head} head, ${l.hair} hair, ${l.eyes} eyes` : ''}`,
+      `ok   ${name.padEnd(12)} ${l ? `${l.build}/${l.head}` : ''}` +
+        (o ? `  ${wardrobe?.get(charId)?.family ?? ''} ${o.collar}/${o.neckwear}/${o.pattern}${o.hat !== 'none' ? '/' + o.hat : ''}` : ''),
     );
   }
   console.log(`\nRedrew ${names.length} character${names.length === 1 ? '' : 's'}.`);

@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { z } from 'zod';
+import { OutfitFamily } from './outfit.ts';
 
 /**
  * ShowIdentity v1 — the show's identity as data.
@@ -46,6 +47,27 @@ export const StyleTreatment = z.object({
 });
 export type StyleTreatment = z.infer<typeof StyleTreatment>;
 
+/**
+ * Card typography and layout, profile-owned.
+ *
+ * Type renders through the engine's own vector glyphs — no machine fonts, so a
+ * card looks identical on any machine and the letterforms carry the show's
+ * line treatment like everything else does.
+ */
+export const CardTemplates = z.object({
+  /** Card background; text and rule colours. */
+  paper: z.string().default('#171717'),
+  ink: z.string().default('#e9e3d6'),
+  accent: z.string().default('#b4744a'),
+  /** Title frames prepended to a scene. 0 disables the title card. */
+  titleFrames: z.number().int().min(0).max(240).default(42),
+  /** End-card frames appended after the smash cut. 0 disables. */
+  endFrames: z.number().int().min(0).max(240).default(30),
+  /** Text of the end card. The genre tradition is abrupt. */
+  endText: z.string().max(24).default('THE END'),
+});
+export type CardTemplates = z.infer<typeof CardTemplates>;
+
 export const VisualBible = z.object({
   style: StyleTreatment.default({}),
   /**
@@ -54,8 +76,16 @@ export const VisualBible = z.object({
    * the prose that used to be hardcoded in the generation prompt.
    */
   setNotes: z.array(z.string()).default([]),
-  // M19 extends: paletteRoles, outfitFamilies, silhouetteCategories,
-  // ensembleRules, setMotifs, typography and card templates.
+  /**
+   * Wardrobe archetypes the ensemble assigner distributes across the cast.
+   * Empty means "no wardrobe opinion": characters roll independently, which is
+   * the pre-M19 behaviour.
+   */
+  outfitFamilies: z.array(OutfitFamily).default([]),
+  /** Accent colours wardrobe may draw from. */
+  accents: z.array(z.string()).default([]),
+  /** Title and end card treatment. */
+  cards: CardTemplates.default({}),
 });
 export type VisualBible = z.infer<typeof VisualBible>;
 
@@ -228,6 +258,51 @@ export const DEFAULT_IDENTITY: ShowIdentity = ShowIdentity.parse({
       'Rooms that have been used: push things off centre and off the grid. Nothing is aligned, nothing is new, nobody tidied up.',
       'Depth by layer, not by detail: get the read from back versus mid versus fore, not from adding more objects.',
     ],
+    // The workplace ensemble: mostly drones, a manager or two, some off-dress
+    // staff, and at most one person who is a walking wrong object.
+    outfitFamilies: [
+      {
+        name: 'drone',
+        weight: 5,
+        fixed: { hat: 'none' },
+        options: {
+          collar: ['flat', 'pointed'],
+          neckwear: ['none', 'tie', 'lanyard'],
+          pattern: ['solid', 'pocket', 'stripes'],
+          shoes: ['round', 'flat'],
+        },
+      },
+      {
+        name: 'management',
+        weight: 2,
+        maxPerScene: 2,
+        fixed: { collar: 'pointed', neckwear: 'tie', sleeves: 'long', hat: 'none', pattern: 'solid' },
+        options: { shoes: ['flat', 'round'] },
+      },
+      {
+        name: 'off-dress',
+        weight: 3,
+        fixed: { collar: 'none', neckwear: 'none' },
+        options: {
+          pattern: ['solid', 'stripes'],
+          hat: ['none', 'none', 'cap', 'beanie'],
+          shoes: ['round', 'boot'],
+        },
+      },
+      {
+        name: 'wrong-object',
+        weight: 1,
+        maxPerScene: 1,
+        options: {
+          collar: ['turtleneck'],
+          neckwear: ['bowtie', 'none'],
+          hat: ['brim', 'none'],
+          pattern: ['stripes', 'solid'],
+          shoes: ['boot'],
+        },
+      },
+    ],
+    accents: ['#a04f4f', '#c9803f', '#8c7a3f', '#4f7a5c', '#3f6b6b', '#4a5f8c', '#6b4f7a'],
   },
   performance: {
     register: [

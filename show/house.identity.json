@@ -22,7 +22,121 @@
       "One wrong object: every room gets a single item that does not belong — a lone traffic cone indoors, a plant beside a filing cabinet. That object is the joke.",
       "Rooms that have been used: push things off centre and off the grid. Nothing is aligned, nothing is new, nobody tidied up.",
       "Depth by layer, not by detail: get the read from back versus mid versus fore, not from adding more objects."
-    ]
+    ],
+    "outfitFamilies": [
+      {
+        "name": "drone",
+        "fixed": {
+          "hat": "none"
+        },
+        "options": {
+          "collar": [
+            "flat",
+            "pointed"
+          ],
+          "neckwear": [
+            "none",
+            "tie",
+            "lanyard"
+          ],
+          "pattern": [
+            "solid",
+            "pocket",
+            "stripes"
+          ],
+          "shoes": [
+            "round",
+            "flat"
+          ]
+        },
+        "weight": 5
+      },
+      {
+        "name": "management",
+        "fixed": {
+          "sleeves": "long",
+          "collar": "pointed",
+          "neckwear": "tie",
+          "pattern": "solid",
+          "hat": "none"
+        },
+        "options": {
+          "shoes": [
+            "flat",
+            "round"
+          ]
+        },
+        "weight": 2,
+        "maxPerScene": 2
+      },
+      {
+        "name": "off-dress",
+        "fixed": {
+          "collar": "none",
+          "neckwear": "none"
+        },
+        "options": {
+          "pattern": [
+            "solid",
+            "stripes"
+          ],
+          "hat": [
+            "none",
+            "none",
+            "cap",
+            "beanie"
+          ],
+          "shoes": [
+            "round",
+            "boot"
+          ]
+        },
+        "weight": 3
+      },
+      {
+        "name": "wrong-object",
+        "fixed": {},
+        "options": {
+          "collar": [
+            "turtleneck"
+          ],
+          "neckwear": [
+            "bowtie",
+            "none"
+          ],
+          "pattern": [
+            "stripes",
+            "solid"
+          ],
+          "hat": [
+            "brim",
+            "none"
+          ],
+          "shoes": [
+            "boot"
+          ]
+        },
+        "weight": 1,
+        "maxPerScene": 1
+      }
+    ],
+    "accents": [
+      "#a04f4f",
+      "#c9803f",
+      "#8c7a3f",
+      "#4f7a5c",
+      "#3f6b6b",
+      "#4a5f8c",
+      "#6b4f7a"
+    ],
+    "cards": {
+      "paper": "#171717",
+      "ink": "#e9e3d6",
+      "accent": "#b4744a",
+      "titleFrames": 42,
+      "endFrames": 30,
+      "endText": "THE END"
+    }
   },
   "performance": {
     "register": [
@@ -39,7 +153,21 @@
       "Vary pause lengths; let long silences sit on the person the line landed on."
     ]
   },
-  "audio": {},
+  "audio": {
+    "ambience": {
+      "enabled": true,
+      "levelDb": -30,
+      "setProfiles": {}
+    },
+    "stings": {
+      "enabled": true,
+      "levelDb": -6
+    },
+    "mix": {
+      "targetRmsDb": -20,
+      "ceilingDb": -1
+    }
+  },
   "variation": {
     "locks": []
   }

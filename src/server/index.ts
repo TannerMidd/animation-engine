@@ -9,7 +9,7 @@ import {
   listScenes, readScript, writeScript, readShotList, writeShotList,
   exists, outputPath, scriptPath,
 } from '../pipeline/scene.ts';
-import { checkScript, summarise, loadRigsForShotList } from '../pipeline/check.ts';
+import { checkScript, summarise, loadRigsForShotList, applySceneOutfits } from '../pipeline/check.ts';
 import { buildPreview } from '../pipeline/preview.ts';
 import { renderScene } from '../pipeline/render.ts';
 import { resolveTimings, mixSceneAudio } from '../pipeline/voices.ts';
@@ -19,7 +19,7 @@ import { buildPlaceholderRig, buildPlaceholderSvg } from '../cast/placeholder.ts
 import { createRig, regenerateRig, lookOf } from '../cast/authoring.ts';
 import { facePlates } from '../cast/sheet.ts';
 import { rollLook } from '../cast/look.ts';
-import { Rig, Look, LOOK_CHOICES, LOOK_SWATCHES, LOOK_SLIDERS } from '../schema/index.ts';
+import { Rig, Look, Outfit, LOOK_CHOICES, LOOK_SWATCHES, LOOK_SLIDERS, OUTFIT_CHOICES, ACCENTS } from '../schema/index.ts';
 import { saveReference, clearReference, referencePath, IDEAL_SECONDS } from '../voice/reference.ts';
 import { mintCandidates, commitCandidate, discardCandidates, candidatePath, ensureVoiceRefs } from '../voice/casting.ts';
 import { soundtrackIsCurrent } from '../pipeline/voices.ts';
@@ -93,7 +93,7 @@ async function rigsFor(shots: ShotList): Promise<Map<string, LoadedRig>> {
         : { rig: buildPlaceholderRig(member.rig), svg: buildPlaceholderSvg(member.rig) },
     );
   }
-  return rigs;
+  return applySceneOutfits(shots, rigs);
 }
 
 // --- routes ---------------------------------------------------------------
@@ -208,6 +208,10 @@ router.get('/api/vocab', ({ res }) => {
     // The appearance editor builds its controls from these rather than
     // hardcoding option lists, so adding a hairstyle needs no UI change.
     look: { choices: LOOK_CHOICES, swatches: LOOK_SWATCHES, sliders: LOOK_SLIDERS },
+    outfit: {
+      choices: OUTFIT_CHOICES,
+      accents: activeIdentity().visual.accents.length ? activeIdentity().visual.accents : ACCENTS,
+    },
     auditionLines: AUDITION_LINES,
     referenceSeconds: IDEAL_SECONDS,
   });
@@ -485,12 +489,13 @@ router.post('/api/cast', async ({ req, res }) => {
  * decision that happens to live in the same file.
  */
 router.put('/api/cast/:name/look', async ({ req, res, params }) => {
-  const body = await readJson<{ look?: unknown; reroll?: boolean }>(req);
+  const body = await readJson<{ look?: unknown; outfit?: unknown; reroll?: boolean }>(req);
   const { rig, svg } = await regenerateRig(params['name']!, {
     look: body.look ? Look.parse(body.look) : undefined,
+    outfit: body.outfit ? Outfit.parse(body.outfit) : undefined,
     reroll: body.reroll,
   });
-  json(res, { rig, svg, look: rig.look });
+  json(res, { rig, svg, look: rig.look, outfit: rig.outfit });
 });
 
 /** A look rolled from the name, without saving it. Feeds the "reroll" button. */
@@ -509,15 +514,17 @@ router.get('/api/cast/:name/look/roll', ({ res, params, query }) => {
  */
 router.post('/api/cast/:name/faces', async ({ req, res, params }) => {
   const name = params['name']!;
-  const body = await readJson<{ look?: unknown }>(req);
+  const body = await readJson<{ look?: unknown; outfit?: unknown }>(req);
 
   const onDisk = (await listRigs()).includes(name);
   let loaded: LoadedRig;
 
-  if (body.look) {
-    // Unsaved edits: draw from the descriptor in the request, never from disk.
-    const look = Look.parse(body.look);
-    loaded = { rig: buildPlaceholderRig(name, look), svg: buildPlaceholderSvg(name, look) };
+  if (body.look || body.outfit) {
+    // Unsaved edits: draw from the descriptors in the request, never from disk.
+    const base = onDisk ? await loadRig(name) : null;
+    const look = body.look ? Look.parse(body.look) : (base?.rig.look ?? undefined);
+    const outfit = body.outfit ? Outfit.parse(body.outfit) : base?.rig.outfit;
+    loaded = { rig: buildPlaceholderRig(name, look, outfit), svg: buildPlaceholderSvg(name, look, outfit) };
   } else {
     loaded = onDisk ? await loadRig(name) : { rig: buildPlaceholderRig(name), svg: buildPlaceholderSvg(name) };
   }
@@ -545,19 +552,23 @@ router.post('/api/cast/:name/regenerate', async ({ res, params }) => {
 
 router.post('/api/cast/:name/preview', async ({ req, res, params }) => {
   const name = params['name']!;
-  const body = await readJson<{ pose?: string; expression?: string; look?: unknown }>(req);
+  const body = await readJson<{ pose?: string; expression?: string; look?: unknown; outfit?: unknown }>(req);
 
   const onDisk = new Set(await listRigs());
-  // An unsaved look wins over whatever is on disk, so the preview follows the
-  // sliders rather than the last save.
-  const loaded = body.look
-    ? (() => {
-        const look = Look.parse(body.look);
-        return { rig: buildPlaceholderRig(name, look), svg: buildPlaceholderSvg(name, look) };
-      })()
-    : onDisk.has(name)
+  // Unsaved edits win over whatever is on disk, so the preview follows the
+  // controls rather than the last save. Outfit and look are independent: an
+  // outfit change alone re-dresses the saved look.
+  let loaded: LoadedRig;
+  if (body.look || body.outfit) {
+    const base = onDisk.has(name) ? await loadRig(name) : null;
+    const look = body.look ? Look.parse(body.look) : (base?.rig.look ?? undefined);
+    const outfit = body.outfit ? Outfit.parse(body.outfit) : base?.rig.outfit;
+    loaded = { rig: buildPlaceholderRig(name, look, outfit), svg: buildPlaceholderSvg(name, look, outfit) };
+  } else {
+    loaded = onDisk.has(name)
       ? await loadRig(name)
       : { rig: buildPlaceholderRig(name), svg: buildPlaceholderSvg(name) };
+  }
 
   // One character, one frame — reusing the same preview machinery as scenes so
   // the cast editor shows exactly what a render would.

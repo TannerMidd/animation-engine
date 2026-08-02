@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { IdentityStamp } from './identity.ts';
+import { Outfit } from './outfit.ts';
 
 /**
  * Screenplay and shot list schemas.
@@ -78,6 +79,13 @@ export const ShotCastMember = z.object({
   scale: z.number().positive().default(1.25),
   /** Expression this character returns to when not otherwise directed. */
   resting: z.string().default('NEUTRAL'),
+  /**
+   * Scene-specific costume, overriding the character's default outfit.
+   * Continuity is the default — absent means "wear what you always wear".
+   * Only works for generator-drawn puppets; hand-drawn art wears what was
+   * drawn.
+   */
+  outfit: Outfit.optional(),
 });
 export type ShotCastMember = z.infer<typeof ShotCastMember>;
 

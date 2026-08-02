@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { Look } from './look.ts';
+import { Outfit } from './outfit.ts';
 import { IdentityStamp } from './identity.ts';
 
 /**
@@ -145,6 +146,13 @@ const RigShape = z.object({
    * rolling it from the name.
    */
   look: Look.optional(),
+  /**
+   * The character's default costume. Separate from `look` on purpose: costume
+   * is changeable per scene without touching who the character is, and a
+   * wardrobe regeneration can never reshape a face. Absent on pre-wardrobe
+   * rigs; filled by regeneration or the ensemble assigner.
+   */
+  outfit: Outfit.optional(),
   parts: z.array(Part).min(1),
   swapSets: z.array(SwapSet).default([]),
   poses: z.array(Pose).default([]),

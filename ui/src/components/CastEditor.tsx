@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.ts';
 import type {
-  CastSummary, FacePlate, Health, Look, LookChoiceKey, LookSwatchKey, RigDoc, Vocab,
+  CastSummary, FacePlate, Health, Look, LookChoiceKey, LookSwatchKey, Outfit, OutfitKey, RigDoc, Vocab,
 } from '../types.ts';
 import { Button, Panel, Select, Slider, Swatches, Field, Empty, Badge, Spinner } from './ui.tsx';
 import { ScaledFrame } from './ScaledFrame.tsx';
@@ -20,6 +20,15 @@ const LOOK_GROUPS: Array<{ title: string; fields: Array<[LookChoiceKey, string]>
   { title: 'Hair', fields: [['hair', 'Style'], ['facialHair', 'Facial']] },
   { title: 'Extras', fields: [['glasses', 'Glasses']] },
 ];
+
+const OUTFIT_LABELS: Record<OutfitKey, string> = {
+  sleeves: 'Sleeves',
+  collar: 'Collar',
+  neckwear: 'Neckwear',
+  pattern: 'Pattern',
+  hat: 'Hat',
+  shoes: 'Shoes',
+};
 
 const SWATCH_LABELS: Record<LookSwatchKey, string> = {
   skin: 'Skin',
@@ -43,6 +52,7 @@ export function CastEditor({ health, vocab }: { health: Health | null; vocab: Vo
   const [name, setName] = useState<string>('');
   const [rig, setRig] = useState<RigDoc | null>(null);
   const [look, setLook] = useState<Look | null>(null);
+  const [outfit, setOutfit] = useState<Outfit | null>(null);
   const [dirty, setDirty] = useState(false);
 
   const [view, setView] = useState<'stage' | 'faces'>('stage');
@@ -74,6 +84,7 @@ export function CastEditor({ health, vocab }: { health: Health | null; vocab: Vo
       .then((r) => {
         setRig(r.rig);
         setLook(r.look);
+        setOutfit(r.rig.outfit ?? null);
         setError(null);
       })
       .catch((e: Error) => setError(e.message));
@@ -85,25 +96,25 @@ export function CastEditor({ health, vocab }: { health: Health | null; vocab: Vo
     if (!name || !look || view !== 'stage') return;
     const t = setTimeout(() => {
       void api
-        .castPreview(name, pose, expression, look)
+        .castPreview(name, pose, expression, look, outfit ?? undefined)
         .then((r) => setPreviewId(r.previewId))
         .catch((e: Error) => setError(e.message));
     }, 140);
     return () => clearTimeout(t);
-  }, [name, look, pose, expression, view]);
+  }, [name, look, outfit, pose, expression, view]);
 
   useEffect(() => {
     if (!name || !look || view !== 'faces') return;
     setPlatesBusy(true);
     const t = setTimeout(() => {
       void api
-        .faces(name, look)
+        .faces(name, look, outfit ?? undefined)
         .then((r) => setPlates(r.plates))
         .catch((e: Error) => setError(e.message))
         .finally(() => setPlatesBusy(false));
     }, 140);
     return () => clearTimeout(t);
-  }, [name, look, view]);
+  }, [name, look, outfit, view]);
 
   const summary = cast.find((c) => c.name === name);
   const expressions = summary?.expressions ?? rig?.expressions.map((e) => e.name) ?? ['NEUTRAL'];
@@ -111,6 +122,11 @@ export function CastEditor({ health, vocab }: { health: Health | null; vocab: Vo
 
   const patchLook = (changes: Partial<Look>) => {
     setLook((l) => (l ? { ...l, ...changes } : l));
+    setDirty(true);
+  };
+
+  const patchOutfit = (changes: Partial<Outfit>) => {
+    setOutfit((o) => (o ? { ...o, ...changes } : o));
     setDirty(true);
   };
 
@@ -125,7 +141,7 @@ export function CastEditor({ health, vocab }: { health: Health | null; vocab: Vo
     try {
       // Look first: it redraws the SVG and rewrites the rig, so saving voice
       // settings the other way round would write them into a stale document.
-      const saved = await api.saveLook(rig.name, look);
+      const saved = await api.saveLook(rig.name, look, outfit ?? undefined);
       await api.saveRig(rig.name, {
         ...saved.rig,
         voice: rig.voice,
@@ -276,6 +292,30 @@ export function CastEditor({ health, vocab }: { health: Health | null; vocab: Vo
                   ))}
                 </div>
               ))}
+
+              {outfit && (
+                <div className="mb-3">
+                  <div className="text-[10px] uppercase tracking-wider text-accent/70 mb-1 pb-0.5 border-b border-edge">
+                    Wardrobe
+                  </div>
+                  {(Object.keys(vocab.outfit.choices) as OutfitKey[]).map((key) => (
+                    <Field key={key} label={OUTFIT_LABELS[key]}>
+                      <Select
+                        value={outfit[key]}
+                        options={vocab.outfit.choices[key] ?? [outfit[key]]}
+                        onChange={(v) => patchOutfit({ [key]: v } as Partial<Outfit>)}
+                        className="w-full"
+                      />
+                    </Field>
+                  ))}
+                  <Swatches
+                    label="Accent"
+                    value={outfit.accent}
+                    options={vocab.outfit.accents}
+                    onChange={(v) => patchOutfit({ accent: v })}
+                  />
+                </div>
+              )}
 
               <div className="h-px bg-edge my-3" />
               {(Object.keys(SWATCH_LABELS) as LookSwatchKey[]).map((key) => (
