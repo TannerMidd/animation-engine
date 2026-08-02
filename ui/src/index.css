@@ -1,0 +1,62 @@
+@import 'tailwindcss';
+
+/*
+ * Palette lifted from the engine's own office set, so the tool looks like the
+ * thing it makes rather than like a generic dashboard.
+ */
+@theme {
+  --color-stage: #1e2126;
+  --color-panel: #252a31;
+  --color-panel-2: #2b3138;
+  --color-edge: #363d46;
+  --color-ink: #e6e3dc;
+  --color-ink-dim: #9aa1ab;
+  --color-ink-faint: #6b737d;
+  --color-accent: #c8834a;
+  --color-accent-dim: #96633a;
+  --color-good: #6f9b5a;
+  --color-bad: #c8595a;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-stage);
+  color: var(--color-ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 13px;
+  overflow: hidden;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-edge);
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #48505a;
+}
+
+/* CodeMirror needs explicit sizing to fill its pane. */
+.cm-editor {
+  height: 100%;
+  font-size: 13px;
+}
+.cm-editor.cm-focused {
+  outline: none;
+}
+.cm-scroller {
+  font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
+  line-height: 1.6;
+}

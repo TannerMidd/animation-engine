@@ -1,0 +1,91 @@
+{
+  "name": "lobby-night",
+  "palette": "office-night",
+  "layout": {
+    "horizonY": 560,
+    "ceilingY": 70,
+    "marginX": 420,
+    "marginY": 220
+  },
+  "layers": {
+    "back": [
+      {
+        "prop": "room-wall",
+        "scale": 1,
+        "flip": false,
+        "params": {}
+      },
+      {
+        "prop": "room-ceiling",
+        "scale": 1,
+        "flip": false,
+        "params": {}
+      },
+      {
+        "prop": "room-floor",
+        "scale": 1,
+        "flip": false,
+        "params": {}
+      }
+    ],
+    "mid": [
+      {
+        "prop": "desk",
+        "x": 320,
+        "y": 698,
+        "scale": 1,
+        "flip": false,
+        "params": {}
+      },
+      {
+        "prop": "monitor",
+        "x": 170,
+        "y": 698,
+        "scale": 1,
+        "flip": false,
+        "params": {}
+      },
+      {
+        "prop": "filing-cabinet",
+        "x": 700,
+        "y": 698,
+        "scale": 1,
+        "flip": false,
+        "params": {}
+      },
+      {
+        "prop": "whiteboard",
+        "x": 700,
+        "scale": 1,
+        "flip": false,
+        "params": {}
+      },
+      {
+        "prop": "doorway",
+        "x": 900,
+        "y": 698,
+        "scale": 1,
+        "flip": false,
+        "params": {}
+      }
+    ],
+    "fore": [
+      {
+        "prop": "chair",
+        "x": 20,
+        "y": 698,
+        "scale": 1,
+        "flip": false,
+        "params": {}
+      },
+      {
+        "prop": "lamp",
+        "x": 960,
+        "y": 698,
+        "scale": 1,
+        "flip": false,
+        "params": {}
+      }
+    ]
+  }
+}

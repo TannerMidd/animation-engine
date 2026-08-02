@@ -1,0 +1,9 @@
+node_modules/
+out/
+.cache/
+.venv/
+tools/
+ui/dist/
+ui/node_modules/
+*.log
+scratch-*.ts

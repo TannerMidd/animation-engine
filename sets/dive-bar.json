@@ -1,0 +1,115 @@
+{
+  "name": "dive-bar",
+  "palette": "bar-night",
+  "layout": {
+    "horizonY": 580,
+    "ceilingY": 70,
+    "marginX": 420,
+    "marginY": 220
+  },
+  "layers": {
+    "back": [
+      {
+        "prop": "room-wall",
+        "scale": 1,
+        "flip": false,
+        "params": {
+          "bandHeight": 180,
+          "railWidth": 5
+        }
+      },
+      {
+        "prop": "room-ceiling",
+        "scale": 1,
+        "flip": false,
+        "params": {
+          "gridOffset": 0
+        }
+      },
+      {
+        "prop": "room-floor",
+        "scale": 1,
+        "flip": false,
+        "params": {
+          "bandOffset": 110
+        }
+      },
+      {
+        "prop": "neon-sign",
+        "x": 330,
+        "scale": 1,
+        "flip": false,
+        "params": {
+          "text": "OPEN",
+          "y": 400,
+          "size": 46
+        }
+      },
+      {
+        "prop": "bottle-shelf",
+        "x": 950,
+        "scale": 1,
+        "flip": false,
+        "params": {
+          "width": 320,
+          "y": 250,
+          "rows": 2
+        }
+      },
+      {
+        "prop": "booth",
+        "x": 120,
+        "scale": 1,
+        "flip": false,
+        "params": {
+          "width": 260,
+          "height": 210
+        }
+      },
+      {
+        "prop": "tv",
+        "x": 640,
+        "scale": 1,
+        "flip": false,
+        "params": {
+          "width": 190,
+          "height": 115,
+          "y": 330,
+          "on": true
+        }
+      }
+    ],
+    "mid": [
+      {
+        "prop": "bar-counter",
+        "x": 950,
+        "scale": 1,
+        "flip": false,
+        "params": {
+          "width": 520,
+          "height": 150
+        }
+      }
+    ],
+    "fore": [
+      {
+        "prop": "stool",
+        "x": 760,
+        "scale": 1,
+        "flip": false,
+        "params": {
+          "height": 130
+        }
+      },
+      {
+        "prop": "stool",
+        "x": 1180,
+        "scale": 1,
+        "flip": false,
+        "params": {
+          "height": 130
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,119 @@
+{
+  "name": "roadside",
+  "palette": "exterior-dusk",
+  "layout": {
+    "horizonY": 560,
+    "ceilingY": 0,
+    "marginX": 420,
+    "marginY": 220
+  },
+  "layers": {
+    "back": [
+      {
+        "prop": "sky",
+        "scale": 1,
+        "flip": false,
+        "params": {
+          "bandHeight": 150
+        }
+      },
+      {
+        "prop": "room-floor",
+        "scale": 1,
+        "flip": false,
+        "params": {
+          "bandOffset": 120
+        }
+      },
+      {
+        "prop": "moon",
+        "x": 260,
+        "scale": 1,
+        "flip": false,
+        "params": {
+          "radius": 46,
+          "y": 540
+        }
+      },
+      {
+        "prop": "cloud",
+        "x": 820,
+        "scale": 1,
+        "flip": false,
+        "params": {
+          "width": 240,
+          "y": 470
+        }
+      },
+      {
+        "prop": "facade",
+        "x": 1230,
+        "scale": 1,
+        "flip": false,
+        "params": {
+          "width": 340,
+          "height": 430,
+          "floors": 3,
+          "windowsPerFloor": 3,
+          "lit": true
+        }
+      },
+      {
+        "prop": "tree",
+        "x": 130,
+        "scale": 1,
+        "flip": false,
+        "params": {
+          "height": 430,
+          "spread": 165,
+          "trunk": 34
+        }
+      }
+    ],
+    "mid": [
+      {
+        "prop": "streetlight",
+        "x": 430,
+        "scale": 1,
+        "flip": false,
+        "params": {
+          "height": 460,
+          "lit": true
+        }
+      },
+      {
+        "prop": "road-sign",
+        "x": 900,
+        "scale": 1,
+        "flip": false,
+        "params": {
+          "text": "STOP",
+          "height": 210,
+          "width": 120
+        }
+      }
+    ],
+    "fore": [
+      {
+        "prop": "bush",
+        "x": 200,
+        "scale": 1,
+        "flip": false,
+        "params": {
+          "width": 150,
+          "height": 80
+        }
+      },
+      {
+        "prop": "rock",
+        "x": 1120,
+        "scale": 1,
+        "flip": false,
+        "params": {
+          "width": 120,
+          "height": 66
+        }
+      }
+    ]
+  }
+}
