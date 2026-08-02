@@ -48,6 +48,11 @@ export async function encodeMp4(opts: EncodeOptions): Promise<string> {
 
   args.push(out);
 
+  await runFfmpeg(args);
+  return out;
+}
+
+export function runFfmpeg(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     const proc = spawn(ffmpegPath(), args, { stdio: ['ignore', 'ignore', 'pipe'] });
     let stderr = '';
@@ -61,11 +66,33 @@ export async function encodeMp4(opts: EncodeOptions): Promise<string> {
       );
     });
     proc.on('close', (code) => {
-      if (code === 0) resolve(out);
+      if (code === 0) resolve();
       // ffmpeg is chatty on success too, so only the tail is useful on failure.
       else reject(new Error(`ffmpeg exited ${code}:\n${stderr.split('\n').slice(-25).join('\n')}`));
     });
   });
+}
+
+/**
+ * ffmpeg argv for the identity comparison reel: the same script rendered under
+ * two identities, stacked top over bottom. Audio comes from the top input
+ * alone — both halves speak the same lines, so mixing them is mush rather
+ * than comparison.
+ *
+ * Every labelled filter output must be consumed by another filter or a -map;
+ * ffmpeg rejects the whole graph over one dangling label.
+ */
+export function stackArgs(top: string, bottom: string, out: string): string[] {
+  return [
+    '-y', '-i', top, '-i', bottom,
+    '-filter_complex',
+    // Scaling both halves to one even-dimensioned size keeps vstack and
+    // yuv420p happy no matter what frame size the identities rendered at.
+    '[0:v]scale=1280:720[top];[1:v]scale=1280:720[bottom];[top][bottom]vstack=inputs=2[v]',
+    '-map', '[v]', '-map', '0:a',
+    '-c:v', 'libx264', '-crf', '18', '-pix_fmt', 'yuv420p',
+    out,
+  ];
 }
 
 /** Reported for diagnostics — old builds work, but are worth flagging. */

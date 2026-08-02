@@ -1,7 +1,6 @@
 #!/usr/bin/env -S npx tsx
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
 import { ROOT, OUT_DIR, CAST_DIR, SCRIPTS_DIR, SETS_DIR, sceneDir } from '../core/paths.ts';
 import { MODELS_ROOT, HF_CACHE, OLLAMA_MODELS, strayCacheLocations } from '../core/models.ts';
 import { loadSet, saveSet, listSets, validateSet, setPath, renderSet } from '../sets/index.ts';
@@ -27,7 +26,7 @@ import { planMigration, applyMigration } from '../show/migrate.ts';
 import { generateScript } from '../llm/script.ts';
 import { generateSet } from '../llm/set.ts';
 import { renderFrames } from '../render/capture.ts';
-import { encodeMp4, ffmpegVersion, ffmpegPath } from '../render/encode.ts';
+import { encodeMp4, ffmpegVersion, ffmpegPath, runFfmpeg, stackArgs } from '../render/encode.ts';
 import { parseScript } from '../parse/index.ts';
 import { autoDirect, buildCapabilityManifest, validateShotList } from '../direct/index.ts';
 import { synthesizeLines, loadRecordedVo, listVoices, getEngine, ENGINE_NAMES, type LineTiming, type VoiceLine } from '../voice/index.ts';
@@ -947,21 +946,8 @@ async function cmdReel(args: Args) {
     outputs.push(rendered.mp4);
   }
 
-  // Stack the two renders. Padding to even dimensions keeps yuv420p happy.
   const out = path.join(OUT_DIR, 'identity-reel.mp4');
-  await new Promise<void>((resolve, reject) => {
-    const proc = spawn(ffmpegPath(), [
-      '-y', '-i', outputs[0]!, '-i', outputs[1]!,
-      '-filter_complex', '[0:v]scale=1280:720[a];[1:v]scale=1280:720[b];[a][b]vstack=inputs=2[v];[0:a][1:a]concat=n=2:v=0:a=1[audio_discard];[v]null[vo]',
-      '-map', '[vo]', '-map', '0:a',
-      '-c:v', 'libx264', '-crf', '18', '-pix_fmt', 'yuv420p',
-      out,
-    ], { stdio: ['ignore', 'ignore', 'pipe'] });
-    let stderr = '';
-    proc.stderr.on('data', (d) => (stderr += String(d)));
-    proc.on('error', reject);
-    proc.on('close', (code) => (code === 0 ? resolve() : reject(new Error(stderr.split('\n').slice(-8).join('\n')))));
-  });
+  await runFfmpeg(stackArgs(outputs[0]!, outputs[1]!, out));
 
   console.log(`\nWrote ${path.relative(process.cwd(), out)} — top: ${a}, bottom: ${b}.`);
 }
