@@ -43,6 +43,25 @@ Install Ollama itself to a custom location too — its default is under `%LOCALA
 `npm run anim -- doctor` prints the models root, warns if it is the system drive, and
 reports how much is in each cache.
 
+## The show identity
+
+Everything recognisable about the output — line treatment, writing register,
+resting faces, wardrobe families, acting envelope, cutting rhythm, room tone,
+title cards — lives in one versioned profile under `show/`. Identity is data:
+
+- `anim show list` / `anim show use <id>` — inspect and switch profiles;
+  `--show fixtures/<id>` overrides for one invocation.
+- `anim show compare <a> <b>` — field-by-field diff of two profiles.
+- `anim migrate` — bring a pre-identity project under a profile (dry-run by
+  default; selective backfill, never a redesign).
+- `anim reel` — render the same script under two profiles, stacked into one
+  video. If the halves don't read as different shows, something is wrong.
+
+Characters carry stable `charId`s, so renaming one changes the label and
+nothing else. Every seeded stream (looks, voices, wardrobe, blinks, fidgets)
+keys off ids under the show's seed. Locks (`locks: ["look.hair"]` on a rig,
+`locked: true` on a beat) survive every regeneration and every director rerun.
+
 ## The UI
 
 ```bash
