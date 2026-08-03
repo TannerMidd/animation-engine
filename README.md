@@ -21,10 +21,10 @@ downloads missing weights, and model caches remain under `F:\ai-models` by defau
 | **M7** Pipeline extraction + local server | done |
 | **M8** UI shell: script editor + live preview | done |
 | **M9–M11** Beat timeline, set designer, cast editor | done |
-| **M12** Local LLM for script + set generation | next |
+| **M12** Local LLM for script + set generation | done |
 | **M5** Inkscape SVG ingestion (your own art) | |
 | **M22** Performance capture, voice conversion, dialogue editorial | foundation implemented; verification gaps below |
-| **M23** Stateful staging and validated physical actions | in progress |
+| **M23** Stateful staging and validated physical actions | foundation implemented |
 | **M24** AnimationDoc, direct manipulation, motion assist, puppeteering | foundation implemented |
 | **M25** Sequence-level coverage and editorial grammar | foundation implemented |
 | **M26** 48 kHz stereo mix, stems, deterministic Foley | foundation implemented; no full post chain/archive master |
@@ -40,6 +40,10 @@ Current boundaries are explicit:
 - conversion provenance records the detected Hugging Face snapshot commit(s), package RECORD
   fingerprint, and worker hash, but installation still follows an unpinned repository ref and
   there is no approved-model manifest or independent weights checksum yet;
+- direct manipulation covers the actor root, head, torso and two-bone arm IK, with live
+  preview, snapping and puppeteering capture; per-character motion profiles, listening
+  behaviour, word-accent placement and repetition linting are **not** implemented, which is
+  why M24 reads as a foundation rather than as done;
 - publishing writes WebVTT/SRT sidecars, not burned-in captions;
 - the mixer writes a social programme master and stems, not a separate less-compressed
   archival master or a complete EQ/de-ess/compression/room-matching post chain; and
@@ -94,11 +98,44 @@ npm run ui:install && npm run ui:build
 npm run ui
 ```
 
-Then open **http://127.0.0.1:5178**. Three panels:
+Then open **http://127.0.0.1:5178**. The whole app is one editor around one scene: project
+sidebar, stage, inspector, and a timeline across the bottom. **Modes** change the chrome
+rather than navigating away — the playhead and selection survive the switch.
 
 | | |
 |---|---|
-| **Scenes** | Script editor, Line Booth/Scene Run performance capture, waveform dialogue editorial, stateful staging, creator animation studio, 16:9/9:16 preview, production preflight, and publishing exports. |
+| **Write** | Screenplay editing. Fountain subset — cues, parentheticals, `[BEAT ms]`. |
+| **Direct** | Shot proposal, beat direction, staging. Locked beats survive reruns. |
+| **Animate** | Blocking, rig controls, Point A → Point B motion paths. |
+| **Perform** | Line Booth and Scene Run capture, takes, trims, voice conversion. |
+| **Sound** | Not in the engine yet — mix, stems and Foley are CLI-only today. |
+| **Publish** | Production readiness, 16:9 / 9:16 masters, captions, export manifest. |
+
+The inspector follows the selection across beat, character, motion, rig, camera, prop, voice
+and scene tabs. The timeline carries script, dialogue, motion, camera, expression, gesture,
+prop, Foley and caption lanes, each independently lockable.
+
+### The stage is directly manipulable
+
+In Animate mode you pose the puppet by grabbing it. Clicking a character picks the part under
+the cursor — an arm solves deterministic two-bone IK, head and torso take rig-local offsets,
+anything else moves the actor's root — and selecting and dragging happen in one gesture.
+Clicking a different character retargets the inspector to them.
+
+The puppet follows the pointer live, posed through the same runtime the renderer uses and
+never written into scene IR, so releasing the drag is what commits an editable
+`MotionSegment`. Escape cancels mid-drag. **Snap** pulls root and prop drags to marks, seats
+and the walkable edges; **Onion** ghosts the controller either side of the playhead; **Record
+path** captures a whole drag and reduces it to editable waypoints. Prop handles drag too —
+those write to the set descriptor, which every scene using that set shares.
+
+### The cast and set editors
+
+Both open over the scene and hand you back to it. Edits land on disk and appear in the scene
+on the next preview.
+
+| | |
+|---|---|
 | **Sets** | Build environments: layer tabs (back / mid / **fore**), prop palette, controls generated from each prop's declared params, and a live preview with characters staged in it that you can **drag props around on**. Composition notes appear over the frame, and *Tidy composition* applies the mechanical fixes. |
 | **Cast** | Edit what a character **looks like** — build, head shape, nose, ears, hair, facial hair, glasses, eye and brow style, four colour ramps and seven proportion sliders — with the puppet redrawn live. A *Faces* tab shows every expression at once. Voice settings, microphone recording for cloning, and a one-line audition to hear the result. |
 
@@ -323,19 +360,27 @@ most of the work, so it's the default baseline.
 
 ```
 src/
-  schema/     zod contracts: rig, scene IR, screenplay, shot list
-  core/       seeded RNG, paths
+  schema/     zod contracts: rig, scene IR, screenplay, shot list, dialogue, animation
+  core/       seeded RNG, paths, models root
+  show/       identity profiles: load, switch, migrate
   cast/       placeholder generator, rig loading + validation
   parse/      script → screenplay
   direct/     screenplay → shot list, + capability validation
-  voice/      engines (chatterbox, sapi), Rhubarb, WAV read/write/mix
+  llm/        Ollama client, script and set generation
+  voice/      engines (chatterbox, sapi), Rhubarb, conversion, WAV read/write/mix
+  animation/  puppeteering capture → reduced editable keys
   compile/    shot list + timing → per-frame IR   ← core logic, no AI
+  style/      hand-drawn line treatment: wobble, weight, misregistration, grain
+  audio/      mix bus, ambience, Foley, stings, loudness QA
   render/     browser runtime, page builder, framing, capture, ffmpeg
   sets/       descriptors, prop registry, palettes
+  assets/     asset ledger: hashes and provenance
   pipeline/   check / voices / preview / render   ← shared by CLI and server
   server/     local HTTP API + SSE jobs
   cli/        the `anim` command
-ui/           Vite + React app
+ui/src/
+  editor/     the production editor: modes, stage, inspector, timeline
+  components/ cast editor, set designer, shared controls
 ```
 
 ## Tests

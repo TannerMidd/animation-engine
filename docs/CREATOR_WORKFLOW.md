@@ -84,15 +84,24 @@ target-voice rights, changed source/reference bytes, and unlocked/unapproved cue
 
 ## 3. Physically direct the actors
 
-Open **Animate**, select an actor and controller, place the playhead at Point A, set the duration in frames, then drag to Point B.
+Open **Animate**, place the playhead at Point A, set the duration in frames, then drag the
+actor to Point B. Grab them directly on the stage — clicking a character selects the part
+under the cursor and starts the drag in the same gesture, and clicking another character
+retargets the inspector to them. The Actor and Body part menus do the same job when you want
+to pick a controller without hunting for it on the picture.
 
-- Root drags are clamped to the set-authored walkable area.
+- The puppet follows your pointer for the whole drag; releasing is what saves the motion.
+- Root drags keep your grab offset and are clamped to the set-authored walkable area.
 - Wrist drags use deterministic two-bone IK and show the reachable region.
+- Escape cancels a drag in progress and restores the authored pose.
+- **Snap** pulls root and prop drags to marks, seats and the walkable edges.
+- Prop handles drag as well. They write to the set descriptor, so the move applies to every
+  scene that uses that set.
 - Motion is saved as an editable `MotionSegment`, not a baked clip.
 - Add, move, retime, lock, or remove normalized waypoints.
 - Choose path shape/easing and editable anticipation, overshoot, hold, and recovery.
 - Turn on onion skins and ghost paths to inspect the phrase.
-- **Record drag** captures one controller in real time, then deterministically smooths and reduces it to editable waypoints.
+- **Record path** (**Record arm path** on a wrist) arms one drag: it captures the controller in real time, then deterministically smooths and reduces the route to editable waypoints. Capture is one-shot and disarms itself.
 - Undo/redo and track/segment locks persist in `animation.json`.
 
 Creator-owned motion overrides only its claimed actor/controller/span. Ambiguous same-rank ownership blocks export instead of producing an accidental blend.
