@@ -67,7 +67,7 @@ function mergeMotion(document: AnimationDocument, request: MotionAuthoringReques
     if (segment.id === proposed.id || segment.layerId !== 'manual') return false;
     if (
       segment.actorId !== request.actorId || segment.channel !== request.channel ||
-      (segment.partId ?? null) !== (request.partId ?? null)
+      ((segment.channel === 'part.transform' ? segment.partId : null) ?? null) !== (request.partId ?? null)
     ) return false;
     const start = absoluteMs(segment.from.time);
     const end = absoluteMs(segment.to.time);

@@ -2,20 +2,34 @@
 
 /*
  * Palette lifted from the engine's own office set, so the tool looks like the
- * thing it makes rather than like a generic dashboard.
+ * thing it makes rather than like a generic dashboard. Semantic colours come
+ * from the production-editor design system: colour is never the only
+ * indicator — every state also carries a shape or a word.
  */
 @theme {
   --color-stage: #1e2126;
   --color-panel: #252a31;
   --color-panel-2: #2b3138;
   --color-edge: #363d46;
+  --color-edge-2: #48505a;
+  --color-well: #141619;
+  --color-deep: #1a1d21;
   --color-ink: #e6e3dc;
   --color-ink-dim: #9aa1ab;
   --color-ink-faint: #6b737d;
+  --color-ink-ghost: #4c545e;
   --color-accent: #c8834a;
   --color-accent-dim: #96633a;
   --color-good: #6f9b5a;
   --color-bad: #c8595a;
+  --color-info: #73a6c7;
+  --color-lock: #a89050;
+  --color-gen: #7a8fc0;
+  --color-mauve: #b06a8f;
+
+  --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'Cascadia Code', 'Consolas', monospace;
+  --font-serif: 'Newsreader', ui-serif, Georgia, serif;
 }
 
 html,
@@ -26,16 +40,17 @@ body,
 
 body {
   margin: 0;
-  background: var(--color-stage);
+  background: var(--color-well);
   color: var(--color-ink);
-  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
-  font-size: 13px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }
 
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 9px;
+  height: 9px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
@@ -48,15 +63,34 @@ body {
   background: #48505a;
 }
 
+@keyframes recpulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+details > summary::-webkit-details-marker {
+  display: none;
+}
+
 /* CodeMirror needs explicit sizing to fill its pane. */
 .cm-editor {
   height: 100%;
-  font-size: 13px;
+  font-size: 11.5px;
 }
 .cm-editor.cm-focused {
   outline: none;
 }
 .cm-scroller {
-  font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
-  line-height: 1.6;
+  font-family: var(--font-mono);
+  line-height: 1.62;
 }

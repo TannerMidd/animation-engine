@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api.ts';
-import type { CastSummary, Health, SceneSummary, ShowInfo, Vocab } from './types.ts';
-import { SceneView } from './components/SceneView.tsx';
+import type { CastSummary, Health, SceneSummary, SetSummary, ShowInfo, Vocab } from './types.ts';
+import { EditorApp } from './editor/EditorApp.tsx';
 import { SetDesigner } from './components/SetDesigner.tsx';
 import { CastEditor } from './components/CastEditor.tsx';
-import { Badge, Empty, Spinner } from './components/ui.tsx';
-
-type View = 'scenes' | 'sets' | 'cast';
+import { Spinner } from './editor/chrome.tsx';
 
 const STARTER = `# NEW SCENE
 
@@ -28,15 +26,21 @@ ALICE
 So that'd be great.
 `;
 
+/**
+ * Boot shell. The production editor is the app; the set designer and cast
+ * editor open over it from the project tree, since blocking, voices and
+ * wardrobe are edited per asset rather than per scene.
+ */
 export default function App() {
-  const [view, setView] = useState<View>('scenes');
   const [scenes, setScenes] = useState<SceneSummary[]>([]);
   const [scene, setScene] = useState<string | null>(null);
   const [cast, setCast] = useState<CastSummary[]>([]);
+  const [sets, setSets] = useState<SetSummary[]>([]);
   const [vocab, setVocab] = useState<Vocab | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [show, setShow] = useState<ShowInfo | null>(null);
   const [booting, setBooting] = useState(true);
+  const [legacy, setLegacy] = useState<null | { kind: 'sets' | 'cast'; name: string | null }>(null);
 
   const refreshScenes = useCallback(async () => {
     const list = await api.scenes();
@@ -45,11 +49,12 @@ export default function App() {
   }, []);
 
   const refreshCast = useCallback(async () => setCast(await api.cast()), []);
+  const refreshSets = useCallback(async () => setSets(await api.sets()), []);
 
   useEffect(() => {
     void (async () => {
       try {
-        const [v, s] = await Promise.all([api.vocab(), api.show(), refreshScenes(), refreshCast()]);
+        const [v, s] = await Promise.all([api.vocab(), api.show(), refreshScenes(), refreshCast(), refreshSets()]);
         setVocab(v);
         setShow(s);
       } finally {
@@ -58,17 +63,7 @@ export default function App() {
       // Health probes Python and can take a while; never block the app on it.
       void api.health().then(setHealth).catch(() => {});
     })();
-  }, [refreshScenes, refreshCast]);
-
-  /**
-   * Switching the show identity re-derives everything downstream of it —
-   * previews, prompts, directing defaults — so the cheapest correct response
-   * is a full reload rather than chasing every stale panel by hand.
-   */
-  const switchShow = async (id: string) => {
-    await api.setActiveShow(id);
-    window.location.reload();
-  };
+  }, [refreshScenes, refreshCast, refreshSets]);
 
   // The engine probe finishes in the background — poll briefly until it lands.
   useEffect(() => {
@@ -86,7 +81,6 @@ export default function App() {
     await api.saveScript(clean, STARTER);
     await refreshScenes();
     setScene(clean);
-    setView('scenes');
   };
 
   /** Expressions a given actor's rig actually has, for the beat inspector. */
@@ -97,150 +91,86 @@ export default function App() {
 
   if (booting) {
     return (
-      <div className="h-full grid place-items-center text-ink-faint gap-2">
-        <Spinner />
+      <div className="h-full grid place-items-center text-ink-faint">
+        <Spinner size={14} />
+      </div>
+    );
+  }
+
+  if (!scene) {
+    return (
+      <div className="h-full grid place-items-center">
+        <div className="w-[420px] border border-[#2f353d] bg-stage rounded-[3px] px-4 py-3.5">
+          <div className="flex items-center gap-1.5 mb-2">
+            <span className="text-[8.5px] tracking-[.07em] uppercase text-gen border border-gen rounded-[2px] px-1">empty</span>
+            <span className="font-mono text-[9px] text-ink-ghost">no scenes</span>
+          </div>
+          <div className="text-[12px] text-[#c9ccd1] leading-snug mb-1">Nothing here yet.</div>
+          <div className="text-[11px] text-ink-faint leading-[1.5] mb-3">
+            Start from a premise with the local model, or write Fountain straight into the editor.
+          </div>
+          <button
+            type="button"
+            onClick={() => void newScene()}
+            className="h-6 px-3 rounded-[3px] border border-good bg-good/15 text-[#8fbd76] text-[11px] cursor-pointer hover:bg-good/25"
+          >
+            Create a scene
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="h-full flex">
-      {/* rail */}
-      <div className="w-48 shrink-0 flex flex-col border-r border-edge bg-panel">
-        <div className="px-3 py-2.5 border-b border-edge">
-          <div className="text-[12px] font-medium tracking-wide">animation engine</div>
-          {show && (
-            show.profiles.length > 1 ? (
-              <select
-                value={show.active.id}
-                onChange={(e) => void switchShow(e.target.value)}
-                title="Active show identity — governs style, register, and directing defaults"
-                className="mt-1 w-full bg-transparent text-[10px] text-ink-faint border border-edge rounded px-1 py-0.5 outline-none hover:text-ink"
-              >
-                {show.profiles.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name} v{p.version}</option>
-                ))}
-              </select>
-            ) : (
-              <div
-                className="mt-0.5 text-[10px] text-ink-faint truncate"
-                title={`Identity ${show.active.id}@${show.active.hash} — every render is stamped with this`}
-              >
-                show: {show.active.name}
-              </div>
-            )
-          )}
-        </div>
-
-        <nav className="flex gap-0.5 p-1 border-b border-edge">
-          {(['scenes', 'sets', 'cast'] as View[]).map((v) => (
-            <button
-              key={v}
-              type="button"
-              onClick={() => setView(v)}
-              className={`flex-1 px-2 py-1 rounded text-[11px] uppercase tracking-wide transition-colors ${
-                view === v ? 'bg-accent text-stage' : 'text-ink-faint hover:text-ink hover:bg-panel-2'
-              }`}
-            >
-              {v}
-            </button>
-          ))}
-        </nav>
-
-        {view === 'scenes' && (
-          <div className="flex-1 min-h-0 overflow-auto p-1">
-            {scenes.map((s) => (
-              <button
-                key={s.name}
-                type="button"
-                onClick={() => setScene(s.name)}
-                className={`w-full text-left px-2 py-1.5 rounded text-[12px] ${
-                  scene === s.name ? 'bg-accent/20 text-ink' : 'text-ink-dim hover:bg-panel-2'
-                }`}
-              >
-                <div className="truncate">{s.name}</div>
-                <div className="text-[10px] text-ink-faint flex gap-1.5">
-                  <span>{s.directed ? `${s.beats} beats` : 'undirected'}</span>
-                  {s.hasVideo && <span className="text-good">rendered</span>}
-                </div>
-              </button>
-            ))}
-            <button
-              type="button"
-              onClick={() => void newScene()}
-              className="w-full text-left px-2 py-1.5 mt-1 rounded text-[12px] text-ink-faint hover:text-accent hover:bg-panel-2"
-            >
-              + new scene
-            </button>
-          </div>
-        )}
-
-        {view !== 'scenes' && <div className="flex-1" />}
-
-        {/* health */}
-        <div className="shrink-0 border-t border-edge p-2 space-y-1">
-          {health ? (
-            <>
-              <HealthRow label="ffmpeg" ok={!!health.ffmpeg} detail={health.ffmpeg ?? 'missing'} />
-              <HealthRow label="rhubarb" ok={!!health.rhubarb} detail={health.rhubarb ? 'ok' : 'missing'} />
-              <HealthRow
-                label="local llm"
-                ok={health.llm.ok}
-                detail={health.llm.ok ? (health.llm.recommended ?? 'ok') : (health.llm.reason ?? 'unavailable')}
-              />
-              {Object.entries(health.engines).map(([name, s]) => (
-                <HealthRow
-                  key={name}
-                  label={name}
-                  ok={s.ok}
-                  checking={s.checking}
-                  detail={s.checking ? 'checking…' : s.ok ? 'ok' : (s.reason?.split('\n')[0] ?? 'unavailable')}
-                />
-              ))}
-            </>
-          ) : (
-            <div className="text-[10px] text-ink-faint">checking toolchain…</div>
-          )}
-        </div>
-      </div>
-
-      {/* workspace */}
-      <div className="flex-1 min-w-0">
-        {view === 'scenes' &&
-          (scene ? (
-            <SceneView
-              key={scene}
-              scene={scene}
-              vocab={vocab}
-              llm={health?.llm ?? null}
-              expressionsFor={expressionsFor}
-              onSceneChanged={() => {
-                void refreshScenes();
-                void refreshCast();
-              }}
-            />
-          ) : (
-            <Empty>No scenes yet — create one from the rail.</Empty>
-          ))}
-        {view === 'sets' && <SetDesigner vocab={vocab} llm={health?.llm ?? null} />}
-        {view === 'cast' && <CastEditor health={health} vocab={vocab} />}
-      </div>
-    </div>
-  );
-}
-
-function HealthRow({ label, ok, detail, checking }: { label: string; ok: boolean; detail: string; checking?: boolean }) {
-  return (
-    <div className="flex items-center gap-1.5 text-[10px]" title={detail}>
-      <span
-        className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-          checking ? 'bg-ink-faint animate-pulse' : ok ? 'bg-good' : 'bg-bad'
-        }`}
+    <div className="h-full relative">
+      <EditorApp
+        key={scene}
+        scene={scene}
+        scenes={scenes}
+        cast={cast}
+        sets={sets}
+        vocab={vocab}
+        health={health}
+        show={show}
+        llm={health?.llm ?? null}
+        expressionsFor={expressionsFor}
+        onScene={setScene}
+        onSceneChanged={() => {
+          void refreshScenes();
+          void refreshCast();
+        }}
+        onNewScene={() => void newScene()}
+        onOpenCast={(name) => setLegacy({ kind: 'cast', name })}
+        onOpenSets={(name) => setLegacy({ kind: 'sets', name })}
       />
-      <span className="text-ink-faint">{label}</span>
-      <span className="text-ink-faint/70 truncate flex-1 text-right">{detail}</span>
+
+      {legacy && (
+        <div className="absolute inset-0 z-50 bg-well flex flex-col">
+          <div className="h-9 shrink-0 flex items-center gap-2.5 px-2.5 bg-panel border-b border-edge">
+            <button
+              type="button"
+              onClick={() => {
+                setLegacy(null);
+                void refreshCast();
+                void refreshSets();
+              }}
+              className="h-[23px] px-2 rounded-[3px] border border-edge bg-panel-2 text-ink-dim text-[11px] cursor-pointer hover:text-ink"
+            >
+              ← Back to the editor
+            </button>
+            <span className="text-[11px] tracking-[.06em] uppercase text-ink-faint">
+              {legacy.kind === 'cast' ? 'Cast editor' : 'Set designer'}
+            </span>
+            {legacy.name && <span className="font-serif text-[14px] text-ink">{legacy.name}</span>}
+            <div className="flex-1" />
+            <span className="text-[10px] text-ink-ghost">edits here land on disk and show up in the scene on the next preview</span>
+          </div>
+          <div className="flex-1 min-h-0">
+            {legacy.kind === 'sets' && <SetDesigner vocab={vocab} llm={health?.llm ?? null} />}
+            {legacy.kind === 'cast' && <CastEditor health={health} vocab={vocab} />}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
-
-export { Badge };

@@ -394,6 +394,10 @@ export function AnimationOverlay({
         return;
       }
 
+      // A wrist target whose arm parts are missing from the rig has nothing
+      // to solve against; bail rather than committing a malformed segment.
+      if (!part || !transform) return;
+
       const direction = actor.flip ? -1 : 1;
       const from = { rot: transform[0], x: transform[1], y: transform[2], scale: transform[3] };
       const valueAt = (point: [number, number]) => {
