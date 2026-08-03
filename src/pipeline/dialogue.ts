@@ -130,6 +130,7 @@ export async function readDialogueDocument(
 export function assertRecordedTakesImmutable(
   before: readonly RecordedTake[],
   after: readonly RecordedTake[],
+  allowedRevocation?: { id: string; revokedAt: string },
 ): void {
   const next = new Map(after.map((take) => [take.id, take]));
   for (const take of before) {
@@ -137,8 +138,17 @@ export function assertRecordedTakesImmutable(
     if (!candidate) {
       throw new Error(`immutable recorded take "${take.id}" cannot be removed; add a new take or revoke it separately`);
     }
-    if (!isDeepStrictEqual(take, candidate)) {
-      throw new Error(`immutable recorded take "${take.id}" cannot be changed; append a new take ID`);
+    if (isDeepStrictEqual(take, candidate)) continue;
+
+    const isAllowedRevocation =
+      allowedRevocation?.id === take.id &&
+      take.revokedAt === null &&
+      candidate.revokedAt === allowedRevocation.revokedAt &&
+      isDeepStrictEqual(candidate, { ...take, revokedAt: allowedRevocation.revokedAt });
+    if (!isAllowedRevocation) {
+      throw new Error(
+        `immutable recorded take "${take.id}" cannot be changed; revoke it through the dedicated revocation operation`,
+      );
     }
   }
 }
@@ -345,6 +355,7 @@ async function persistDialogueDocument(
   document: DialogueDocumentType,
   outDir: string,
   allowedRevocation?: { id: string; revokedAt: string },
+  allowedTakeRevocation?: { id: string; revokedAt: string },
 ): Promise<string> {
   const parsed = DialogueDocument.parse(document);
   if (parsed.scene !== scene) {
@@ -353,7 +364,7 @@ async function persistDialogueDocument(
 
   const existing = await readDialogueDocument(scene, outDir);
   if (existing) {
-    assertRecordedTakesImmutable(existing.recordedTakes, parsed.recordedTakes);
+    assertRecordedTakesImmutable(existing.recordedTakes, parsed.recordedTakes, allowedTakeRevocation);
     // Scene Run segment audit rows live inside RecordedTake provenance, so the
     // raw-take check above also makes every accepted segment and QC report immutable.
     assertVoiceConsentsImmutable(existing.consents, parsed.consents, allowedRevocation);
@@ -405,6 +416,83 @@ export async function revokeVoiceConsent(
       : item),
   });
   await persistDialogueDocument(scene, next, outDir, { id: consentId, revokedAt });
+  return next;
+}
+
+/**
+ * One-way, idempotent take revocation — the "discard" a creator reaches for
+ * after recording onto the wrong line.
+ *
+ * The row itself is untouched audit evidence (bytes, checksums, QC,
+ * provenance); only `revokedAt` is stamped. Everything *working* on top of it
+ * is cleared in the same revision: cue selections, trims, selections of
+ * renders derived from it, and any approval that stood on those. Locked cues
+ * refuse the cleanup rather than being silently edited.
+ */
+export async function revokeRecordedTake(
+  scene: string,
+  takeId: string,
+  revokedAt = new Date().toISOString(),
+  outDir = OUT_DIR,
+): Promise<DialogueDocumentType> {
+  const parsedTimestamp = new Date(revokedAt);
+  if (!Number.isFinite(parsedTimestamp.getTime()) || parsedTimestamp.toISOString() !== revokedAt) {
+    throw new Error('revokedAt must be a canonical ISO timestamp');
+  }
+  const current = await readDialogueDocument(scene, outDir);
+  if (!current) throw new Error(`no dialogue document for scene "${scene}"`);
+  const take = current.recordedTakes.find((item) => item.id === takeId);
+  if (!take) throw new Error(`no recorded take "${takeId}"`);
+  if (take.revokedAt) return current;
+  if (parsedTimestamp.getTime() < Date.parse(take.capture.recordedAt)) {
+    throw new Error('a take cannot be revoked before it was recorded');
+  }
+
+  const derivedRenderIds = new Set(
+    current.voiceRenders
+      .filter((render) => render.source.kind !== 'draft-tts' && render.source.takeId === takeId)
+      .map((render) => render.id),
+  );
+  const affected = current.cues.filter((cue) =>
+    cue.selectedTakeId === takeId ||
+    (cue.selectedRenderId !== null && derivedRenderIds.has(cue.selectedRenderId)));
+  const lockedAffected = affected.filter((cue) => cue.locked || cue.lockedFields.length > 0);
+  if (lockedAffected.length) {
+    throw new Error(
+      `locked dialogue cue${lockedAffected.length === 1 ? '' : 's'} ` +
+      `${lockedAffected.map((cue) => `"${cue.id}"`).join(', ')} reference${lockedAffected.length === 1 ? 's' : ''} ` +
+      `take "${takeId}"; unlock before revoking`,
+    );
+  }
+
+  const next = DialogueDocument.parse({
+    ...current,
+    revision: current.revision + 1,
+    recordedTakes: current.recordedTakes.map((item) => item.id === takeId
+      ? { ...item, revokedAt }
+      : item),
+    cues: current.cues.map((cue) => {
+      const lostTake = cue.selectedTakeId === takeId;
+      const lostRender = cue.selectedRenderId !== null && derivedRenderIds.has(cue.selectedRenderId);
+      if (!lostTake && !lostRender) return cue;
+      return {
+        ...cue,
+        selectedTakeId: lostTake ? null : cue.selectedTakeId,
+        selectedRenderId: lostRender ? null : cue.selectedRenderId,
+        trim: lostTake ? null : cue.trim,
+        approval: cue.approval.state === 'approved'
+          ? {
+              ...cue.approval,
+              state: 'draft' as const,
+              by: null,
+              at: null,
+              notes: [...cue.approval.notes, `approval withdrawn: take ${takeId} was revoked`],
+            }
+          : cue.approval,
+      };
+    }),
+  });
+  await persistDialogueDocument(scene, next, outDir, undefined, { id: takeId, revokedAt });
   return next;
 }
 
@@ -467,6 +555,7 @@ export async function syncDialogueDocument(
         spokenText: beat.text,
         selectedTakeId: null,
         selectedRenderId: null,
+        voiceSource: 'performance',
         seed: shots.seed * 1000 + beatIndex,
         delivery: {
           expression: beat.expression,

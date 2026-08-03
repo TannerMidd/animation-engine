@@ -12,5 +12,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..', '..');
 const python = process.env.ANIM_PYTHON ?? path.join(root, '.venv', 'Scripts', 'python.exe');
 
-const result = spawnSync(python, [path.join(here, 'worker_conditioning_test.py')], { stdio: 'inherit' });
-process.exit(result.status ?? 1);
+for (const test of ['worker_conditioning_test.py', 'vc_register_test.py']) {
+  const result = spawnSync(python, [path.join(here, test)], { stdio: 'inherit' });
+  if (result.status !== 0) process.exit(result.status ?? 1);
+}
+process.exit(0);

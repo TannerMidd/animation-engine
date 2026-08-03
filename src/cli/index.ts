@@ -47,6 +47,9 @@ import { parseScript } from '../parse/index.ts';
 import { autoDirect, buildCapabilityManifest, validateShotList } from '../direct/index.ts';
 import { synthesizeLines, loadRecordedVo, listVoices, getEngine, ENGINE_NAMES, type LineTiming, type VoiceLine } from '../voice/index.ts';
 import { findRhubarb } from '../voice/rhubarb.ts';
+import {
+  chatterboxVcAvailable, checkConversionIdentity, convertPerformances,
+} from '../voice/conversion.ts';
 import { ShotList } from '../schema/script.ts';
 import { atomicWriteFile } from '../audio/files.ts';
 
@@ -904,6 +907,84 @@ async function cmdVoices() {
   console.log(`\nSet a character's voice in cast/<name>.rig.json ("voice" matches on substring).`);
 }
 
+/**
+ * Convert one performance into every cast voice and score the results.
+ *
+ * Aligning a performance to a character voice is the feature everything else
+ * leans on, and whether it works is a property of each reference rather than
+ * of the code — a voice the speaker encoder cannot read produces confident
+ * noise. This runs the real conversion path per character and prints what
+ * came back, so the answer is measured rather than assumed.
+ */
+async function cmdVoicesCheck(args: Args) {
+  const available = await chatterboxVcAvailable();
+  if (!available.ok) {
+    console.log(`voice conversion unavailable — ${available.reason.split('\n')[0]}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const source = typeof args.flags['source'] === 'string' ? args.flags['source'] : null;
+  if (!source) {
+    console.log('Usage: anim voices check --source <performance.wav> [--only alice,bob]');
+    console.log('  Any spoken recording works; a few seconds of normal delivery is plenty.');
+    process.exitCode = 1;
+    return;
+  }
+  await fs.access(source);
+
+  const only = typeof args.flags['only'] === 'string'
+    ? new Set(args.flags['only'].split(',').map((n) => n.trim()).filter(Boolean))
+    : null;
+  const names = (await listRigs()).filter((name) => !only || only.has(name));
+  const targets: Array<{ name: string; ref: string }> = [];
+  for (const name of names) {
+    const { rig } = await loadRig(name);
+    if (rig.voiceRef && path.basename(rig.voiceRef) === rig.voiceRef) {
+      targets.push({ name, ref: path.join(CAST_DIR, rig.voiceRef) });
+    }
+  }
+  if (!targets.length) {
+    console.log('No cast member has a voice reference yet.');
+    return;
+  }
+
+  console.log(`Converting ${path.basename(source)} into ${targets.length} character voices…\n`);
+  const results = await convertPerformances(
+    targets.map((t) => ({ id: t.name, source, targetRef: t.ref, seed: 0, registerPolicy: 'adapt-to-character' as const })),
+    (done, total) => process.stdout.write(`\r  ${done}/${total}`),
+  );
+  process.stdout.write('\r');
+
+  console.log('character    ref Hz   lift   out Hz   voicing   register   verdict');
+  let failures = 0;
+  for (const { name } of targets) {
+    const result = results.get(name);
+    if (!result) {
+      failures++;
+      console.log(`${name.padEnd(12)} ${'—'.padStart(6)} ${'—'.padStart(6)} ${'—'.padStart(8)} ${'—'.padStart(9)} ${'—'.padStart(10)}   NO RESULT`);
+      continue;
+    }
+    const check = checkConversionIdentity(result);
+    if (check.failures.length) failures++;
+    const cell = (value: number | null, digits = 0, width = 6) =>
+      (value === null ? '—' : value.toFixed(digits)).padStart(width);
+    console.log(
+      `${name.padEnd(12)}${cell(result.targetMedianPitchHz)}${cell(result.conditioningLiftSemitones, 1)}` +
+      `${cell(result.outputMedianPitchHz, 0, 8)}${cell(check.voicedRetention, 2, 9)}` +
+      `${cell(check.pitchErrorSemitones, 1, 10)}   ${check.failures.length ? 'FAIL' : 'ok'}`,
+    );
+    for (const failure of check.failures) console.log(`  ${name}: ${failure}`);
+  }
+
+  console.log(
+    `\n${targets.length - failures}/${targets.length} character voices convert cleanly. ` +
+    'Voicing is the share of the performance\'s voiced speech that survived (want ≥ 0.65); ' +
+    'register is the distance from the character\'s own pitch in semitones (want within 4).',
+  );
+  if (failures) process.exitCode = 1;
+}
+
 async function cmdDoctor() {
   const ff = await ffmpegVersion();
   console.log(`ffmpeg     ${ff ? `${ff}  (${ffmpegPath()})` : 'NOT FOUND'}`);
@@ -1144,7 +1225,9 @@ const HELP = `anim — script to limited-animation scene
                          vocabulary a descriptor can draw from.
                          "sets describe <text>" designs one with the local model.
                          "sets preview <name>" renders it with characters in it
-  voices                 list installed SAPI voices
+  voices                 list installed SAPI voices.
+                         "voices check --source <wav>" converts one performance
+                         into every character voice and scores each result
   doctor                 check the toolchain
   show                   list identity profiles; "show use <id>" switches,
                          "show compare <a> <b>" diffs two, "show validate" checks all.
@@ -1216,7 +1299,7 @@ async function main() {
     case 'sets':
       return cmdSets(rest);
     case 'voices':
-      return cmdVoices();
+      return rest._[0] === 'check' ? cmdVoicesCheck({ ...rest, _: rest._.slice(1) }) : cmdVoices();
     case 'doctor':
       return cmdDoctor();
     case undefined:

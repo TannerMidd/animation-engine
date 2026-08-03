@@ -537,8 +537,12 @@
   },
   "voice": "Zira",
   "voiceRate": 0,
-  "voiceRef": null,
-  "voiceProvenance": null,
+  "voiceRef": "larry.ref.wav",
+  "voiceProvenance": {
+    "source": "minted",
+    "seed": 97741260,
+    "hash": "b361bd6a403f7f4bfe4e8be33cb2f5a15f95c14e"
+  },
   "acting": {
     "reactionMs": 471,
     "gestureBias": 1.08,

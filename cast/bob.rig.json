@@ -1,11 +1,11 @@
 {
-  "name": "mel",
-  "charId": "e01d73c4c6",
+  "name": "bob",
+  "charId": "457eb0ecc1",
   "locks": [],
   "identity": {
     "id": "house",
     "version": "1.0.0",
-    "hash": "247eac48398b"
+    "hash": "845ceeea2d52"
   },
   "canvas": {
     "width": 200,
@@ -17,39 +17,39 @@
   ],
   "focus": [
     100,
-    47.019488561044426
+    57.03322180215084
   ],
   "look": {
-    "build": "lanky",
-    "head": "wide",
-    "nose": "button",
-    "ears": "stuck-out",
-    "hair": "tall",
-    "facialHair": "beard",
-    "glasses": "none",
-    "eyes": "googly",
-    "brows": "thick",
+    "build": "pear",
+    "head": "egg",
+    "nose": "wide",
+    "ears": "none",
+    "hair": "receding",
+    "facialHair": "none",
+    "glasses": "round",
+    "eyes": "oval",
+    "brows": "angled",
     "skin": "#e8b98a",
-    "shirt": "#3f6b6b",
-    "hairColour": "#767268",
-    "trousers": "#3d3d4d",
+    "shirt": "#6b8f5a",
+    "hairColour": "#c4a86b",
+    "trousers": "#514540",
     "line": "#1a1a1a",
-    "headSize": 1.0834165107738227,
-    "bodyWidth": 0.9514095860393718,
-    "bodyHeight": 1.034622997059487,
-    "limbLength": 1.0216767640737816,
-    "limbWidth": 1.045620584259741,
-    "eyeSize": 1.092788555205334,
-    "eyeSpread": 1.1230853953491895
+    "headSize": 0.9622483291057871,
+    "bodyWidth": 1.012695057746023,
+    "bodyHeight": 1.004670071043074,
+    "limbLength": 0.9888479687646031,
+    "limbWidth": 0.9727426126087085,
+    "eyeSize": 1.1648479203460738,
+    "eyeSpread": 1.0065147240087389
   },
   "outfit": {
     "sleeves": "long",
-    "collar": "pointed",
+    "collar": "flat",
     "neckwear": "lanyard",
     "pattern": "stripes",
-    "hat": "cap",
-    "shoes": "flat",
-    "accent": "#2b2f36"
+    "hat": "none",
+    "shoes": "round",
+    "accent": "#4f7a5c"
   },
   "parts": [
     {
@@ -57,7 +57,7 @@
       "parent": null,
       "pivot": [
         100,
-        311.72348169162973
+        266.3540637840256
       ],
       "z": 0
     },
@@ -65,8 +65,8 @@
       "id": "leg_L",
       "parent": "torso",
       "pivot": [
-        89.34687658319994,
-        311.72348169162973
+        79.88179998281751,
+        266.3540637840256
       ],
       "z": -1
     },
@@ -74,8 +74,8 @@
       "id": "leg_R",
       "parent": "torso",
       "pivot": [
-        110.65312341680006,
-        311.72348169162973
+        120.11820001718249,
+        266.3540637840256
       ],
       "z": -1
     },
@@ -83,8 +83,8 @@
       "id": "arm_L_upper",
       "parent": "torso",
       "pivot": [
-        80.63542043619034,
-        101.13624872354264
+        58.09952376861311,
+        119.76179255200057
       ],
       "z": 1
     },
@@ -92,8 +92,8 @@
       "id": "arm_L_fore",
       "parent": "arm_L_upper",
       "pivot": [
-        80.63542043619034,
-        188.5509126576954
+        58.09952376861311,
+        178.61802365286974
       ],
       "z": 1
     },
@@ -101,8 +101,8 @@
       "id": "arm_R_upper",
       "parent": "torso",
       "pivot": [
-        119.36457956380966,
-        101.13624872354264
+        141.9004762313869,
+        119.76179255200057
       ],
       "z": 1
     },
@@ -110,8 +110,8 @@
       "id": "arm_R_fore",
       "parent": "arm_R_upper",
       "pivot": [
-        119.36457956380966,
-        188.5509126576954
+        141.9004762313869,
+        178.61802365286974
       ],
       "z": 1
     },
@@ -120,7 +120,7 @@
       "parent": "torso",
       "pivot": [
         100,
-        77.13624872354264
+        95.76179255200057
       ],
       "z": 2
     }
@@ -530,27 +530,27 @@
     }
   ],
   "idle": {
-    "breathAmplitude": 3.6,
-    "breathPeriod": 3.2,
-    "blinkRateHz": 0.45,
+    "breathAmplitude": 4,
+    "breathPeriod": 3.8,
+    "blinkRateHz": 0.47,
     "blinkDuration": 0.12
   },
   "voice": "David",
-  "voiceRate": 0,
-  "voiceRef": "mel.ref.wav",
+  "voiceRate": 1,
+  "voiceRef": "bob.ref.wav",
   "voiceProvenance": {
     "source": "minted",
-    "seed": 519578391,
-    "hash": "94c124f512aa37a784d13a3ef8e87b60475ef979"
+    "seed": 233760991,
+    "hash": "643543fab2d4821350c2e0523e7a4a4cf36061f6"
   },
   "acting": {
-    "reactionMs": 151,
-    "gestureBias": 1.3,
-    "fidgetAmp": 1.5
+    "reactionMs": 326,
+    "gestureBias": 0.89,
+    "fidgetAmp": 2.5
   },
   "voicePersona": {
-    "energy": 1.1,
-    "pace": 0.89
+    "energy": 0.99,
+    "pace": 0.91
   },
-  "svg": "mel.svg"
+  "svg": "bob.svg"
 }

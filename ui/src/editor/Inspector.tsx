@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type {
   AnimationDocument, Beat, CastMember, DialogueCue, DialogueDocument, Mark, SetDescriptor, ShotList, StageAction, Vocab,
 } from '../types.ts';
@@ -25,6 +25,8 @@ const MARKS = ['FAR_L', 'SL', 'CENTER', 'SR', 'FAR_R'];
 export interface InspectorProps {
   tab: InspectorTab;
   onTab: (tab: InspectorTab) => void;
+  /** Bumped by Booth-style buttons elsewhere; draws the eye to this panel. */
+  flash?: number;
   scene: string;
   shots: ShotList | null;
   vocab: Vocab | null;
@@ -41,8 +43,13 @@ export interface InspectorProps {
   onEditCast: (actorId: string, changes: Partial<CastMember>) => void;
   onAnimationDocument: (doc: AnimationDocument) => void;
   onAnimationTarget: (target: AnimationEditTarget | null) => void;
+  onAnimationSeek: (ms: number) => void;
+  selectedMotionId: string | null;
+  onDeleteMotion: (segmentId: string) => void;
   onReloadDialogue: () => Promise<void>;
   onSaveCue: (cue: DialogueCue) => Promise<void>;
+  onDiscardTake: (takeId: string) => void;
+  speakerVoiceBound: boolean;
   performContext: { audioUrl: string; startMs: number; endMs: number } | null;
   sceneRun: { audioUrl: string; beatStarts: number[]; durationMs: number } | null;
   onOpenCastEditor: (name: string | null) => void;
@@ -57,11 +64,26 @@ export function Inspector(p: InspectorProps) {
   const missingVoice = (p.dialogue?.cues ?? []).some((c) => c.approval.state !== 'approved');
   const hasMotion = (p.animation?.segments.length ?? 0) > 0;
 
+  // A short accent ring when something elsewhere hands off to this panel —
+  // without it, a "Booth" click that lands on an already-open tab looks dead.
+  const [flashing, setFlashing] = useState(false);
+  const body = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!p.flash) return;
+    setFlashing(true);
+    body.current?.scrollTo({ top: 0, behavior: 'smooth' });
+    const t = setTimeout(() => setFlashing(false), 1100);
+    return () => clearTimeout(t);
+  }, [p.flash]);
+
   const kindFg = beat?.kind === 'pause' ? '#c8834a' : beat?.kind === 'action' ? '#6f9b5a' : '#9aa1ab';
   const isCreator = Boolean(beat?.locked);
 
   return (
-    <div className="w-[302px] shrink-0 flex flex-col bg-[#22262c] border-l border-edge min-h-0">
+    <div
+      className="w-[302px] shrink-0 flex flex-col bg-[#22262c] border-l border-edge min-h-0 transition-shadow duration-300"
+      style={flashing ? { boxShadow: 'inset 0 0 0 2px #c8834a' } : undefined}
+    >
       {/* tab strip */}
       <div className="shrink-0 px-1.5 pt-[5px] pb-1 border-b border-[#2f353d] flex flex-wrap gap-[2px]">
         {TABS.map((t) => {
@@ -84,7 +106,7 @@ export function Inspector(p: InspectorProps) {
         })}
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto">
+      <div ref={body} className="flex-1 min-h-0 overflow-y-auto">
         {/* context header */}
         {beat && selected !== null && (
           <div className="px-2.5 pt-[9px] pb-1.5 border-b border-[#2f353d] flex items-center gap-[7px]">
@@ -174,8 +196,11 @@ export function Inspector(p: InspectorProps) {
               shots={p.shots}
               document={p.animation}
               playheadMs={p.playheadMs}
+              selectedSegmentId={p.selectedMotionId}
               onDocument={p.onAnimationDocument}
               onTarget={p.onAnimationTarget}
+              onSeek={p.onAnimationSeek}
+              onDeleteSegment={p.onDeleteMotion}
             />
           )}
           {tab === 'rig' && <RigTab {...p} castIds={castIds} />}
@@ -188,6 +213,8 @@ export function Inspector(p: InspectorProps) {
               sceneRun={p.sceneRun}
               onReload={p.onReloadDialogue}
               onSaveCue={p.onSaveCue}
+              onDiscardTake={p.onDiscardTake}
+              speakerVoiceBound={p.speakerVoiceBound}
             />
           )}
           {tab === 'scene' && <SceneTab {...p} />}

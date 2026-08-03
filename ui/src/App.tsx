@@ -166,8 +166,8 @@ export default function App() {
             <span className="text-[10px] text-ink-ghost">edits here land on disk and show up in the scene on the next preview</span>
           </div>
           <div className="flex-1 min-h-0">
-            {legacy.kind === 'sets' && <SetDesigner vocab={vocab} llm={health?.llm ?? null} />}
-            {legacy.kind === 'cast' && <CastEditor health={health} vocab={vocab} />}
+            {legacy.kind === 'sets' && <SetDesigner vocab={vocab} llm={health?.llm ?? null} open={legacy.name} />}
+            {legacy.kind === 'cast' && <CastEditor health={health} vocab={vocab} open={legacy.name} />}
           </div>
         </div>
       )}

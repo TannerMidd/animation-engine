@@ -284,6 +284,13 @@ function inspectDialogue(
     }
     if (!cue.locked) unlocked.push(label);
 
+    if (cue.voiceSource === 'generated') {
+      // The creator explicitly chose the character's seeded synthesis for this
+      // line; having nothing selected is the correct state. Approval and lock
+      // are still demanded above — generated is a decision, not a default.
+      continue;
+    }
+
     if (!cue.selectedTakeId && !cue.selectedRenderId) {
       note(notes, 'error', 'dialogue-selection-unresolved', `dialogue cue "${label}" has no selected take or render`);
       continue;
@@ -345,17 +352,34 @@ function inspectDialogue(
         note(notes, 'warn', 'capture-qc-warning', `selected take "${take.id}" for "${label}" has capture warnings: ${take.quality.flags.join('; ')}`);
       }
 
-      const performanceConsent = take.capture.consentId
+      // Takes are immutable, so a recording captured before any rights record
+      // existed can never be re-stamped. A live document-level record with
+      // performance scope legitimately covers the creator's own recordings —
+      // demand explicit binding only when nothing covers them at all.
+      const fallbackConsent = dialogue.consents.find((item) =>
+        !item.revokedAt &&
+        (!item.expiresAt || Date.parse(item.expiresAt) > Date.now()) &&
+        item.permits.distribution &&
+        (item.scope === 'performance' || item.scope === 'both'));
+      const performanceConsent = (take.capture.consentId
         ? dialogue.consents.find((item) => item.id === take.capture.consentId)
-        : undefined;
-      if (!take.capture.consentId || !performanceConsent) {
+        : undefined) ?? fallbackConsent;
+      if (!performanceConsent) {
         note(
           notes,
           'error',
           'performance-consent-missing',
-          `selected performance take "${take.id}" for "${label}" is not bound to a rights record`,
+          `selected performance take "${take.id}" for "${label}" is not bound to a rights record and no active performance-scope record covers it`,
         );
       } else {
+        if (!take.capture.consentId) {
+          note(
+            notes,
+            'info',
+            'performance-consent-fallback',
+            `take "${take.id}" for "${label}" predates its rights record; covered by document-level record "${performanceConsent.id}"`,
+          );
+        }
         if (performanceConsent.revokedAt) {
           note(notes, 'error', 'performance-consent-revoked', `performance consent "${performanceConsent.id}" for take "${take.id}" was revoked at ${performanceConsent.revokedAt}`);
         }
@@ -450,35 +474,69 @@ function inspectDialogue(
   }
 }
 
-function cueUsesRigVoice(cue: DialogueCue | undefined, document: DialogueDocument | null): boolean {
-  if (!cue || !document) return true;
-  if (!cue.selectedRenderId) return !cue.selectedTakeId;
+/**
+ * How a line leans on the rig's voice reference.
+ *
+ * 'undecided' — synthesis or conversion would use the rig voice with no
+ * explicit creator decision behind it. 'chosen' — the creator approved the
+ * character's voice for this line, generated or converted into. 'none' — an
+ * original performance carries the line; the rig voice is not involved.
+ */
+function rigVoiceUse(cue: DialogueCue | undefined, document: DialogueDocument | null): 'undecided' | 'chosen' | 'none' {
+  if (!cue || !document) return 'undecided';
+  if (cue.voiceSource === 'generated') {
+    return cue.approval.state === 'approved' ? 'chosen' : 'undecided';
+  }
+  if (!cue.selectedRenderId) return cue.selectedTakeId ? 'none' : 'undecided';
   const render = document.voiceRenders.find((item) => item.id === cue.selectedRenderId);
-  if (!render) return true;
-  return render.source.kind === 'draft-tts' || render.source.kind === 'voice-conversion';
+  if (!render) return 'undecided';
+  // A conversion names its target voice and binds a rights record to that
+  // reference's checksum, so approving one is as explicit a decision as
+  // approving the generated voice. Draft TTS is nobody's decision.
+  if (render.source.kind === 'voice-conversion') {
+    return cue.approval.state === 'approved' ? 'chosen' : 'undecided';
+  }
+  return render.source.kind === 'draft-tts' ? 'undecided' : 'none';
 }
 
 function inspectVoiceReferences(input: ProductionPreflightInput, notes: ProductionPreflightNote[]): void {
   const { shots } = input;
   if (!shots) return;
   const cues = new Map(input.dialogue?.cues.map((cue) => [cue.id, cue]) ?? []);
-  const actorsByRig = new Map<string, string[]>();
+  const undecidedByRig = new Map<string, string[]>();
+  const chosenByRig = new Map<string, string[]>();
   for (const member of shots.cast) {
     const lines = shots.beats.filter((beat) => beat.kind === 'line' && beat.speaker === member.id);
-    if (!lines.some((beat) => cueUsesRigVoice(cues.get(beat.id), input.dialogue))) continue;
-    const actors = actorsByRig.get(member.rig) ?? [];
+    const uses = lines.map((beat) => rigVoiceUse(cues.get(beat.id), input.dialogue));
+    const bucket = uses.some((use) => use === 'undecided')
+      ? undecidedByRig
+      : uses.some((use) => use === 'chosen')
+        ? chosenByRig
+        : null;
+    if (!bucket) continue;
+    const actors = bucket.get(member.rig) ?? [];
     actors.push(member.id);
-    actorsByRig.set(member.rig, actors);
+    bucket.set(member.rig, actors);
   }
 
-  for (const [rigName, actors] of actorsByRig) {
+  for (const [rigName, actors] of undecidedByRig) {
     const rig = input.rigs.get(rigName)?.rig;
     if (!rig?.voiceRef || rig.voiceProvenance?.source !== 'minted') continue;
     note(
       notes,
       'error',
       'voice-reference-draft-only',
-      `minted draft voice reference "${rig.voiceRef}" is still used for ${actors.join(', ')}; approve a recorded/uploaded reference or select an original performance that does not use it`,
+      `minted draft voice reference "${rig.voiceRef}" is still used for ${actors.join(', ')}; approve a recorded/uploaded reference, select an original performance, or approve the character voice per line — generated, or converted from your own take`,
+    );
+  }
+  for (const [rigName, actors] of chosenByRig) {
+    const rig = input.rigs.get(rigName)?.rig;
+    if (!rig?.voiceRef || rig.voiceProvenance?.source !== 'minted') continue;
+    note(
+      notes,
+      'warn',
+      'voice-reference-minted-in-use',
+      `${actors.join(', ')} speak with the minted voice reference "${rig.voiceRef}" by explicit approval; audition it before release, or record/upload a reference in the cast editor`,
     );
   }
 }

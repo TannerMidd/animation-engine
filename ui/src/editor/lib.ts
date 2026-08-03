@@ -1,4 +1,4 @@
-import type { Beat, DialogueCue, DialogueDocument, ShotList, TimeAnchor } from '../types.ts';
+import type { AnimationDocument, Beat, DialogueCue, DialogueDocument, ShotList, TimeAnchor } from '../types.ts';
 
 /** Editor modes, in the order they appear in the mode switcher. */
 export type Mode = 'write' | 'direct' | 'animate' | 'perform' | 'sound' | 'publish';
@@ -95,17 +95,43 @@ export function resolveAnchor(
   return base + anchor.offsetMs;
 }
 
-/** Approval state of a line beat, resolved through the dialogue document. */
-export function cueApproval(cue: DialogueCue | undefined): 'approved' | 'candidate' | 'missing' {
+/** Voice state of a line beat, resolved through the dialogue document. */
+export function cueApproval(cue: DialogueCue | undefined): 'approved' | 'generated' | 'candidate' | 'missing' {
   if (!cue) return 'missing';
+  if (cue.voiceSource === 'generated' && cue.approval.state === 'approved') return 'generated';
   if (cue.approval.state === 'approved') return 'approved';
   if (cue.selectedTakeId || cue.selectedRenderId || cue.approval.state === 'candidate') return 'candidate';
   return 'missing';
 }
 
+/** True when the line still needs a creator decision (record, select, or choose generated). */
+export function cueUndecided(cue: DialogueCue | undefined): boolean {
+  const state = cueApproval(cue);
+  return state === 'missing' || state === 'candidate';
+}
+
 export function cueForBeat(dialogue: DialogueDocument | null, beat: Beat | null): DialogueCue | null {
   if (!dialogue || !beat || beat.kind !== 'line') return null;
   return dialogue.cues.find((cue) => cue.id === beat.id) ?? null;
+}
+
+/** Why a timeline motion clip cannot currently be deleted, or null when safe. */
+export function motionDeletionBlocker(document: AnimationDocument, segmentId: string): string | null {
+  const segment = document.segments.find((item) => item.id === segmentId);
+  if (!segment) return 'That motion no longer exists.';
+  const layer = document.layers.find((item) => item.id === segment.layerId);
+  if (layer?.locked) return `Unlock the ${layer.name} layer before deleting this motion.`;
+  if (segment.locked) return 'Unlock this motion before deleting it.';
+  const lockedControl = [segment.from, segment.to, ...segment.waypoints].find((control) => control.locked);
+  if (lockedControl) return `Unlock motion control ${lockedControl.id} before deleting this motion.`;
+  return null;
+}
+
+/** Remove exactly one unlocked motion segment while preserving every other animation item. */
+export function withoutMotionSegment(document: AnimationDocument, segmentId: string): AnimationDocument {
+  const blocker = motionDeletionBlocker(document, segmentId);
+  if (blocker) throw new Error(blocker);
+  return { ...document, segments: document.segments.filter((segment) => segment.id !== segmentId) };
 }
 
 /** Deterministic 4-swatch strip from an identity hash, for the app-bar chip. */

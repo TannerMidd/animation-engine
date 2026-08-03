@@ -11,7 +11,13 @@
     "horizonY": 566,
     "ceilingY": 92,
     "marginX": 420,
-    "marginY": 220
+    "marginY": 220,
+    "walkable": {
+      "x": 64,
+      "y": 540,
+      "width": 1152,
+      "height": 180
+    }
   },
   "layers": {
     "back": [

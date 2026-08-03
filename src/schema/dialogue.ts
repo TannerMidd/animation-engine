@@ -124,6 +124,13 @@ export const RecordedTake = z
       })
       .strict()
       .default({}),
+    /**
+     * One-way withdrawal. The row stays as audit evidence — bytes, checksums
+     * and provenance untouched — but a revoked take leaves every working
+     * surface: selections referencing it are cleared by the revocation
+     * operation and the UI stops listing it.
+     */
+    revokedAt: IsoDate.nullable().default(null),
   })
   .strict();
 export type RecordedTake = Readonly<z.infer<typeof RecordedTake>>;
@@ -312,6 +319,14 @@ export const VoiceQualityReport = z
     speakerSimilarity: z.number().min(0).max(1).nullable().default(null),
     /** Normalized source/output energy-envelope similarity; cadence proxy, not ASR. */
     cadenceSimilarity: z.number().min(0).max(1).nullable().default(null),
+    /**
+     * Output voiced-frame share over the source's. Near 1 means the conversion
+     * is still speech; well under 1 means it collapsed into noise that a
+     * loudness check cannot distinguish from a voice.
+     */
+    voicedRetention: z.number().min(0).nullable().default(null),
+    /** How far the result landed from the target voice's register, in semitones. */
+    pitchErrorSemitones: z.number().nullable().default(null),
     flags: z.array(z.string()).default([]),
   })
   .strict()
@@ -447,6 +462,14 @@ export const DialogueCue = z
     spokenText: z.string().min(1),
     selectedTakeId: Id.nullable().default(null),
     selectedRenderId: Id.nullable().default(null),
+    /**
+     * The creator's voice decision for this line. 'performance' expects a
+     * selected take or render; 'generated' is the explicit choice that the
+     * character's own seeded synthesis carries the line — approvable and
+     * lockable like any performance, so "no recording" can be a decision
+     * rather than a gap.
+     */
+    voiceSource: z.enum(['performance', 'generated']).default('performance'),
     seed: z.number().int().nullable().default(null),
     delivery: CueDelivery,
     trim: CueTrim.nullable().default(null),
@@ -478,7 +501,14 @@ export const DialogueCue = z
         });
       }
     }
-    if (cue.approval.state === 'approved') {
+    if (cue.voiceSource === 'generated' && (cue.selectedTakeId !== null || cue.selectedRenderId !== null)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['voiceSource'],
+        message: 'a generated-voice cue cannot also select a performance; clear the selection or switch to performance',
+      });
+    }
+    if (cue.approval.state === 'approved' && cue.voiceSource === 'performance') {
       if (cue.selectedTakeId === null && cue.selectedRenderId === null) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,

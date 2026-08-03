@@ -139,6 +139,71 @@
     return t;
   }
 
+  /**
+   * Temporary direct-manipulation pose used only by the editor while a handle
+   * is held. It never mutates scene IR. The next __seek restores the authored
+   * frame because touched cache entries are deliberately invalidated.
+   */
+  window.__previewParts = function (actorId, transforms) {
+    var actor = actors[actorId];
+    if (!actor) return false;
+    for (var partId in transforms) {
+      var part = actor.parts[partId];
+      var t = transforms[partId];
+      if (!part || !t) continue;
+      var value = partTransform(t[0], t[1], t[2], t[3], part.px, part.py);
+      if (value === '') part.el.removeAttribute('transform');
+      else part.el.setAttribute('transform', value);
+      part.last = null;
+    }
+    return true;
+  };
+
+  /**
+   * Temporary actor-root placement used by the editor while the body handle is
+   * held. Same contract as __previewParts: scene IR is never mutated, and the
+   * next __seek restores the authored placement because the cache entry is
+   * deliberately invalidated.
+   */
+  window.__previewRoot = function (actorId, x, y) {
+    if (!ir) return false;
+    var actor = actors[actorId];
+    var frame = ir.frames[typeof window.__frame === 'number' ? window.__frame : 0];
+    var state = frame && frame.actors[actorId];
+    if (!actor || !state || !state.visible) return false;
+    var sx = state.flip ? -state.scale : state.scale;
+    actor.group.setAttribute('transform',
+      'translate(' + x + ',' + y + ') ' +
+      'scale(' + sx + ',' + state.scale + ') ' +
+      'translate(' + -actor.anchorX + ',' + -actor.anchorY + ')');
+    actor.lastPlacement = null;
+    return true;
+  };
+
+  /**
+   * Temporary set-prop nudge used by the editor while a prop handle is held.
+   * Only the set-authored instance moves. __seek never touches set elements,
+   * so restore is explicit: call with dx = dy = 0. Props without a set-prop id
+   * (non-interaction decor) return false and the editor drags a ghost instead.
+   */
+  var propPreviewOriginals = {};
+  window.__previewProp = function (id, dx, dy) {
+    var el = document.getElementById('set-prop-' + id);
+    if (!el) return false;
+    if (!(id in propPreviewOriginals)) {
+      propPreviewOriginals[id] = el.getAttribute('transform');
+    }
+    var original = propPreviewOriginals[id];
+    if (dx === 0 && dy === 0) {
+      if (original === null) el.removeAttribute('transform');
+      else el.setAttribute('transform', original);
+      delete propPreviewOriginals[id];
+      return true;
+    }
+    el.setAttribute('transform', 'translate(' + dx + ',' + dy + ')' + (original ? ' ' + original : ''));
+    return true;
+  };
+
   var cardEls = { title: null, end: null };
   var shownCard = null;
 

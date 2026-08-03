@@ -3,276 +3,554 @@ import {
   reducePuppeteeringSamples,
   type PuppeteeringSample,
 } from '../../../src/animation/recording.ts';
+import {
+  clientToStage,
+  clientToWorld,
+  worldPerCssPx,
+  worldToOverlay,
+  type CameraRect,
+  type FrameGeom,
+} from '../editor/stage/coords.ts';
+import {
+  actorIdFromDom,
+  actorLocalToWorld,
+  availableControllers,
+  clampToArea,
+  controllerForPart,
+  controllerLabel,
+  controllerLocalPoint,
+  dragTargetTo,
+  partIdFromDom,
+  partMaxReach,
+  partOffsetTo,
+  snapPoint,
+  solveArm,
+  worldToActorLocal,
+  FORE_LENGTH_RATIO,
+  type AnimationEditTarget,
+  type AnimationValidArea,
+  type ControllerId,
+  type IRTransform,
+  type MotionAuthoringRequest,
+  type PropTarget,
+  type RuntimeRigData,
+  type SnapCandidate,
+} from '../editor/stage/interaction.ts';
 
-type IRTransform = [number, number, number, number];
+// The authoring contract moved to the pure interaction module; re-export so
+// existing imports keep working.
+export type {
+  AnimationEditTarget,
+  AnimationValidArea,
+  MotionAuthoringCommit,
+  MotionAuthoringRequest,
+} from '../editor/stage/interaction.ts';
+
 interface RuntimeScene {
   cast: Array<{ id: string; rig: string }>;
   frames: Array<{
-    camera: { x: number; y: number; w: number; h: number };
+    camera: CameraRect;
     actors: Record<string, {
       visible: boolean; x: number; y: number; scale: number; flip: boolean;
       parts: Record<string, IRTransform>;
     }>;
   }>;
 }
-interface RuntimeRig {
-  anchor: [number, number];
-  parts: Array<{ id: string; parent?: string | null; pivot: [number, number] }>;
-}
 interface RuntimeWindow extends Window {
   __IR?: RuntimeScene;
-  __RIGS?: Record<string, RuntimeRig>;
+  __RIGS?: Record<string, RuntimeRigData>;
+  __seek?: (frame: number) => void;
+  __previewParts?: (actorId: string, transforms: Record<string, IRTransform>) => boolean;
+  __previewRoot?: (actorId: string, x: number, y: number) => boolean;
+  __previewProp?: (id: string, dx: number, dy: number) => boolean;
 }
 
-export interface MotionAuthoringRequest {
-  actorId: string;
-  channel: 'root.position' | 'part.transform';
-  partId?: string;
+/** A draggable set instance, decorated with who is seated at it. */
+export interface StagePropTarget extends PropTarget {
+  seatedBy?: string;
+}
+
+interface DragSample {
+  clientX: number;
+  clientY: number;
+  elapsedMs: number;
+  frame: number;
+}
+
+interface ActorDragState {
+  kind: 'actor';
+  pointerId: number;
+  controller: ControllerId;
   startMs: number;
-  endMs: number;
-  from: [number, number] | { rot: number; x: number; y: number; scale: number };
-  to: [number, number] | { rot: number; x: number; y: number; scale: number };
-  waypoints?: Array<{
-    at: number;
-    value: [number, number] | { rot: number; x: number; y: number; scale: number };
-  }>;
-  path?: { shape: 'linear' | 'smooth' | 'arc'; curvature: number };
-  assist?: { anticipation: number; overshoot: number; hold: number; recovery: number };
-  source?: 'drag' | 'puppeteering';
+  startClient: [number, number];
+  startWorld: [number, number];
+  startActorPos: [number, number];
+  /** Pointer and controller in rig-local space at grab (part controllers). */
+  startLocal: [number, number] | null;
+  startControllerLocal: [number, number] | null;
+  /** Authored part offset at grab (head/torso). */
+  startOffset: [number, number];
+  /** Authored arm angles at grab (wrists). */
+  startPose: { upper: number; fore: number } | null;
+  clientX: number;
+  clientY: number;
+  startedAt: number;
+  samples: DragSample[];
 }
 
-export type MotionAuthoringCommit = MotionAuthoringRequest | MotionAuthoringRequest[];
-
-export interface AnimationValidArea {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
+interface PropDragState {
+  kind: 'prop';
+  pointerId: number;
+  prop: StagePropTarget;
+  startClient: [number, number];
+  startWorld: [number, number];
+  startPos: [number, number];
+  clientX: number;
+  clientY: number;
+  startedAt: number;
 }
 
-export interface AnimationEditTarget {
-  actorId: string;
-  partId: string | null;
-  startMs: number;
-  durationFrames: number;
-  fps: number;
-  recording: boolean;
-  onionSkinFrames: number;
-  path: { shape: 'linear' | 'smooth' | 'arc'; curvature: number };
-  assist: { anticipation: number; overshoot: number; hold: number; recovery: number };
-  ghostPath?: Array<[number, number] | { rot: number; x: number; y: number; scale: number }>;
-  onCommit: (request: MotionAuthoringCommit) => void;
-}
+type DragState = ActorDragState | PropDragState;
 
-function rotate(point: [number, number], degrees: number): [number, number] {
-  const angle = degrees * Math.PI / 180;
-  const c = Math.cos(angle);
-  const s = Math.sin(angle);
-  return [point[0] * c - point[1] * s, point[0] * s + point[1] * c];
-}
+type Hit =
+  | { kind: 'actor'; controller: ControllerId }
+  | { kind: 'other-actor'; actorId: string; controller: ControllerId }
+  | { kind: 'prop'; prop: StagePropTarget };
 
-function normalizedDegrees(value: number): number {
-  let out = value;
-  while (out > 180) out -= 360;
-  while (out < -180) out += 360;
-  return out;
-}
+type Hover =
+  | { kind: 'actor'; controller: ControllerId }
+  | { kind: 'other-actor'; actorId: string; at: [number, number] }
+  | { kind: 'prop'; id: string };
 
-function angularDistance(a: number, b: number): number {
-  return Math.abs(normalizedDegrees(a - b));
-}
+const HANDLE_GRAB_RADIUS_PX = 24;
+const CLICK_SLOP_PX = 3;
 
-/** Deterministic two-bone solve. Both elbow branches are tested; nearest current pose wins. */
-function solveArm(
-  shoulder: [number, number],
-  elbow: [number, number],
-  target: [number, number],
-  currentUpper: number,
-  currentFore: number,
-): { upper: number; fore: number; clampedTarget: [number, number]; reach: number } {
-  const rest = [elbow[0] - shoulder[0], elbow[1] - shoulder[1]] as [number, number];
-  const upperLength = Math.max(1, Math.hypot(rest[0], rest[1]));
-  const foreLength = upperLength * 0.92;
-  const restAngle = Math.atan2(rest[1], rest[0]);
-  let x = target[0] - shoulder[0];
-  let y = target[1] - shoulder[1];
-  let distance = Math.hypot(x, y);
-  const minReach = Math.abs(upperLength - foreLength) + 1;
-  const maxReach = upperLength + foreLength - 1;
-  const wanted = Math.max(minReach, Math.min(maxReach, distance));
-  if (distance < 0.001) {
-    x = 0;
-    y = wanted;
-    distance = wanted;
-  } else if (Math.abs(wanted - distance) > 0.001) {
-    x *= wanted / distance;
-    y *= wanted / distance;
-    distance = wanted;
-  }
-
-  const cosine = Math.max(-1, Math.min(1,
-    (distance * distance - upperLength * upperLength - foreLength * foreLength) /
-    (2 * upperLength * foreLength)));
-  const bend = Math.acos(cosine);
-  const base = Math.atan2(y, x);
-  const candidates = [bend, -bend].map((foreRadians) => {
-    const upperRadians = base - Math.atan2(
-      foreLength * Math.sin(foreRadians),
-      upperLength + foreLength * Math.cos(foreRadians),
-    );
-    return {
-      upper: normalizedDegrees((upperRadians - restAngle) * 180 / Math.PI),
-      fore: normalizedDegrees(foreRadians * 180 / Math.PI),
-    };
-  });
-  candidates.sort((a, b) =>
-    angularDistance(a.upper, currentUpper) + angularDistance(a.fore, currentFore) -
-    angularDistance(b.upper, currentUpper) - angularDistance(b.fore, currentFore));
-  return {
-    ...candidates[0]!,
-    clampedTarget: [shoulder[0] + x, shoulder[1] + y],
-    reach: maxReach,
-  };
-}
-
-/** Direct-manipulation handles layered over the immutable renderer iframe. */
+/**
+ * Direct manipulation over the immutable renderer iframe.
+ *
+ * Mounted inside the frame box, so `inset-0` is exactly the frame at any zoom
+ * and `getBoundingClientRect` gives the true frame origin. The root is the hit
+ * surface: pointerdown anywhere hit-tests the preview's SVG (same-origin) to
+ * find the character part or prop under the cursor; the handles are shortcuts
+ * to the same gestures. Everything the surface covers is inert chrome.
+ */
 export function AnimationOverlay({
-  iframe, frame, target, validArea,
+  iframe, frame, target, validArea, scale, width, height,
+  showOnion, showPath, showPropHandles, snapEnabled, snapCandidates, propTargets,
+  onCommitProp, onInteractStart,
 }: {
   iframe: React.RefObject<HTMLIFrameElement | null>;
   frame: number;
   target: AnimationEditTarget;
   /** Set-authored actor-root blocking bounds. Parts still use rig reach. */
   validArea?: AnimationValidArea | null;
+  scale: number;
+  width: number;
+  height: number;
+  showOnion: boolean;
+  showPath: boolean;
+  showPropHandles: boolean;
+  snapEnabled: boolean;
+  snapCandidates: readonly SnapCandidate[];
+  propTargets: readonly StagePropTarget[];
+  onCommitProp?: (prop: StagePropTarget, to: [number, number]) => void;
+  onInteractStart?: () => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ width: 1, height: 1 });
-  const [drag, setDrag] = useState<{
-    clientX: number;
-    clientY: number;
-    startedAt: number;
-    samples: Array<{ clientX: number; clientY: number; elapsedMs: number }>;
-  } | null>(null);
+  const [drag, setDrag] = useState<DragState | null>(null);
+  const dragCapture = useRef<DragState | null>(null);
+  const dragPaintFrame = useRef<number | null>(null);
+  const hoverFrame = useRef<number | null>(null);
+  const [hover, setHover] = useState<Hover | null>(null);
+  const armPreviewPose = useRef<{ upper: number; fore: number } | null>(null);
+  const previewApplied = useRef<null | { kind: 'actor' } | { kind: 'prop'; id: string }>(null);
 
-  useLayoutEffect(() => {
-    const el = host.current;
-    if (!el) return;
-    const measure = () => {
-      const box = el.getBoundingClientRect();
-      setSize({ width: box.width, height: box.height });
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
+  const geom: FrameGeom = { width, height, scale };
   const runtime = iframe.current?.contentWindow as RuntimeWindow | null | undefined;
   const scene = runtime?.__IR;
-  const state = scene?.frames[Math.max(0, Math.min(frame, (scene?.frames.length ?? 1) - 1))];
-  const actor = state?.actors[target.actorId];
+  const frameState = scene?.frames[Math.max(0, Math.min(frame, (scene?.frames.length ?? 1) - 1))];
+  const camera = frameState?.camera;
+  const actor = frameState?.actors[target.actorId];
   const member = scene?.cast.find((item) => item.id === target.actorId);
   const rig = member ? runtime?.__RIGS?.[member.rig] : undefined;
-  const wristSide = target.partId?.match(/^wrist_([LR])$/)?.[1] as 'L' | 'R' | undefined;
-  const armUpper = wristSide ? rig?.parts.find((item) => item.id === `arm_${wristSide}_upper`) : undefined;
-  const armFore = wristSide ? rig?.parts.find((item) => item.id === `arm_${wristSide}_fore`) : undefined;
-  const part = target.partId && !wristSide ? rig?.parts.find((item) => item.id === target.partId) : undefined;
-  const transform = part && actor ? (actor.parts[part.id] ?? [0, 0, 0, 1] as IRTransform) : null;
-  const upperTransform = armUpper && actor ? (actor.parts[armUpper.id] ?? [0, 0, 0, 1] as IRTransform) : null;
-  const foreTransform = armFore && actor ? (actor.parts[armFore.id] ?? [0, 0, 0, 1] as IRTransform) : null;
+  const rigPartIds = new Set((rig?.parts ?? []).map((part) => part.id));
+  const controllers = rig ? availableControllers(rigPartIds) : (['body'] as ControllerId[]);
+  const requestedController = (target.partId ?? 'body') as ControllerId;
+  const activeController: ControllerId = controllers.includes(requestedController) ? requestedController : 'body';
 
-  const scale = Math.min(size.width / 1280, size.height / 720);
-  const originX = (size.width - 1280 * scale) / 2;
-  const originY = (size.height - 720 * scale) / 2;
-  const camera = state?.camera;
-  const rootArea = validArea ?? { x: 0, y: 0, width: 1280, height: 720 };
-  const clampRoot = useCallback((point: [number, number]): [number, number] => [
-    Math.round(Math.max(rootArea.x, Math.min(rootArea.x + rootArea.width, point[0])) * 10) / 10,
-    Math.round(Math.max(rootArea.y, Math.min(rootArea.y + rootArea.height, point[1])) * 10) / 10,
-  ], [rootArea.x, rootArea.y, rootArea.width, rootArea.height]);
+  const rootArea = validArea ?? { x: 0, y: 0, width, height };
+  const stageArea: AnimationValidArea = { x: 0, y: 0, width, height };
+  const snapThreshold = camera ? 12 * worldPerCssPx(camera, geom) : 0;
 
-  const worldPoint = (() => {
-    if (!actor) return null;
-    if (!rig) return [actor.x, actor.y] as [number, number];
-    const direction = actor.flip ? -1 : 1;
-    if (wristSide && armUpper && armFore && upperTransform && foreTransform) {
-      const shoulder = armUpper.pivot;
-      const rest = [armFore.pivot[0] - shoulder[0], armFore.pivot[1] - shoulder[1]] as [number, number];
-      const first = rotate(rest, upperTransform[0]);
-      const second = rotate([rest[0] * 0.92, rest[1] * 0.92], upperTransform[0] + foreTransform[0]);
-      const localX = shoulder[0] + first[0] + second[0];
-      const localY = shoulder[1] + first[1] + second[1];
-      return [
-        actor.x + (localX - rig.anchor[0]) * actor.scale * direction,
-        actor.y + (localY - rig.anchor[1]) * actor.scale,
-      ] as [number, number];
-    }
-    if (!part || !transform) return [actor.x, actor.y] as [number, number];
-    const localX = part.pivot[0] + transform[1];
-    const localY = part.pivot[1] + transform[2];
+  const controllerWorldAt = useCallback((controller: ControllerId, frameIndex: number): [number, number] | null => {
+    const index = Math.max(0, Math.min(frameIndex, (scene?.frames.length ?? 1) - 1));
+    const state = scene?.frames[index]?.actors[target.actorId];
+    if (!state) return null;
+    if (!rig) return controller === 'body' ? [state.x, state.y] : null;
+    const local = controllerLocalPoint(controller, rig, state.parts);
+    return local ? actorLocalToWorld(local, state, rig.anchor) : null;
+  }, [rig, scene, target.actorId]);
+
+  const armParts = useCallback((controller: 'wrist_L' | 'wrist_R') => {
+    const side = controller === 'wrist_L' ? 'L' : 'R';
+    const upper = rig?.parts.find((part) => part.id === `arm_${side}_upper`);
+    const fore = rig?.parts.find((part) => part.id === `arm_${side}_fore`);
+    return upper && fore ? { upper, fore } : null;
+  }, [rig]);
+
+  const frameRect = () => host.current?.getBoundingClientRect() ?? null;
+
+  const pointerToWorld = useCallback((clientX: number, clientY: number): [number, number] | null => {
+    const rect = host.current?.getBoundingClientRect();
+    if (!rect || !camera) return null;
+    return clientToWorld(camera, geom, rect.left, rect.top, clientX, clientY);
+  }, [camera, geom.width, geom.height, geom.scale]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // --- drag resolution (pure, reused by preview, paint and commit) -----------
+
+  const resolveBodyDrag = useCallback((state: ActorDragState, world: [number, number]) => {
+    const raw = dragTargetTo(state.startActorPos, state.startWorld, world);
+    const point = clampToArea(raw, rootArea);
+    const clamped = Math.abs(point[0] - raw[0]) > 0.05 || Math.abs(point[1] - raw[1]) > 0.05;
+    if (!snapEnabled || target.recording) return { point, hits: [] as SnapCandidate[], clamped };
+    const snapped = snapPoint(point, snapCandidates, snapThreshold);
+    return { point: snapped.point, hits: snapped.hits, clamped };
+  }, [rootArea.x, rootArea.y, rootArea.width, rootArea.height, snapEnabled, target.recording, snapCandidates, snapThreshold]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const resolvePropDrag = useCallback((state: PropDragState, world: [number, number]) => {
+    const raw = dragTargetTo(state.startPos, state.startWorld, world);
+    const point = clampToArea(raw, stageArea);
+    if (!snapEnabled) return { point, hits: [] as SnapCandidate[] };
+    const candidates = snapCandidates.filter((c) => !(c.kind === 'seat' && c.id === state.prop.id));
+    return snapPoint(point, candidates, snapThreshold);
+  }, [snapEnabled, snapCandidates, snapThreshold, width, height]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Wrist target in rig-local space, preserving the grab offset. */
+  const armTargetLocal = useCallback((state: ActorDragState, world: [number, number]): [number, number] | null => {
+    if (!actor || !rig || !state.startLocal || !state.startControllerLocal) return null;
+    const local = worldToActorLocal(world, actor, rig.anchor);
     return [
-      actor.x + (localX - rig.anchor[0]) * actor.scale * direction,
-      actor.y + (localY - rig.anchor[1]) * actor.scale,
-    ] as [number, number];
-  })();
+      state.startControllerLocal[0] + (local[0] - state.startLocal[0]),
+      state.startControllerLocal[1] + (local[1] - state.startLocal[1]),
+    ];
+  }, [actor, rig]);
 
-  const screenPoint = worldPoint && camera ? [
-    originX + ((worldPoint[0] - camera.x) / camera.w) * 1280 * scale,
-    originY + ((worldPoint[1] - camera.y) / camera.h) * 720 * scale,
-  ] as [number, number] : null;
+  // --- live preview while a drag is held --------------------------------------
 
-  const reachCenterWorld = actor && rig && wristSide && armUpper ? [
-    actor.x + (armUpper.pivot[0] - rig.anchor[0]) * actor.scale * (actor.flip ? -1 : 1),
-    actor.y + (armUpper.pivot[1] - rig.anchor[1]) * actor.scale,
-  ] as [number, number] : worldPoint;
-  const reachCenterScreen = reachCenterWorld && camera ? [
-    originX + ((reachCenterWorld[0] - camera.x) / camera.w) * 1280 * scale,
-    originY + ((reachCenterWorld[1] - camera.y) / camera.h) * 720 * scale,
-  ] as [number, number] : screenPoint;
+  const restorePreview = useCallback(() => {
+    const applied = previewApplied.current;
+    if (!applied) return;
+    const win = iframe.current?.contentWindow as RuntimeWindow | null | undefined;
+    try {
+      if (applied.kind === 'prop') win?.__previewProp?.(applied.id, 0, 0);
+      else win?.__seek?.(frame);
+    } catch {
+      // A preview rebuild may replace the iframe during a save. Its first seek
+      // will render the authored pose, so there is nothing left to restore.
+    }
+    previewApplied.current = null;
+    armPreviewPose.current = null;
+  }, [frame, iframe]);
 
-  const clientToWorld = useCallback((clientX: number, clientY: number): [number, number] | null => {
-    const el = host.current;
-    if (!el || !camera) return null;
-    const box = el.getBoundingClientRect();
-    const sx = (clientX - box.left - originX) / scale;
-    const sy = (clientY - box.top - originY) / scale;
-    return [camera.x + (sx / 1280) * camera.w, camera.y + (sy / 720) * camera.h];
-  }, [camera, originX, originY, scale]);
-
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!drag) return;
-    const move = (event: PointerEvent) => setDrag((current) => current ? {
-      ...current,
+    const win = iframe.current?.contentWindow as RuntimeWindow | null | undefined;
+    if (!win) return;
+    const world = pointerToWorld(drag.clientX, drag.clientY);
+    if (!world) return;
+
+    if (drag.kind === 'prop') {
+      const to = resolvePropDrag(drag, world).point;
+      if (win.__previewProp?.(drag.prop.id, to[0] - drag.startPos[0], to[1] - drag.startPos[1])) {
+        previewApplied.current = { kind: 'prop', id: drag.prop.id };
+      }
+      return;
+    }
+    if (!actor || !actor.visible) return;
+
+    if (drag.controller === 'body') {
+      const to = resolveBodyDrag(drag, world).point;
+      if (win.__previewRoot?.(target.actorId, to[0], to[1])) {
+        previewApplied.current = { kind: 'actor' };
+      }
+      return;
+    }
+    if (!rig) return;
+
+    if (drag.controller === 'wrist_L' || drag.controller === 'wrist_R') {
+      const parts = armParts(drag.controller);
+      const localTarget = armTargetLocal(drag, world);
+      if (!parts || !localTarget || !win.__previewParts) return;
+      const upperT = actor.parts[parts.upper.id] ?? [0, 0, 0, 1] as IRTransform;
+      const foreT = actor.parts[parts.fore.id] ?? [0, 0, 0, 1] as IRTransform;
+      const previous = armPreviewPose.current ?? drag.startPose ?? { upper: upperT[0], fore: foreT[0] };
+      const solved = solveArm(parts.upper.pivot, parts.fore.pivot, localTarget, previous.upper, previous.fore);
+      armPreviewPose.current = { upper: solved.upper, fore: solved.fore };
+      if (win.__previewParts(target.actorId, {
+        [parts.upper.id]: [solved.upper, upperT[1], upperT[2], upperT[3]],
+        [parts.fore.id]: [solved.fore, foreT[1], foreT[2], foreT[3]],
+      })) previewApplied.current = { kind: 'actor' };
+      return;
+    }
+
+    if (!drag.startLocal || !win.__previewParts) return;
+    const local = worldToActorLocal(world, actor, rig.anchor);
+    const offset = partOffsetTo(drag.startOffset, drag.startLocal, local, partMaxReach(drag.controller));
+    const t = actor.parts[drag.controller] ?? [0, 0, 0, 1] as IRTransform;
+    if (win.__previewParts(target.actorId, { [drag.controller]: [t[0], offset[0], offset[1], t[3]] })) {
+      previewApplied.current = { kind: 'actor' };
+    }
+  }, [
+    actor, armParts, armTargetLocal, drag, iframe, pointerToWorld,
+    resolveBodyDrag, resolvePropDrag, rig, target.actorId,
+  ]);
+
+  useEffect(() => () => restorePreview(), [restorePreview]);
+
+  // --- gesture lifecycle -------------------------------------------------------
+
+  const beginDrag = (event: React.PointerEvent, initial: DragState) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onInteractStart?.();
+    dragCapture.current = initial;
+    setDrag(initial.kind === 'actor' ? { ...initial, samples: [...initial.samples] } : { ...initial });
+    try {
+      host.current?.setPointerCapture(event.pointerId);
+    } catch {
+      // Capture is best-effort; the window listeners still track the pointer.
+    }
+  };
+
+  const beginActorDrag = (event: React.PointerEvent, controller: ControllerId) => {
+    if (target.busy || event.button !== 0 || !actor?.visible || !camera) return;
+    const world = pointerToWorld(event.clientX, event.clientY);
+    if (!world) return;
+    if (controller !== activeController) target.onPickPart(controller);
+    const isArm = controller === 'wrist_L' || controller === 'wrist_R';
+    const parts = isArm ? armParts(controller as 'wrist_L' | 'wrist_R') : null;
+    if (isArm && !parts) return;
+    const upperT = parts ? (actor.parts[parts.upper.id] ?? [0, 0, 0, 1] as IRTransform) : null;
+    const foreT = parts ? (actor.parts[parts.fore.id] ?? [0, 0, 0, 1] as IRTransform) : null;
+    const partT = controller === 'head' || controller === 'torso'
+      ? (actor.parts[controller] ?? [0, 0, 0, 1] as IRTransform)
+      : null;
+    armPreviewPose.current = upperT && foreT ? { upper: upperT[0], fore: foreT[0] } : null;
+    beginDrag(event, {
+      kind: 'actor',
+      pointerId: event.pointerId,
+      controller,
+      startMs: target.startMs,
+      startClient: [event.clientX, event.clientY],
+      startWorld: world,
+      startActorPos: [actor.x, actor.y],
+      startLocal: rig ? worldToActorLocal(world, actor, rig.anchor) : null,
+      startControllerLocal: rig ? controllerLocalPoint(controller, rig, actor.parts) : null,
+      startOffset: partT ? [partT[1], partT[2]] : [0, 0],
+      startPose: upperT && foreT ? { upper: upperT[0], fore: foreT[0] } : null,
       clientX: event.clientX,
       clientY: event.clientY,
+      startedAt: event.timeStamp,
       samples: target.recording
-        ? [...current.samples, {
-            clientX: event.clientX,
-            clientY: event.clientY,
-            elapsedMs: Math.max(0, event.timeStamp - current.startedAt),
-          }]
-        : current.samples,
-    } : null);
-    const up = (event: PointerEvent) => {
-      const world = clientToWorld(event.clientX, event.clientY);
-      setDrag(null);
-      if (!world || !actor) return;
+        ? [{ clientX: event.clientX, clientY: event.clientY, elapsedMs: 0, frame: 1 }]
+        : [],
+    });
+  };
 
-      const startMs = target.startMs;
-      const captured = target.recording
-        ? [...drag.samples, {
-            clientX: event.clientX,
-            clientY: event.clientY,
-            elapsedMs: Math.max(0, event.timeStamp - drag.startedAt),
-          }]
-        : [];
-      const capturedWorld = captured.flatMap((sample) => {
-        const point = clientToWorld(sample.clientX, sample.clientY);
-        if (!point) return [];
-        return [{
-          frame: Math.max(1, Math.min(target.fps * 10, Math.round((sample.elapsedMs / 1000) * target.fps))),
-          world: point,
-        }];
+  const beginPropDrag = (event: React.PointerEvent, prop: StagePropTarget) => {
+    if (target.busy || event.button !== 0 || !camera || !onCommitProp) return;
+    const world = pointerToWorld(event.clientX, event.clientY);
+    if (!world) return;
+    beginDrag(event, {
+      kind: 'prop',
+      pointerId: event.pointerId,
+      prop,
+      startClient: [event.clientX, event.clientY],
+      startWorld: world,
+      startPos: [prop.x, prop.y],
+      clientX: event.clientX,
+      clientY: event.clientY,
+      startedAt: event.timeStamp,
+    });
+  };
+
+  /** What lives under a stage-px point: a part of an actor, or a prop. */
+  const hitTest = (stage: [number, number]): Hit | null => {
+    const doc = iframe.current?.contentDocument;
+    const el = (doc?.elementFromPoint(stage[0], stage[1]) ?? null) as Element | null;
+    if (el) {
+      const group = el.closest('g[id^="actor-"]');
+      if (group) {
+        const actorId = actorIdFromDom(group.id);
+        if (actorId) {
+          const hitMember = scene?.cast.find((item) => item.id === actorId);
+          const hitRig = hitMember ? runtime?.__RIGS?.[hitMember.rig] : undefined;
+          const hitPartIds = new Set((hitRig?.parts ?? []).map((part) => part.id));
+          const available = new Set(availableControllers(hitPartIds));
+          let partId: string | null = null;
+          for (let node: Element | null = el; node; node = node.parentElement) {
+            const candidate = node.id ? partIdFromDom(node.id, actorId) : null;
+            if (candidate && hitPartIds.has(candidate)) {
+              partId = candidate;
+              break;
+            }
+            if (node === group) break;
+          }
+          const controller = controllerForPart(partId, available);
+          return actorId === target.actorId
+            ? { kind: 'actor', controller }
+            : { kind: 'other-actor', actorId, controller };
+        }
+      }
+      const propId = el.closest('[data-prop-id]')?.getAttribute('data-prop-id');
+      if (propId && onCommitProp) {
+        const prop = propTargets.find((item) => item.id === propId);
+        if (prop) return { kind: 'prop', prop };
+      }
+    }
+    // Transparent gaps in the artwork fall through — grab the nearest handle
+    // of the current actor instead of doing nothing.
+    if (actor?.visible && camera) {
+      const pointer: [number, number] = [stage[0] * scale, stage[1] * scale];
+      let best: { controller: ControllerId; distance: number } | null = null;
+      for (const controller of controllers) {
+        const world = controllerWorldAt(controller, frame);
+        if (!world) continue;
+        const at = worldToOverlay(camera, geom, world);
+        const distance = Math.hypot(at[0] - pointer[0], at[1] - pointer[1]);
+        if (distance <= HANDLE_GRAB_RADIUS_PX && (!best || distance < best.distance)) {
+          best = { controller, distance };
+        }
+      }
+      if (best) return { kind: 'actor', controller: best.controller };
+    }
+    return null;
+  };
+
+  const onSurfacePointerDown = (event: React.PointerEvent) => {
+    if (target.busy || event.button !== 0 || !camera) return;
+    const rect = frameRect();
+    if (!rect) return;
+    const stage = clientToStage(geom, rect.left, rect.top, event.clientX, event.clientY);
+    const hit = hitTest(stage);
+    if (!hit) return;
+    if (hit.kind === 'other-actor') {
+      event.preventDefault();
+      setHover(null);
+      target.onPickActor(hit.actorId, hit.controller);
+      return;
+    }
+    if (hit.kind === 'prop') {
+      beginPropDrag(event, hit.prop);
+      return;
+    }
+    beginActorDrag(event, hit.controller);
+  };
+
+  const onSurfacePointerMove = (event: React.PointerEvent) => {
+    if (dragCapture.current || hoverFrame.current !== null) return;
+    const { clientX, clientY } = event;
+    hoverFrame.current = window.requestAnimationFrame(() => {
+      hoverFrame.current = null;
+      const rect = frameRect();
+      if (!rect || !camera) {
+        setHover(null);
+        return;
+      }
+      const stage = clientToStage(geom, rect.left, rect.top, clientX, clientY);
+      const hit = hitTest(stage);
+      setHover(hit === null ? null
+        : hit.kind === 'actor' ? { kind: 'actor', controller: hit.controller }
+        : hit.kind === 'other-actor' ? { kind: 'other-actor', actorId: hit.actorId, at: [stage[0] * scale, stage[1] * scale] }
+        : { kind: 'prop', id: hit.prop.id });
+    });
+  };
+
+  const onSurfacePointerLeave = () => {
+    if (hoverFrame.current !== null) {
+      window.cancelAnimationFrame(hoverFrame.current);
+      hoverFrame.current = null;
+    }
+    setHover(null);
+  };
+
+  const dragActive = drag !== null;
+
+  useEffect(() => {
+    if (!dragActive) return;
+    const paint = () => {
+      if (dragPaintFrame.current !== null) return;
+      dragPaintFrame.current = window.requestAnimationFrame(() => {
+        dragPaintFrame.current = null;
+        const current = dragCapture.current;
+        if (!current) return;
+        setDrag(current.kind === 'actor' ? { ...current, samples: [...current.samples] } : { ...current });
+      });
+    };
+    const addSample = (event: PointerEvent) => {
+      const current = dragCapture.current;
+      if (!current) return;
+      current.clientX = event.clientX;
+      current.clientY = event.clientY;
+      if (current.kind === 'actor' && target.recording) {
+        const elapsedMs = Math.max(0, event.timeStamp - current.startedAt);
+        const sampleFrame = Math.max(1, Math.min(target.fps * 10, Math.round((elapsedMs / 1000) * target.fps)));
+        const sample = { clientX: event.clientX, clientY: event.clientY, elapsedMs, frame: sampleFrame };
+        if (current.samples.at(-1)?.frame === sampleFrame) current.samples[current.samples.length - 1] = sample;
+        else current.samples.push(sample);
+      }
+      paint();
+    };
+    const stopPaint = () => {
+      if (dragPaintFrame.current !== null) {
+        window.cancelAnimationFrame(dragPaintFrame.current);
+        dragPaintFrame.current = null;
+      }
+    };
+    const releaseCapture = (pointerId: number) => {
+      try {
+        host.current?.releasePointerCapture(pointerId);
+      } catch {
+        // Pointer already gone; nothing held.
+      }
+    };
+    const up = (event: PointerEvent) => {
+      addSample(event);
+      const completed = dragCapture.current;
+      dragCapture.current = null;
+      stopPaint();
+      const world = pointerToWorld(event.clientX, event.clientY);
+      // The live preview chained IK solves along the whole gesture; committing
+      // against its final pose keeps the saved elbow on the branch the user
+      // watched, instead of re-deciding from the authored pose and popping.
+      const finalArmPose = armPreviewPose.current;
+      restorePreview();
+      setDrag(null);
+      if (completed) releaseCapture(completed.pointerId);
+      if (completed?.kind === 'actor' && target.recording) target.onCaptureEnd?.();
+      if (!completed || !world) return;
+
+      // A stationary press is a selection, not a zero-length motion.
+      const moved = Math.hypot(
+        event.clientX - completed.startClient[0],
+        event.clientY - completed.startClient[1],
+      ) >= CLICK_SLOP_PX;
+      if (!moved) return;
+
+      if (completed.kind === 'prop') {
+        const to = resolvePropDrag(completed, world).point;
+        if (to[0] !== completed.startPos[0] || to[1] !== completed.startPos[1]) {
+          onCommitProp?.(completed.prop, to);
+        }
+        return;
+      }
+      if (!actor) return;
+
+      const startMs = completed.startMs;
+      const endMs = startMs + (target.durationFrames / target.fps) * 1000;
+      const capturedWorld = (target.recording ? completed.samples : []).flatMap((sample) => {
+        const point = pointerToWorld(sample.clientX, sample.clientY);
+        return point ? [{ frame: sample.frame, world: point }] : [];
       });
       const recordedRequest = <T extends MotionAuthoringRequest['from']>(
         request: Omit<MotionAuthoringRequest, 'from' | 'to' | 'endMs'>,
@@ -281,7 +559,7 @@ export function AnimationOverlay({
       ): MotionAuthoringRequest => {
         const reduced = reducePuppeteeringSamples(
           [{ frame: 0, value: from }, ...recorded] as PuppeteeringSample[],
-          { smoothingPasses: 1, tolerance: Array.isArray(from) ? 1.5 : 0.75 },
+          { smoothingPasses: 2, tolerance: Array.isArray(from) ? 1.5 : 0.75 },
         );
         const lastFrame = Math.max(1, reduced[reduced.length - 1]!.frame);
         return {
@@ -298,16 +576,19 @@ export function AnimationOverlay({
           source: 'puppeteering',
         };
       };
-      const endMs = startMs + (target.durationFrames / target.fps) * 1000;
-      if (!rig || (!part && !wristSide)) {
-        // Root blocking remains on the set-authored floor. Entrances/exits use
-        // explicit stage actions rather than an accidental off-area drag.
-        const to = clampRoot(world);
+
+      if (completed.controller === 'body') {
         if (target.recording && capturedWorld.length) {
           target.onCommit(recordedRequest(
             { actorId: target.actorId, channel: 'root.position', startMs },
-            [actor.x, actor.y] as [number, number],
-            capturedWorld.map((sample) => ({ frame: sample.frame, value: clampRoot(sample.world) })),
+            completed.startActorPos,
+            capturedWorld.map((sample) => ({
+              frame: sample.frame,
+              value: clampToArea(
+                dragTargetTo(completed.startActorPos, completed.startWorld, sample.world),
+                rootArea,
+              ),
+            })),
           ));
           return;
         }
@@ -316,38 +597,41 @@ export function AnimationOverlay({
           channel: 'root.position',
           startMs,
           endMs,
-          from: [actor.x, actor.y],
-          to,
+          from: completed.startActorPos,
+          to: resolveBodyDrag(completed, world).point,
           path: target.path,
           assist: target.assist,
           source: 'drag',
         });
         return;
       }
+      if (!rig) return;
 
-      if (wristSide && armUpper && armFore && upperTransform && foreTransform) {
-        const direction = actor.flip ? -1 : 1;
-        const solve = (point: [number, number]) => {
-          const localTarget: [number, number] = [
-            (point[0] - actor.x) / (actor.scale * direction) + rig.anchor[0],
-            (point[1] - actor.y) / actor.scale + rig.anchor[1],
-          ];
-          return solveArm(
-            armUpper.pivot,
-            armFore.pivot,
-            localTarget,
-            upperTransform[0],
-            foreTransform[0],
-          );
+      if (completed.controller === 'wrist_L' || completed.controller === 'wrist_R') {
+        const parts = armParts(completed.controller);
+        if (!parts) return;
+        const upperT = actor.parts[parts.upper.id] ?? [0, 0, 0, 1] as IRTransform;
+        const foreT = actor.parts[parts.fore.id] ?? [0, 0, 0, 1] as IRTransform;
+        const upperFrom = { rot: upperT[0], x: upperT[1], y: upperT[2], scale: upperT[3] };
+        const foreFrom = { rot: foreT[0], x: foreT[1], y: foreT[2], scale: foreT[3] };
+        const solveTo = (point: [number, number], previousUpper: number, previousFore: number) => {
+          const local = armTargetLocal(completed, point);
+          return local ? solveArm(parts.upper.pivot, parts.fore.pivot, local, previousUpper, previousFore) : null;
         };
-        const solved = solve(world);
-        const upperFrom = { rot: upperTransform[0], x: upperTransform[1], y: upperTransform[2], scale: upperTransform[3] };
-        const foreFrom = { rot: foreTransform[0], x: foreTransform[1], y: foreTransform[2], scale: foreTransform[3] };
         if (target.recording && capturedWorld.length) {
-          const recorded = capturedWorld.map((sample) => ({ ...sample, solved: solve(sample.world) }));
+          let previousUpper = upperT[0];
+          let previousFore = foreT[0];
+          const recorded = capturedWorld.flatMap((sample) => {
+            const solved = solveTo(sample.world, previousUpper, previousFore);
+            if (!solved) return [];
+            previousUpper = solved.upper;
+            previousFore = solved.fore;
+            return [{ frame: sample.frame, solved }];
+          });
+          if (!recorded.length) return;
           target.onCommit([
             recordedRequest(
-              { actorId: target.actorId, channel: 'part.transform', partId: armUpper.id, startMs },
+              { actorId: target.actorId, channel: 'part.transform', partId: parts.upper.id, startMs },
               upperFrom,
               recorded.map((sample) => ({
                 frame: sample.frame,
@@ -355,7 +639,7 @@ export function AnimationOverlay({
               })),
             ),
             recordedRequest(
-              { actorId: target.actorId, channel: 'part.transform', partId: armFore.id, startMs },
+              { actorId: target.actorId, channel: 'part.transform', partId: parts.fore.id, startMs },
               foreFrom,
               recorded.map((sample) => ({
                 frame: sample.frame,
@@ -365,11 +649,13 @@ export function AnimationOverlay({
           ]);
           return;
         }
+        const solved = solveTo(world, finalArmPose?.upper ?? upperT[0], finalArmPose?.fore ?? foreT[0]);
+        if (!solved) return;
         target.onCommit([
           {
             actorId: target.actorId,
             channel: 'part.transform',
-            partId: armUpper.id,
+            partId: parts.upper.id,
             startMs,
             endMs,
             from: upperFrom,
@@ -381,7 +667,7 @@ export function AnimationOverlay({
           {
             actorId: target.actorId,
             channel: 'part.transform',
-            partId: armFore.id,
+            partId: parts.fore.id,
             startMs,
             endMs,
             from: foreFrom,
@@ -394,33 +680,18 @@ export function AnimationOverlay({
         return;
       }
 
-      // A wrist target whose arm parts are missing from the rig has nothing
-      // to solve against; bail rather than committing a malformed segment.
-      if (!part || !transform) return;
-
-      const direction = actor.flip ? -1 : 1;
-      const from = { rot: transform[0], x: transform[1], y: transform[2], scale: transform[3] };
+      const partId = completed.controller;
+      if (!completed.startLocal) return;
+      const partT = actor.parts[partId] ?? [0, 0, 0, 1] as IRTransform;
+      const from = { rot: partT[0], x: completed.startOffset[0], y: completed.startOffset[1], scale: partT[3] };
       const valueAt = (point: [number, number]) => {
-        const localTargetX = (point[0] - actor.x) / (actor.scale * direction) + rig.anchor[0];
-        const localTargetY = (point[1] - actor.y) / actor.scale + rig.anchor[1];
-        let dx = localTargetX - part.pivot[0];
-        let dy = localTargetY - part.pivot[1];
-        const maxReach = part.id === 'head' ? 48 : 120;
-        const distance = Math.hypot(dx, dy);
-        if (distance > maxReach) {
-          dx = (dx / distance) * maxReach;
-          dy = (dy / distance) * maxReach;
-        }
-        return {
-          ...from,
-          x: Math.round(dx * 10) / 10,
-          y: Math.round(dy * 10) / 10,
-        };
+        const local = worldToActorLocal(point, actor, rig.anchor);
+        const offset = partOffsetTo(completed.startOffset, completed.startLocal!, local, partMaxReach(partId));
+        return { ...from, x: offset[0], y: offset[1] };
       };
-      const to = valueAt(world);
       if (target.recording && capturedWorld.length) {
         target.onCommit(recordedRequest(
-          { actorId: target.actorId, channel: 'part.transform', partId: part.id, startMs },
+          { actorId: target.actorId, channel: 'part.transform', partId, startMs },
           from,
           capturedWorld.map((sample) => ({ frame: sample.frame, value: valueAt(sample.world) })),
         ));
@@ -429,191 +700,330 @@ export function AnimationOverlay({
       target.onCommit({
         actorId: target.actorId,
         channel: 'part.transform',
-        partId: part.id,
+        partId,
         startMs,
         endMs,
         from,
-        to,
+        to: valueAt(world),
         path: target.path,
         assist: target.assist,
         source: 'drag',
       });
     };
-    window.addEventListener('pointermove', move);
+    const cancel = () => {
+      const active = dragCapture.current;
+      dragCapture.current = null;
+      stopPaint();
+      restorePreview();
+      setDrag(null);
+      if (active) releaseCapture(active.pointerId);
+      if (active?.kind === 'actor' && target.recording) target.onCaptureEnd?.();
+    };
+    const key = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      cancel();
+    };
+    window.addEventListener('pointermove', addSample);
     window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancel);
+    window.addEventListener('blur', cancel);
+    window.addEventListener('keydown', key, true);
     return () => {
-      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointermove', addSample);
       window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancel);
+      window.removeEventListener('blur', cancel);
+      window.removeEventListener('keydown', key, true);
     };
   }, [
-    drag, actor, part, rig, transform, wristSide, armUpper, armFore, upperTransform, foreTransform,
-    clientToWorld, clampRoot, target,
+    dragActive, actor, rig, armParts, armTargetLocal, onCommitProp, pointerToWorld,
+    resolveBodyDrag, resolvePropDrag, restorePreview, rootArea, target,
   ]);
 
-  const rawDragWorld = drag ? clientToWorld(drag.clientX, drag.clientY) : null;
-  const validatedDrag = (() => {
-    if (!rawDragWorld || !actor) return { world: rawDragWorld, clamped: false };
-    if (wristSide && rig && armUpper && armFore && upperTransform && foreTransform) {
-      const direction = actor.flip ? -1 : 1;
-      const local: [number, number] = [
-        (rawDragWorld[0] - actor.x) / (actor.scale * direction) + rig.anchor[0],
-        (rawDragWorld[1] - actor.y) / actor.scale + rig.anchor[1],
-      ];
-      const solved = solveArm(armUpper.pivot, armFore.pivot, local, upperTransform[0], foreTransform[0]);
-      const world: [number, number] = [
-        actor.x + (solved.clampedTarget[0] - rig.anchor[0]) * actor.scale * direction,
-        actor.y + (solved.clampedTarget[1] - rig.anchor[1]) * actor.scale,
-      ];
-      return { world, clamped: Math.hypot(world[0] - rawDragWorld[0], world[1] - rawDragWorld[1]) > 0.5 };
-    }
-    if (!part) {
-      const world = clampRoot(rawDragWorld);
-      return { world, clamped: world[0] !== rawDragWorld[0] || world[1] !== rawDragWorld[1] };
-    }
-    return { world: rawDragWorld, clamped: false };
-  })();
-  const dragScreen = validatedDrag.world && camera ? [
-    originX + ((validatedDrag.world[0] - camera.x) / camera.w) * 1280 * scale,
-    originY + ((validatedDrag.world[1] - camera.y) / camera.h) * 720 * scale,
-  ] as [number, number] : null;
+  // --- render ------------------------------------------------------------------
 
-  const worldToScreen = (point: [number, number]): [number, number] | null => camera ? [
-    originX + ((point[0] - camera.x) / camera.w) * 1280 * scale,
-    originY + ((point[1] - camera.y) / camera.h) * 720 * scale,
-  ] : null;
-  const controllerWorldAt = (index: number): [number, number] | null => {
-    const actorAt = scene?.frames[Math.max(0, Math.min(index, (scene?.frames.length ?? 1) - 1))]
-      ?.actors[target.actorId];
-    if (!actorAt) return null;
-    if (!rig) return [actorAt.x, actorAt.y];
-    const direction = actorAt.flip ? -1 : 1;
-    if (wristSide && armUpper && armFore) {
-      const upper = actorAt.parts[armUpper.id] ?? [0, 0, 0, 1] as IRTransform;
-      const fore = actorAt.parts[armFore.id] ?? [0, 0, 0, 1] as IRTransform;
-      const rest = [
-        armFore.pivot[0] - armUpper.pivot[0],
-        armFore.pivot[1] - armUpper.pivot[1],
-      ] as [number, number];
-      const first = rotate(rest, upper[0]);
-      const second = rotate([rest[0] * 0.92, rest[1] * 0.92], upper[0] + fore[0]);
-      return [
-        actorAt.x + (armUpper.pivot[0] + first[0] + second[0] - rig.anchor[0]) * actorAt.scale * direction,
-        actorAt.y + (armUpper.pivot[1] + first[1] + second[1] - rig.anchor[1]) * actorAt.scale,
-      ];
+  if (!scene || !camera) return null;
+
+  const toOverlay = (point: [number, number]): [number, number] => worldToOverlay(camera, geom, point);
+
+  const pointerWorld = drag ? pointerToWorld(drag.clientX, drag.clientY) : null;
+
+  /** Where the active gesture currently lands, plus its badges. */
+  const dragVisual = (() => {
+    if (!drag || !pointerWorld) return null;
+    if (drag.kind === 'prop') {
+      const resolved = resolvePropDrag(drag, pointerWorld);
+      return {
+        origin: toOverlay(drag.startPos),
+        point: toOverlay(resolved.point),
+        hits: resolved.hits,
+        clamped: false,
+      };
     }
-    if (!part) return [actorAt.x, actorAt.y];
-    const authored = actorAt.parts[part.id] ?? [0, 0, 0, 1] as IRTransform;
-    return [
-      actorAt.x + (part.pivot[0] + authored[1] - rig.anchor[0]) * actorAt.scale * direction,
-      actorAt.y + (part.pivot[1] + authored[2] - rig.anchor[1]) * actorAt.scale,
-    ];
-  };
-  const onionPoints = target.onionSkinFrames > 0
-    ? [frame - target.onionSkinFrames, frame + target.onionSkinFrames]
-      .map(controllerWorldAt)
-      .flatMap((point) => point ? [worldToScreen(point)] : [])
-      .filter((point): point is [number, number] => point !== null)
+    if (!actor) return null;
+    if (drag.controller === 'body') {
+      const resolved = resolveBodyDrag(drag, pointerWorld);
+      return {
+        origin: toOverlay(drag.startActorPos),
+        point: toOverlay(resolved.point),
+        hits: resolved.hits,
+        clamped: resolved.clamped,
+      };
+    }
+    if (!rig || !drag.startControllerLocal) return null;
+    if (drag.controller === 'wrist_L' || drag.controller === 'wrist_R') {
+      const parts = armParts(drag.controller);
+      const localTarget = armTargetLocal(drag, pointerWorld);
+      if (!parts || !localTarget) return null;
+      const previous = armPreviewPose.current ?? drag.startPose ?? { upper: 0, fore: 0 };
+      const solved = solveArm(parts.upper.pivot, parts.fore.pivot, localTarget, previous.upper, previous.fore);
+      const clamped = Math.hypot(
+        solved.clampedTarget[0] - localTarget[0],
+        solved.clampedTarget[1] - localTarget[1],
+      ) > 0.5;
+      return {
+        origin: toOverlay(actorLocalToWorld(drag.startControllerLocal, actor, rig.anchor)),
+        point: toOverlay(actorLocalToWorld(solved.clampedTarget, actor, rig.anchor)),
+        hits: [] as SnapCandidate[],
+        clamped,
+      };
+    }
+    const local = worldToActorLocal(pointerWorld, actor, rig.anchor);
+    const rawDx = drag.startOffset[0] + (local[0] - drag.startLocal![0]);
+    const rawDy = drag.startOffset[1] + (local[1] - drag.startLocal![1]);
+    const offset = partOffsetTo(drag.startOffset, drag.startLocal!, local, partMaxReach(drag.controller));
+    const pivot = rig.parts.find((part) => part.id === drag.controller)?.pivot;
+    if (!pivot) return null;
+    return {
+      origin: toOverlay(actorLocalToWorld(
+        [pivot[0] + drag.startOffset[0], pivot[1] + drag.startOffset[1]], actor, rig.anchor,
+      )),
+      point: toOverlay(actorLocalToWorld([pivot[0] + offset[0], pivot[1] + offset[1]], actor, rig.anchor)),
+      hits: [] as SnapCandidate[],
+      clamped: Math.hypot(rawDx, rawDy) > partMaxReach(drag.controller) + 0.05,
+    };
+  })();
+
+  const draggedController = drag?.kind === 'actor' ? drag.controller : null;
+
+  const handles = actor?.visible
+    ? controllers.flatMap((controller) => {
+        const world = controllerWorldAt(controller, frame);
+        if (!world) return [];
+        const at = draggedController === controller && dragVisual ? dragVisual.point : toOverlay(world);
+        return [{ controller, at }];
+      })
     : [];
-  const ghostPoints = (target.ghostPath ?? []).flatMap((value) => {
-    if (Array.isArray(value)) return [worldToScreen(value)];
-    if (!actor || !rig || !part) return [];
-    const direction = actor.flip ? -1 : 1;
-    return [worldToScreen([
-      actor.x + (part.pivot[0] + value.x - rig.anchor[0]) * actor.scale * direction,
-      actor.y + (part.pivot[1] + value.y - rig.anchor[1]) * actor.scale,
-    ])];
-  }).filter((point): point is [number, number] => point !== null);
-  const recordedPoints = drag?.samples.flatMap((sample) => {
-    const point = clientToWorld(sample.clientX, sample.clientY);
-    const screen = point ? worldToScreen(point) : null;
-    return screen ? [screen] : [];
-  }) ?? [];
+
+  const onionPoints = showOnion && target.onionSkinFrames > 0
+    ? [frame - target.onionSkinFrames, frame + target.onionSkinFrames]
+      .map((index) => controllerWorldAt(activeController, index))
+      .flatMap((point) => (point ? [toOverlay(point)] : []))
+    : [];
+
+  const ghostPoints = showPath && actor
+    ? (target.ghostPath ?? []).flatMap((value) => {
+        if (Array.isArray(value)) return [toOverlay(value)];
+        if (!rig || activeController === 'body' || activeController === 'wrist_L' || activeController === 'wrist_R') return [];
+        const pivot = rig.parts.find((part) => part.id === activeController)?.pivot;
+        if (!pivot) return [];
+        return [toOverlay(actorLocalToWorld([pivot[0] + value.x, pivot[1] + value.y], actor, rig.anchor))];
+      })
+    : [];
+
+  const recordedPoints = drag?.kind === 'actor'
+    ? drag.samples.flatMap((sample) => {
+        const point = pointerToWorld(sample.clientX, sample.clientY);
+        return point ? [toOverlay(point)] : [];
+      })
+    : [];
+
+  const reach = (() => {
+    if (!actor?.visible || !rig || activeController === 'body') return null;
+    if (activeController === 'wrist_L' || activeController === 'wrist_R') {
+      const parts = armParts(activeController);
+      if (!parts) return null;
+      const upperLength = Math.hypot(
+        parts.fore.pivot[0] - parts.upper.pivot[0],
+        parts.fore.pivot[1] - parts.upper.pivot[1],
+      );
+      return {
+        center: toOverlay(actorLocalToWorld(parts.upper.pivot, actor, rig.anchor)),
+        radius: upperLength * (1 + FORE_LENGTH_RATIO) * actor.scale * (width / camera.w) * scale,
+      };
+    }
+    const pivot = rig.parts.find((part) => part.id === activeController)?.pivot;
+    if (!pivot) return null;
+    return {
+      center: toOverlay(actorLocalToWorld(pivot, actor, rig.anchor)),
+      radius: partMaxReach(activeController) * actor.scale * (width / camera.w) * scale,
+    };
+  })();
+
+  const cursorClass = drag
+    ? 'cursor-grabbing'
+    : hover?.kind === 'other-actor'
+      ? 'cursor-pointer'
+      : hover
+        ? 'cursor-grab'
+        : '';
 
   return (
-    <div ref={host} className="absolute inset-0 z-20 pointer-events-none">
-      {screenPoint && actor?.visible && (
+    <div
+      ref={host}
+      onPointerDown={onSurfacePointerDown}
+      onPointerMove={onSurfacePointerMove}
+      onPointerLeave={onSurfacePointerLeave}
+      className={`absolute inset-0 z-20 pointer-events-auto touch-none select-none ${cursorClass}`}
+    >
+      {!actor?.visible && (
+        <div className="absolute inset-x-0 top-3 flex justify-center pointer-events-none">
+          <span className="rounded border border-edge bg-panel/90 px-2 py-1 text-[10px] text-ink-dim shadow-lg">
+            {target.actorId} is off-stage at this frame — move the playhead, or click another character to select it.
+          </span>
+        </div>
+      )}
+
+      {(ghostPoints.length > 1 || recordedPoints.length > 1 || dragVisual) && (
+        <svg className="absolute inset-0 w-full h-full pointer-events-none">
+          {ghostPoints.length > 1 && (
+            <polyline
+              points={ghostPoints.map((point) => point.join(',')).join(' ')}
+              fill="none" stroke="#73a6c7" strokeWidth="2" strokeDasharray="4 5" opacity="0.65"
+            />
+          )}
+          {recordedPoints.length > 1 && (
+            <polyline
+              points={recordedPoints.map((point) => point.join(',')).join(' ')}
+              fill="none" stroke="#c8834a" strokeWidth="2.5" opacity="0.8"
+            />
+          )}
+          {dragVisual && (
+            <line
+              x1={dragVisual.origin[0]} y1={dragVisual.origin[1]}
+              x2={dragVisual.point[0]} y2={dragVisual.point[1]}
+              stroke="#c8834a" strokeWidth="2" strokeDasharray="5 4"
+            />
+          )}
+        </svg>
+      )}
+
+      {onionPoints.map((point, index) => (
+        <span
+          key={`onion-${index}`}
+          className="absolute -translate-x-1/2 -translate-y-1/2 w-7 h-7 rounded-full border-2 border-info/60 bg-info/10 pointer-events-none"
+          style={{ left: point[0], top: point[1], opacity: index === 0 ? 0.45 : 0.7 }}
+          title={index === 0 ? 'Previous onion skin' : 'Next onion skin'}
+        />
+      ))}
+
+      {reach && !drag && (
+        <div
+          className="absolute rounded-full border border-accent/50 pointer-events-none"
+          style={{
+            left: reach.center[0],
+            top: reach.center[1],
+            width: reach.radius * 2,
+            height: reach.radius * 2,
+            transform: 'translate(-50%, -50%)',
+          }}
+        />
+      )}
+
+      {dragVisual && dragVisual.clamped && (
+        <span
+          className="absolute -translate-x-1/2 rounded bg-bad/90 text-white text-[10px] px-1.5 py-0.5 pointer-events-none whitespace-nowrap"
+          style={{ left: dragVisual.point[0], top: dragVisual.point[1] + 12 }}
+        >
+          {draggedController && draggedController !== 'body' ? 'clamped to valid reach' : 'clamped to walkable area'}
+        </span>
+      )}
+      {dragVisual && dragVisual.hits.length > 0 && (
         <>
-          {(ghostPoints.length > 1 || recordedPoints.length > 1) && (
-            <svg className="absolute inset-0 w-full h-full pointer-events-none">
-              {ghostPoints.length > 1 && (
-                <polyline
-                  points={ghostPoints.map((point) => point.join(',')).join(' ')}
-                  fill="none" stroke="#73a6c7" strokeWidth="2" strokeDasharray="4 5" opacity="0.65"
-                />
-              )}
-              {recordedPoints.length > 1 && (
-                <polyline
-                  points={recordedPoints.map((point) => point.join(',')).join(' ')}
-                  fill="none" stroke="#c8834a" strokeWidth="2.5" opacity="0.8"
-                />
-              )}
-            </svg>
-          )}
-          {onionPoints.map((point, index) => (
-            <span
-              key={`${point[0]}:${point[1]}:${index}`}
-              className="absolute -translate-x-1/2 -translate-y-1/2 w-7 h-7 rounded-full border-2 border-info/60 bg-info/10 pointer-events-none"
-              style={{ left: point[0], top: point[1], opacity: index === 0 ? 0.45 : 0.7 }}
-              title={index === 0 ? 'Previous onion skin' : 'Next onion skin'}
-            />
-          ))}
-          {(part || wristSide) && (
-            <div
-              className="absolute rounded-full border border-accent/50 pointer-events-none"
-              style={{
-                left: reachCenterScreen?.[0] ?? screenPoint[0], top: reachCenterScreen?.[1] ?? screenPoint[1],
-                width: (wristSide && armUpper && armFore
-                  ? Math.hypot(armFore.pivot[0] - armUpper.pivot[0], armFore.pivot[1] - armUpper.pivot[1]) * 1.92 * 2
-                  : part?.id === 'head' ? 96 : 240) * actor.scale * (1280 * scale / (camera?.w ?? 1280)),
-                height: (wristSide && armUpper && armFore
-                  ? Math.hypot(armFore.pivot[0] - armUpper.pivot[0], armFore.pivot[1] - armUpper.pivot[1]) * 1.92 * 2
-                  : part?.id === 'head' ? 96 : 240) * actor.scale * (720 * scale / (camera?.h ?? 720)),
-                transform: 'translate(-50%, -50%)',
-              }}
-            />
-          )}
-          {dragScreen && (
-            <>
-              <svg className="absolute inset-0 w-full h-full pointer-events-none">
-                <line x1={screenPoint[0]} y1={screenPoint[1]} x2={dragScreen[0]} y2={dragScreen[1]} stroke="#c8834a" strokeWidth="2" strokeDasharray="5 4" />
-              </svg>
-              {validatedDrag.clamped && (
-                <span
-                  className="absolute -translate-x-1/2 rounded bg-bad/90 text-white text-[10px] px-1.5 py-0.5 pointer-events-none"
-                  style={{ left: dragScreen[0], top: dragScreen[1] + 10 }}
-                >
-                  {part || wristSide ? 'clamped to valid reach' : 'clamped to walkable area'}
-                </span>
-              )}
-            </>
-          )}
-          <button
-            type="button"
-            onPointerDown={(event) => {
-              event.preventDefault();
-              setDrag({
-                clientX: event.clientX,
-                clientY: event.clientY,
-                startedAt: event.timeStamp,
-                samples: target.recording ? [{
-                  clientX: event.clientX,
-                  clientY: event.clientY,
-                  elapsedMs: 0,
-                }] : [],
-              });
-            }}
-            style={{ left: screenPoint[0], top: screenPoint[1] }}
-            title={`Drag ${target.actorId} ${wristSide ? `wrist ${wristSide}` : part?.id ?? 'root'} to author ${target.durationFrames} frames of motion`}
-            className="absolute -translate-x-1/2 -translate-y-1/2 w-5 h-5 rounded-full border-2 border-accent bg-accent/30 hover:bg-accent/60 cursor-grab active:cursor-grabbing pointer-events-auto"
+          <span
+            className="absolute -translate-x-1/2 -translate-y-1/2 w-6 h-6 rounded-full border-2 border-good pointer-events-none"
+            style={{ left: dragVisual.point[0], top: dragVisual.point[1] }}
+          />
+          <span
+            className="absolute -translate-x-1/2 rounded bg-good/90 text-stage text-[9px] font-semibold tracking-[.04em] px-1.5 py-0.5 pointer-events-none whitespace-nowrap"
+            style={{ left: dragVisual.point[0], top: dragVisual.point[1] - 24 }}
           >
-            <span className="absolute left-1/2 -translate-x-1/2 top-5 whitespace-nowrap rounded bg-black/75 text-white text-[10px] px-1">
-              {wristSide ? `wrist ${wristSide}` : part?.id ?? `${target.actorId} root`}
-            </span>
-            {target.recording && (
-              <span className="absolute -top-5 left-1/2 -translate-x-1/2 rounded bg-bad text-white text-[9px] px-1">REC</span>
+            {dragVisual.hits.map((hit) => hit.id).join(' · ')}
+          </span>
+        </>
+      )}
+
+      {showPropHandles && propTargets.map((prop) => {
+        const dragging = drag?.kind === 'prop' && drag.prop.id === prop.id;
+        const at = dragging && dragVisual ? dragVisual.point : toOverlay([prop.x, prop.y]);
+        return (
+          <button
+            key={prop.id}
+            type="button"
+            onPointerDown={(event) => beginPropDrag(event, prop)}
+            title={prop.seatedBy
+              ? `${prop.id} · seat target — occupied by ${prop.seatedBy}. Drag to move it in the shared set.`
+              : `${prop.id} · ${prop.prop} — drag to move it in the shared set`}
+            className={`absolute w-[11px] h-[11px] -translate-x-1/2 -translate-y-1/2 border-[1.5px] bg-[rgba(12,13,15,.55)] cursor-grab active:cursor-grabbing pointer-events-auto ${
+              hover?.kind === 'prop' && hover.id === prop.id ? 'shadow-[0_0_0_3px_rgba(168,144,80,.35)]' : ''
+            }`}
+            style={{
+              left: at[0],
+              top: at[1],
+              borderColor: prop.seatedBy ? '#c8595a' : '#a89050',
+              borderRadius: prop.seatedBy ? '50%' : 2,
+            }}
+          >
+            {dragging && (
+              <span className="absolute left-1/2 -translate-x-1/2 top-4 whitespace-nowrap rounded bg-black/75 text-white text-[10px] px-1 pointer-events-none">
+                {prop.prop}
+              </span>
             )}
           </button>
-        </>
+        );
+      })}
+
+      {handles.map(({ controller, at }) => {
+        const active = controller === activeController;
+        const highlighted = hover?.kind === 'actor' && hover.controller === controller;
+        return (
+          <button
+            key={controller}
+            type="button"
+            onPointerDown={(event) => beginActorDrag(event, controller)}
+            title={`Drag ${target.actorId}'s ${controllerLabel(controller).toLowerCase()}${active ? '' : ' (selects it)'}`}
+            className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-2 pointer-events-auto cursor-grab active:cursor-grabbing ${
+              active
+                ? 'w-5 h-5 border-accent bg-accent/30 hover:bg-accent/60'
+                : 'w-3.5 h-3.5 border-accent/60 bg-stage/60 hover:border-accent hover:bg-accent/30'
+            } ${highlighted ? 'shadow-[0_0_0_3px_rgba(200,131,74,.3)]' : ''} ${target.busy ? 'opacity-50' : ''}`}
+            style={{ left: at[0], top: at[1] }}
+          >
+            {(active || highlighted) && (
+              <span className="absolute left-1/2 -translate-x-1/2 top-5 whitespace-nowrap rounded bg-black/75 text-white text-[10px] px-1 pointer-events-none">
+                {controllerLabel(controller)}
+              </span>
+            )}
+            {active && target.recording && (
+              <span className="absolute -top-5 left-1/2 -translate-x-1/2 rounded bg-bad text-white text-[9px] px-1 pointer-events-none">REC</span>
+            )}
+            {active && target.busy && (
+              <span className="absolute -top-5 left-1/2 -translate-x-1/2 rounded bg-panel border border-edge text-ink-dim text-[9px] px-1 pointer-events-none whitespace-nowrap">
+                saving…
+              </span>
+            )}
+          </button>
+        );
+      })}
+
+      {hover?.kind === 'other-actor' && !drag && (
+        <span
+          className="absolute rounded bg-black/80 text-white text-[10px] px-1.5 py-0.5 pointer-events-none whitespace-nowrap"
+          style={{ left: hover.at[0] + 12, top: hover.at[1] - 8 }}
+        >
+          select {hover.actorId}
+        </span>
       )}
     </div>
   );

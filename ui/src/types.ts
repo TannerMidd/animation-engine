@@ -165,6 +165,12 @@ export interface Health {
   ffmpeg: string | null;
   rhubarb: string | null;
   engines: Record<string, { ok: boolean; reason?: string; checking?: boolean }>;
+  /**
+   * Identity of the conversion runtime as it stands now. Renders carry the
+   * fingerprint they were made with, so output from a build with a known
+   * defect can be told apart from output this build would still produce.
+   */
+  voiceConversion: { fingerprint: string; packageRevision: string; modelRevision: string };
   llm: LlmStatus;
   sapiVoices: string[];
   sets: string[];
@@ -341,11 +347,14 @@ export interface RecordedTake {
       } | null;
     }>;
   };
+  /** Set once by revocation; a revoked take is audit evidence, not a choice. */
+  revokedAt: string | null;
 }
 
 export interface VoiceRender {
   id: string;
-  source: { kind: string; takeId?: string; targetVoiceId?: string };
+  /** Conversion sources additionally name the cue the performance was recorded for. */
+  source: { kind: string; takeId?: string; targetVoiceId?: string; sourceCueId?: string };
   state: 'ready' | 'failed' | 'stale' | 'rejected';
   audio: AudioAsset | null;
   model: {
@@ -397,6 +406,8 @@ export interface DialogueCue {
   spokenText: string;
   selectedTakeId: string | null;
   selectedRenderId: string | null;
+  /** 'generated' is the explicit decision that the character's seeded synthesis carries this line. */
+  voiceSource: 'performance' | 'generated';
   trim: { inMs: number; outMs: number; speechOnsetMs: number; speechEndMs: number } | null;
   startFrame: number;
   durationFrames: number | null;

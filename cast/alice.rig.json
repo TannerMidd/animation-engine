@@ -1,12 +1,5 @@
 {
-  "name": "mel",
-  "charId": "e01d73c4c6",
-  "locks": [],
-  "identity": {
-    "id": "house",
-    "version": "1.0.0",
-    "hash": "247eac48398b"
-  },
+  "name": "alice",
   "canvas": {
     "width": 200,
     "height": 400
@@ -17,47 +10,48 @@
   ],
   "focus": [
     100,
-    47.019488561044426
+    66.63416656093932
   ],
   "look": {
-    "build": "lanky",
-    "head": "wide",
+    "build": "round",
+    "head": "egg",
     "nose": "button",
-    "ears": "stuck-out",
-    "hair": "tall",
-    "facialHair": "beard",
-    "glasses": "none",
-    "eyes": "googly",
-    "brows": "thick",
-    "skin": "#e8b98a",
+    "ears": "large",
+    "hair": "bun",
+    "facialHair": "none",
+    "glasses": "round",
+    "eyes": "round",
+    "brows": "angled",
+    "skin": "#b8825c",
     "shirt": "#3f6b6b",
-    "hairColour": "#767268",
-    "trousers": "#3d3d4d",
+    "hairColour": "#2b2118",
+    "trousers": "#45403a",
     "line": "#1a1a1a",
-    "headSize": 1.0834165107738227,
-    "bodyWidth": 0.9514095860393718,
-    "bodyHeight": 1.034622997059487,
-    "limbLength": 1.0216767640737816,
-    "limbWidth": 1.045620584259741,
-    "eyeSize": 1.092788555205334,
-    "eyeSpread": 1.1230853953491895
+    "headSize": 0.9216289905691519,
+    "bodyWidth": 1.0252584524499253,
+    "bodyHeight": 0.9667201440385542,
+    "limbLength": 0.9937474590772762,
+    "limbWidth": 1.082519979728386,
+    "eyeSize": 1.0690239975694567,
+    "eyeSpread": 0.9917777426028623
   },
   "outfit": {
     "sleeves": "long",
     "collar": "pointed",
-    "neckwear": "lanyard",
-    "pattern": "stripes",
-    "hat": "cap",
-    "shoes": "flat",
-    "accent": "#2b2f36"
+    "neckwear": "tie",
+    "pattern": "solid",
+    "hat": "none",
+    "shoes": "round",
+    "accent": "#3f6b6b"
   },
+  "locks": [],
   "parts": [
     {
       "id": "torso",
       "parent": null,
       "pivot": [
         100,
-        311.72348169162973
+        229.60757464129813
       ],
       "z": 0
     },
@@ -65,8 +59,8 @@
       "id": "leg_L",
       "parent": "torso",
       "pivot": [
-        89.34687658319994,
-        311.72348169162973
+        73.33671858220626,
+        229.60757464129813
       ],
       "z": -1
     },
@@ -74,8 +68,8 @@
       "id": "leg_R",
       "parent": "torso",
       "pivot": [
-        110.65312341680006,
-        311.72348169162973
+        126.66328141779374,
+        229.60757464129813
       ],
       "z": -1
     },
@@ -83,8 +77,8 @@
       "id": "arm_L_upper",
       "parent": "torso",
       "pivot": [
-        80.63542043619034,
-        101.13624872354264
+        42.515996624300634,
+        137.61954980334713
       ],
       "z": 1
     },
@@ -92,8 +86,8 @@
       "id": "arm_L_fore",
       "parent": "arm_L_upper",
       "pivot": [
-        80.63542043619034,
-        188.5509126576954
+        42.515996624300634,
+        185.67717692432421
       ],
       "z": 1
     },
@@ -101,8 +95,8 @@
       "id": "arm_R_upper",
       "parent": "torso",
       "pivot": [
-        119.36457956380966,
-        101.13624872354264
+        157.48400337569936,
+        137.61954980334713
       ],
       "z": 1
     },
@@ -110,8 +104,8 @@
       "id": "arm_R_fore",
       "parent": "arm_R_upper",
       "pivot": [
-        119.36457956380966,
-        188.5509126576954
+        157.48400337569936,
+        185.67717692432421
       ],
       "z": 1
     },
@@ -120,7 +114,7 @@
       "parent": "torso",
       "pivot": [
         100,
-        77.13624872354264
+        113.61954980334713
       ],
       "z": 2
     }
@@ -529,28 +523,34 @@
       "suppressBlink": false
     }
   ],
-  "idle": {
-    "breathAmplitude": 3.6,
-    "breathPeriod": 3.2,
-    "blinkRateHz": 0.45,
-    "blinkDuration": 0.12
-  },
   "voice": "David",
-  "voiceRate": 0,
-  "voiceRef": "mel.ref.wav",
+  "voiceRate": -2,
+  "voiceRef": "alice.ref.wav",
   "voiceProvenance": {
     "source": "minted",
-    "seed": 519578391,
-    "hash": "94c124f512aa37a784d13a3ef8e87b60475ef979"
-  },
-  "acting": {
-    "reactionMs": 151,
-    "gestureBias": 1.3,
-    "fidgetAmp": 1.5
+    "seed": 1053719217,
+    "hash": "22c27c912dfb51979671509de83e12d5c32e7b0a"
   },
   "voicePersona": {
-    "energy": 1.1,
-    "pace": 0.89
+    "energy": 1.08,
+    "pace": 0.9
   },
-  "svg": "mel.svg"
+  "idle": {
+    "breathAmplitude": 2.7,
+    "breathPeriod": 3.4,
+    "blinkRateHz": 0.41,
+    "blinkDuration": 0.12
+  },
+  "acting": {
+    "reactionMs": 221,
+    "gestureBias": 0.83,
+    "fidgetAmp": 2.7
+  },
+  "svg": "alice.svg",
+  "charId": "0f1bd48b19",
+  "identity": {
+    "id": "house",
+    "version": "1.0.0",
+    "hash": "845ceeea2d52"
+  }
 }

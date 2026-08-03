@@ -3,8 +3,14 @@ import { api } from '../api.ts';
 import type {
   AnimationDocument, AnimationKey, MotionSegment, MotionValue, RigDoc, ShotList, TimeAnchor,
 } from '../types.ts';
-import type { AnimationEditTarget, MotionAuthoringCommit, MotionAuthoringRequest } from './AnimationOverlay.tsx';
+import {
+  availableControllers,
+  type AnimationEditTarget,
+  type MotionAuthoringCommit,
+  type MotionAuthoringRequest,
+} from '../editor/stage/interaction.ts';
 import { Badge, Button, Empty, Field, NumberInput, Select, Spinner } from './ui.tsx';
+import { motionDeletionBlocker } from '../editor/lib.ts';
 
 type Easing = AnimationKey['easing'];
 
@@ -125,14 +131,17 @@ function nudgeMotion(value: MotionValue, dx: number, dy: number): MotionValue {
 
 /** Controls which actor controller is draggable in the preview. */
 export function AnimationPanel({
-  scene, shots, document, playheadMs, onDocument, onTarget,
+  scene, shots, document, playheadMs, selectedSegmentId, onDocument, onTarget, onSeek, onDeleteSegment,
 }: {
   scene: string;
   shots: ShotList | null;
   document: AnimationDocument | null;
   playheadMs: number;
+  selectedSegmentId: string | null;
   onDocument: (document: AnimationDocument) => void;
   onTarget: (target: AnimationEditTarget | null) => void;
+  onSeek: (ms: number) => void;
+  onDeleteSegment: (segmentId: string) => void;
 }) {
   const actorIds = shots?.cast.map((member) => member.id) ?? [];
   const [actorId, setActorId] = useState('');
@@ -164,26 +173,59 @@ export function AnimationPanel({
     else if (!actorIds.includes(actorId)) setActorId(actorIds[0]!);
   }, [actorIds.join('|'), actorId]);
 
+  // Keyed on the rig NAME, not shots identity: an unrelated shot-list save
+  // must not refetch the rig and stomp the user's Body-part selection. On
+  // load the current selection is validated, never blindly reset.
+  const rigName = shots?.cast.find((item) => item.id === actorId)?.rig ?? null;
   useEffect(() => {
-    const member = shots?.cast.find((item) => item.id === actorId);
-    if (!member) {
+    if (!rigName) {
       setRig(null);
       return;
     }
     let cancelled = false;
-    void api.rig(member.rig).then((result) => {
+    void api.rig(rigName).then((result) => {
       if (!cancelled) {
         setRig(result.rig);
-        setPartId('body');
+        setPartId((current) => {
+          const partIds = new Set((result.rig.parts ?? []).map((part) => part.id));
+          const supported = new Set<string>(availableControllers(partIds));
+          return supported.has(current) ? current : 'body';
+        });
       }
     }).catch((err: unknown) => {
       if (!cancelled) setError((err as Error).message);
     });
     return () => { cancelled = true; };
-  }, [actorId, shots]);
+  }, [rigName]);
+
+  useEffect(() => {
+    const selected = selectedSegmentId
+      ? document?.segments.find((segment) => segment.id === selectedSegmentId)
+      : null;
+    if (!selected) return;
+    if (actorId !== selected.actorId) {
+      setActorId(selected.actorId);
+      return;
+    }
+    if (!rig) return;
+    if (selected.channel !== 'part.transform') {
+      setPartId('body');
+    } else if (selected.partId.startsWith('arm_L_')) {
+      setPartId('wrist_L');
+    } else if (selected.partId.startsWith('arm_R_')) {
+      setPartId('wrist_R');
+    } else {
+      setPartId(selected.partId);
+    }
+  }, [actorId, document?.revision, rig, selectedSegmentId]);
 
   const commit = useCallback(async (request: MotionAuthoringCommit) => {
-    if (!document) return;
+    // The target stays mounted while saving, so this is the re-entrancy guard
+    // that stops a second drag racing the in-flight save.
+    if (!document || busy) return;
+    // Capture is one-shot. Disarm on every completed drag, including a stale
+    // normal-drag callback or a save failure, so the next gesture is predictable.
+    setRecording(false);
     setBusy(true);
     setError(null);
     try {
@@ -193,15 +235,14 @@ export function AnimationPanel({
       setUndoStack((items) => [...items, document].slice(-50));
       setRedoStack([]);
       onDocument(saved.document);
-      if ((Array.isArray(request) ? request : [request]).some((edit) => edit.source === 'puppeteering')) {
-        setRecording(false);
-      }
+      const edits = Array.isArray(request) ? request : [request];
+      onSeek(Math.max(...edits.map((edit) => edit.endMs)));
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setBusy(false);
     }
-  }, [document, easing, onDocument, scene]);
+  }, [busy, document, easing, onDocument, onSeek, scene]);
 
   const restore = useCallback(async (direction: 'undo' | 'redo') => {
     if (!document || busy) return;
@@ -238,7 +279,10 @@ export function AnimationPanel({
         ? segment.channel === 'root.position'
         : segment.channel === 'part.transform' && !!segment.partId && selectedPartIds.includes(segment.partId)
     )) ?? [];
-  const selectedSegment = [...selectedSegments].sort((a, b) => {
+  const explicitlySelectedSegment = selectedSegmentId
+    ? document?.segments.find((segment) => segment.id === selectedSegmentId) ?? null
+    : null;
+  const selectedSegment = explicitlySelectedSegment ?? [...selectedSegments].sort((a, b) => {
     const aStart = absoluteMs(a.from.time) ?? 0;
     const bStart = absoluteMs(b.from.time) ?? 0;
     return Math.abs(aStart - playheadMs) - Math.abs(bStart - playheadMs) || a.id.localeCompare(b.id);
@@ -256,7 +300,7 @@ export function AnimationPanel({
   }, [document?.revision, selectedSegment?.id]);
 
   const target = useMemo<AnimationEditTarget | null>(() => {
-    if (!shots || !document || !actorId || busy) return null;
+    if (!shots || !document || !actorId) return null;
     return {
       actorId,
       partId: partId === 'body' ? null : partId,
@@ -264,6 +308,7 @@ export function AnimationPanel({
       durationFrames,
       fps: shots.fps,
       recording,
+      busy,
       onionSkinFrames,
       path: { shape: pathShape, curvature },
       assist: { anticipation, overshoot, hold, recovery },
@@ -272,6 +317,13 @@ export function AnimationPanel({
           .filter((value): value is [number, number] | { rot: number; x: number; y: number; scale: number } => typeof value !== 'number')
         : undefined,
       onCommit: (request) => { void commit(request); },
+      onCaptureEnd: () => setRecording(false),
+      onPickPart: (controller) => setPartId(controller),
+      onPickActor: (id, controller) => {
+        if (!shots.cast.some((member) => member.id === id)) return;
+        setActorId(id);
+        if (controller) setPartId(controller);
+      },
     };
   }, [
     actorId, anticipation, busy, commit, curvature, document, durationFrames, hold,
@@ -288,13 +340,23 @@ export function AnimationPanel({
 
   const partIds = new Set((rig?.parts ?? []).map((part) => part.id));
   const controllers = [
-    'body',
-    ...(partIds.has('head') ? ['head'] : []),
-    ...(partIds.has('torso') ? ['torso'] : []),
-    ...(partIds.has('arm_L_upper') && partIds.has('arm_L_fore') ? ['wrist_L'] : []),
-    ...(partIds.has('arm_R_upper') && partIds.has('arm_R_fore') ? ['wrist_R'] : []),
+    { value: 'body', label: 'Body / stage position' },
+    ...(partIds.has('head') ? [{ value: 'head', label: 'Head' }] : []),
+    ...(partIds.has('torso') ? [{ value: 'torso', label: 'Torso' }] : []),
+    ...(partIds.has('arm_L_upper') && partIds.has('arm_L_fore')
+      ? [{ value: 'wrist_L', label: 'Left arm' }]
+      : []),
+    ...(partIds.has('arm_R_upper') && partIds.has('arm_R_fore')
+      ? [{ value: 'wrist_R', label: 'Right arm' }]
+      : []),
   ];
-  const targetLabel = partId === 'body' ? 'actor root' : partId.replace('_', ' ');
+  const targetLabel = partId === 'body'
+    ? 'body'
+    : partId === 'wrist_L'
+      ? 'left arm'
+      : partId === 'wrist_R'
+        ? 'right arm'
+        : partId.replace('_', ' ');
   const ownedTracks = document.tracks.filter((track) => track.layerId === 'manual').length;
   const ownedSegments = document.segments.filter((segment) => segment.layerId === 'manual').length;
   const selectedTracks = document.tracks.filter((track) =>
@@ -307,6 +369,7 @@ export function AnimationPanel({
   const selectedLocked = selectedCount > 0 &&
     selectedTracks.every((track) => track.locked) && selectedSegments.every((segment) => segment.locked);
   const frameMs = 1_000 / shots.fps;
+  const deleteBlocker = selectedSegment ? motionDeletionBlocker(document, selectedSegment.id) : null;
 
   const saveEdited = async (edited: AnimationDocument) => {
     if (busy) return;
@@ -503,7 +566,7 @@ export function AnimationPanel({
       <Field label="Actor">
         <Select value={actorId} options={actorIds} onChange={setActorId} className="w-full" />
       </Field>
-      <Field label="Controller" hint="Body changes blocking. A part adds a manual transform above generated acting.">
+      <Field label="Body part" hint="Choose the body part you want to move. Arm dragging poses the upper arm and forearm together.">
         <Select value={partId} options={controllers} onChange={setPartId} className="w-full" />
       </Field>
 
@@ -574,17 +637,22 @@ export function AnimationPanel({
           variant={recording ? 'danger' : 'default'}
           disabled={!actorId || busy}
           onClick={() => setRecording((active) => !active)}
-          title="Record one selected controller drag, then smooth and reduce it deterministically"
+          title="Capture the full route of one drag; the orange trace is smoothed into editable motion"
           className="mb-2.5"
         >
-          {recording ? 'Stop recording' : 'Record drag'}
+          {recording ? 'Cancel path capture' : partId.startsWith('wrist_') ? 'Record arm path' : 'Record path'}
         </Button>
       </div>
 
       <div className="rounded border border-accent/40 bg-accent/10 p-2 text-[11px] text-ink-dim leading-snug">
-        Pause on the starting frame, then drag the <span className="text-ink">{targetLabel}</span> handle in the preview.
-        The engine writes an editable motion segment with normalized waypoints over {durationFrames} frames and keeps generated motion underneath.
-        {recording && <span className="text-bad"> Recording is armed for the next drag (10 second maximum).</span>}
+        {partId.startsWith('wrist_') ? (
+          <>Drag the on-character <span className="text-ink">{targetLabel}</span> control; the rendered arm follows your pointer live. Release to save the move and show its ending pose. </>
+        ) : (
+          <>Drag the on-character <span className="text-ink">{targetLabel}</span> handle to set the ending pose. </>
+        )}
+        Choose Record path first only when you want the full route of your drag captured and smoothed.
+        {partId.startsWith('wrist_') && <span> One arm control moves both arm sections.</span>}
+        {recording && <span className="text-bad"> Armed for one drag: the orange line previews the captured path, then capture turns off automatically (10 second maximum).</span>}
       </div>
 
       {selectedSegment && (
@@ -628,6 +696,15 @@ export function AnimationPanel({
 
           <Button className="w-full" disabled={busy || selectedSegment.locked} onClick={() => void applyStyle()}>
             Apply easing, path & assist
+          </Button>
+          <Button
+            variant="danger"
+            className="w-full"
+            disabled={busy || Boolean(deleteBlocker)}
+            title={deleteBlocker ?? 'Delete this complete motion segment from the timeline'}
+            onClick={() => onDeleteSegment(selectedSegment.id)}
+          >
+            Delete motion segment
           </Button>
         </div>
       )}

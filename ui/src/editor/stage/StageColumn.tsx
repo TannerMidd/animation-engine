@@ -1,8 +1,14 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Beat, CastMember, PreviewInfo, SetDescriptor, ShotList } from '../../types.ts';
-import { AnimationOverlay, type AnimationEditTarget, type AnimationValidArea } from '../../components/AnimationOverlay.tsx';
+import {
+  AnimationOverlay,
+  type AnimationEditTarget,
+  type AnimationValidArea,
+  type StagePropTarget,
+} from '../../components/AnimationOverlay.tsx';
 import { Mono } from '../chrome.tsx';
 import { MARK_X, fmtTimecode, speakerColour, type Mode } from '../lib.ts';
+import { buildSnapCandidates, listPropTargets } from './interaction.ts';
 
 interface RuntimeWindow extends Window {
   __ready?: boolean;
@@ -51,6 +57,7 @@ export const StageColumn = forwardRef<StageHandle, {
   onSelectBeat: (index: number) => void;
   animationTarget: AnimationEditTarget | null;
   validArea: AnimationValidArea | null;
+  onCommitProp: (prop: StagePropTarget, to: [number, number]) => void;
   recording: boolean;
   draftMarked: boolean;
   previewError?: string | null;
@@ -58,8 +65,8 @@ export const StageColumn = forwardRef<StageHandle, {
   bottomStrip?: ReactNode;
 }>(function StageColumn({
   mode, preview, audioUrl, shots, beatStarts, totalMs, selected, setDescriptor,
-  prefs, onPrefs, onPlayhead, onSelectBeat, animationTarget, validArea, recording,
-  draftMarked, previewError, bottomStrip,
+  prefs, onPrefs, onPlayhead, onSelectBeat, animationTarget, validArea, onCommitProp,
+  recording, draftMarked, previewError, bottomStrip,
 }, ref) {
   const host = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -227,9 +234,9 @@ export const StageColumn = forwardRef<StageHandle, {
     { label: 'Fit', hint: 'Fit the frame to the viewport', on: zoom === null, go: () => setZoom(null) },
     { label: '+', hint: 'Zoom in', go: () => setZoom((z) => Math.min(3, (z ?? fitScale) * 1.25)) },
     { label: 'Grid', hint: 'Composition grid — thirds and centre', on: prefs.grid, go: () => onPrefs({ grid: !prefs.grid }) },
-    { label: 'Snap', hint: 'Snap handles to marks, seats and frame boundaries', on: prefs.snap, go: () => onPrefs({ snap: !prefs.snap }) },
+    { label: 'Snap', hint: 'Snap body and prop drags to marks, seats and the walkable edges', on: prefs.snap, go: () => onPrefs({ snap: !prefs.snap }) },
     { label: 'Safe areas', hint: 'Title-safe 90% and action-safe 95%', on: prefs.safe, go: () => onPrefs({ safe: !prefs.safe }) },
-    { label: 'Onion', hint: 'Ghost the controller 2 frames either side of the playhead', on: prefs.onion, go: () => onPrefs({ onion: !prefs.onion }) },
+    { label: 'Onion', hint: 'Ghost the active controller either side of the playhead (count set in the Motion panel)', on: prefs.onion, go: () => onPrefs({ onion: !prefs.onion }) },
   ];
 
   const [overlayMenu, setOverlayMenu] = useState(false);
@@ -237,7 +244,6 @@ export const StageColumn = forwardRef<StageHandle, {
   const showSafe = prefs.safe && (mode === 'write' || mode === 'direct' || mode === 'publish');
   const showMarks = prefs.marks && (mode === 'direct' || mode === 'animate');
   const showWalkable = prefs.walkable && mode === 'animate';
-  const showProps = prefs.props && mode === 'animate';
   const showSelection = prefs.selection && (mode === 'write' || mode === 'direct' || mode === 'perform');
   const showCaptions = prefs.captions && mode === 'publish';
 
@@ -251,6 +257,21 @@ export const StageColumn = forwardRef<StageHandle, {
 
   const walk = setDescriptor?.layout.walkable ?? null;
   const captionBeat = showCaptions && activeBeat?.kind === 'line' ? activeBeat : null;
+
+  // Draggable set instances, decorated with seat occupancy. Seats are matched
+  // by explicit instance id or by prop kind — the same references cast[].seat uses.
+  const propTargets = useMemo<StagePropTarget[]>(() => {
+    if (!setDescriptor) return [];
+    return listPropTargets(setDescriptor).map((target) => ({
+      ...target,
+      seatedBy: shots?.cast.find((c) => c.seat === target.id || c.seat === target.prop)?.id,
+    }));
+  }, [setDescriptor, shots]);
+
+  const snapCandidates = useMemo(
+    () => buildSnapCandidates(width, setDescriptor, validArea ?? null),
+    [width, setDescriptor, validArea],
+  );
 
   return (
     <div className="flex-1 min-w-0 flex flex-col min-h-0">
@@ -426,28 +447,6 @@ export const StageColumn = forwardRef<StageHandle, {
             </>
           )}
 
-          {/* prop handles */}
-          {showProps && setDescriptor && Object.values(setDescriptor.layers).flat().map((instance, i) => {
-            if (instance.x === undefined || instance.y === undefined) return null;
-            const id = instance.id ?? instance.prop;
-            const seated = shots?.cast.find((c) => c.seat === id);
-            const color = seated ? '#c8595a' : '#a89050';
-            return (
-              <div
-                key={`${id}-${i}`}
-                title={seated ? `${id} · seat target — occupied by ${seated.id}` : `${id} · ${instance.prop}`}
-                className="absolute w-[11px] h-[11px] border-[1.5px] bg-[rgba(12,13,15,.55)] cursor-grab"
-                style={{
-                  left: `${(instance.x / width) * 100}%`,
-                  top: `${(instance.y / height) * 100}%`,
-                  transform: 'translate(-50%,-50%)',
-                  borderColor: color,
-                  borderRadius: seated ? '50%' : 2,
-                }}
-              />
-            );
-          })}
-
           {/* selection outline */}
           {showSelection && selectionMember && (
             <div
@@ -515,12 +514,30 @@ export const StageColumn = forwardRef<StageHandle, {
               </div>
             </>
           )}
+
+          {/* direct manipulation — inside the frame box so inset-0 IS the frame,
+              at any zoom. Mounts whenever a motion target exists. */}
+          {ready && animationTarget && (
+            <AnimationOverlay
+              iframe={iframeRef}
+              frame={frame}
+              target={animationTarget}
+              validArea={validArea}
+              scale={scale}
+              width={width}
+              height={height}
+              showOnion={prefs.onion}
+              showPath={prefs.path}
+              showPropHandles={prefs.props}
+              snapEnabled={prefs.snap}
+              snapCandidates={snapCandidates}
+              propTargets={propTargets}
+              onCommitProp={onCommitProp}
+              onInteractStart={() => setPlaying(false)}
+            />
+          )}
         </div>
 
-        {/* direct-manipulation handles (animate) live over the whole well */}
-        {ready && animationTarget && mode === 'animate' && (
-          <AnimationOverlay iframe={iframeRef} frame={frame} target={animationTarget} validArea={validArea} />
-        )}
         {preview?.previewId && !ready && (
           <div className="absolute inset-0 grid place-items-center text-ink-faint text-[12px] bg-stage/60 pointer-events-none">
             building preview…

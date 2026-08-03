@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { tempDir } from './helpers.ts';
 import {
+  checkConversionIdentity,
   compareConversionAudio,
   voiceConversionCacheKey,
   voiceConversionRuntimeProvenance,
@@ -87,5 +88,55 @@ describe('voice conversion acoustic QA', () => {
     const badReport = await compareConversionAudio(source, bad);
     expect(badReport.cadenceSimilarity).toBeLessThan(0.8);
     expect(badReport.flags.join(' ')).toMatch(/too little detected speech|lost voiced material/);
+  });
+});
+
+/**
+ * Measured on this engine: converting into references at 90-104 Hz retains
+ * 1.14-1.31 of the performance's voicing and lands within ~2 semitones of the
+ * character. Converting into an 80 Hz reference retains 0.37 and lands 47
+ * semitones out — loud, correctly shaped, and not speech.
+ */
+describe('voice conversion identity checks', () => {
+  const measured = {
+    sourceVoicedRatio: 0.468,
+    outputVoicedRatio: 0.614,
+    outputMedianPitchHz: 104.4,
+    targetMedianPitchHz: 103.8,
+  };
+
+  it('accepts a conversion that keeps its voicing and lands on the character', () => {
+    const check = checkConversionIdentity(measured);
+    expect(check.failures).toEqual([]);
+    expect(check.voicedRetention).toBeGreaterThan(1);
+    expect(Math.abs(check.pitchErrorSemitones!)).toBeLessThan(1);
+  });
+
+  it('rejects a conversion that collapsed into noise, however loud it is', () => {
+    const check = checkConversionIdentity({
+      ...measured,
+      outputVoicedRatio: 0.171,
+      outputMedianPitchHz: 1237.3,
+      targetMedianPitchHz: 80.1,
+    });
+    expect(check.voicedRetention).toBeLessThan(0.65);
+    expect(check.failures.join(' ')).toMatch(/voiced speech/);
+    expect(check.failures.join(' ')).toMatch(/semitones from the character/);
+  });
+
+  it('rejects a conversion that missed the character\'s register', () => {
+    const check = checkConversionIdentity({ ...measured, outputMedianPitchHz: 58.6, targetMedianPitchHz: 80.1 });
+    expect(check.failures).toHaveLength(1);
+    expect(check.failures[0]).toMatch(/5\.4 semitones from the character/);
+  });
+
+  it('reports nulls rather than guessing when pitch could not be measured', () => {
+    const check = checkConversionIdentity({
+      sourceVoicedRatio: null,
+      outputVoicedRatio: null,
+      outputMedianPitchHz: null,
+      targetMedianPitchHz: null,
+    });
+    expect(check).toEqual({ voicedRetention: null, pitchErrorSemitones: null, failures: [] });
   });
 });

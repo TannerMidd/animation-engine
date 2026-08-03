@@ -185,6 +185,235 @@ describe('production preflight policy', () => {
     }
   });
 
+  it('covers a pre-rights recording with a document-level performance record', () => {
+    const shots = lineScene();
+    const spokenText = 'This is the line.';
+    const base = {
+      schemaVersion: 1,
+      scene: shots.scene,
+      revision: 1,
+      fps: 24,
+      scriptHash: dialogueScriptHash(shots),
+      recordedTakes: [{
+        id: 'take-1',
+        cueId: 'line-1',
+        speaker: 'alice',
+        displayText: spokenText,
+        spokenText,
+        scriptTextHash: crypto.createHash('sha256').update(spokenText).digest('hex'),
+        audio: {
+          file: 'dialogue/takes/take-1.wav',
+          checksum: 'a'.repeat(64),
+          byteLength: 96044,
+          mediaType: 'audio/wav',
+          sampleRate: 48000,
+          channels: 1,
+          sampleCount: 48000,
+          durationMs: 1000,
+        },
+        quality: { verdict: 'pass' as const, peakDb: -6, rmsDb: -20, speechRatio: 0.8, flags: [] },
+        capture: {
+          mode: 'line-booth' as const,
+          recordedAt: '2026-08-02T12:00:00.000Z',
+          performerId: 'creator',
+          inputDevice: null,
+          latencyCompensationMs: 0,
+          countInMs: 0,
+          sourceFileName: null,
+          consentId: null,
+        },
+      }],
+      voiceRenders: [],
+      cues: [{
+        id: 'line-1',
+        beatIndex: 0,
+        speaker: 'alice',
+        displayText: spokenText,
+        spokenText,
+        selectedTakeId: 'take-1',
+        trim: { inMs: 0, outMs: 1000, speechOnsetMs: 80, speechEndMs: 920 },
+        approval: { state: 'approved', by: 'creator', at: '2026-08-02T12:05:00.000Z' },
+        locked: true,
+        provenance: { origin: 'recorded', revision: 1 },
+      }],
+    };
+
+    const uncovered = evaluateProductionPreflight({ ...input(shots), dialogue: DialogueDocument.parse(base) });
+    expect(uncovered.notes.find((item) => item.code === 'performance-consent-missing')?.level).toBe('error');
+
+    const covered = evaluateProductionPreflight({
+      ...input(shots),
+      dialogue: DialogueDocument.parse({
+        ...base,
+        consents: [{
+          id: 'creator-owned-voice',
+          subject: 'creator',
+          basis: 'self-owned',
+          scope: 'both',
+          referenceChecksum: null,
+          permits: { voiceConversion: true, distribution: true, training: false },
+          createdAt: '2026-08-02T13:00:00.000Z',
+          expiresAt: null,
+          revokedAt: null,
+          notes: [],
+        }],
+      }),
+    });
+    expect(covered.notes.some((item) => item.code === 'performance-consent-missing')).toBe(false);
+    expect(covered.notes.find((item) => item.code === 'performance-consent-fallback')?.level).toBe('info');
+  });
+
+  it('accepts an approved generated-voice line and downgrades the minted reference to a warning', () => {
+    const shots = lineScene();
+    const loaded = rig();
+    loaded.rig.voiceRef = 'alice.ref.wav';
+    loaded.rig.voiceProvenance = { source: 'minted', seed: 7, hash: 'abc' };
+    const dialogue = DialogueDocument.parse({
+      schemaVersion: 1,
+      scene: shots.scene,
+      revision: 1,
+      fps: 24,
+      scriptHash: dialogueScriptHash(shots),
+      recordedTakes: [],
+      voiceRenders: [],
+      cues: [{
+        id: 'line-1',
+        beatIndex: 0,
+        speaker: 'alice',
+        displayText: 'This is the line.',
+        spokenText: 'This is the line.',
+        voiceSource: 'generated',
+        approval: { state: 'approved', by: 'creator', at: '2026-08-02T12:00:00.000Z' },
+        locked: true,
+        provenance: { origin: 'generated', revision: 1 },
+      }],
+    });
+    const result = evaluateProductionPreflight({ ...input(shots, loaded), dialogue });
+    const codes = new Set(result.notes.map((item) => item.code));
+
+    expect(codes.has('dialogue-selection-unresolved')).toBe(false);
+    expect(codes.has('dialogue-unapproved')).toBe(false);
+    expect(codes.has('dialogue-unlocked')).toBe(false);
+    expect(codes.has('voice-reference-draft-only')).toBe(false);
+    expect(result.notes.find((item) => item.code === 'voice-reference-minted-in-use')?.level).toBe('warn');
+    expect(result.notes.filter((item) => item.blocking && item.code.startsWith('dialogue')).length).toBe(0);
+  });
+
+  it('treats an approved conversion into a minted reference as a decision, not a draft', () => {
+    const shots = lineScene();
+    const spokenText = 'This is the line.';
+    const loaded = rig();
+    loaded.rig.voiceRef = 'alice.ref.wav';
+    loaded.rig.voiceProvenance = { source: 'minted', seed: 7, hash: 'abc' };
+    const audio = (file: string) => ({
+      file,
+      checksum: 'a'.repeat(64),
+      byteLength: 96044,
+      mediaType: 'audio/wav' as const,
+      sampleRate: 48000,
+      channels: 1,
+      sampleCount: 48000,
+      durationMs: 1000,
+    });
+    const base = {
+      schemaVersion: 1,
+      scene: shots.scene,
+      revision: 1,
+      fps: 24,
+      scriptHash: dialogueScriptHash(shots),
+      consents: [{
+        id: 'creator-owned-voice',
+        subject: 'creator',
+        basis: 'self-owned' as const,
+        scope: 'both' as const,
+        referenceChecksum: 'b'.repeat(64),
+        permits: { voiceConversion: true, distribution: true, training: false },
+        createdAt: '2026-08-02T12:00:00.000Z',
+        expiresAt: null,
+        revokedAt: null,
+        notes: [],
+      }],
+      recordedTakes: [{
+        id: 'take-1',
+        cueId: 'line-1',
+        speaker: 'alice',
+        displayText: spokenText,
+        spokenText,
+        scriptTextHash: crypto.createHash('sha256').update(spokenText).digest('hex'),
+        audio: audio('dialogue/takes/take-1.wav'),
+        quality: { verdict: 'pass' as const, peakDb: -6, rmsDb: -20, speechRatio: 0.8, flags: [] },
+        capture: {
+          mode: 'line-booth' as const,
+          recordedAt: '2026-08-02T12:00:00.000Z',
+          performerId: 'creator',
+          inputDevice: null,
+          latencyCompensationMs: 0,
+          countInMs: 0,
+          sourceFileName: null,
+          consentId: 'creator-owned-voice',
+        },
+      }],
+      voiceRenders: [{
+        id: 'vc-1',
+        source: {
+          kind: 'voice-conversion' as const,
+          takeId: 'take-1',
+          targetVoiceId: 'alice',
+          targetReferenceChecksum: 'b'.repeat(64),
+          consentId: 'creator-owned-voice',
+          registerPolicy: 'adapt-to-character' as const,
+          sourceCueId: 'line-1',
+          sourceAudioChecksum: 'a'.repeat(64),
+        },
+        state: 'ready' as const,
+        audio: audio('dialogue/renders/vc-1.wav'),
+        model: {
+          engine: 'chatterbox-vc',
+          model: 'ResembleAI/chatterbox:ChatterboxVC',
+          revision: 'ResembleAI/chatterbox@abc1234',
+          settings: {},
+          generatedAt: '2026-08-02T12:10:00.000Z',
+        },
+        quality: { verdict: 'pass' as const, flags: [] },
+      }],
+      cues: [{
+        id: 'line-1',
+        beatIndex: 0,
+        speaker: 'alice',
+        displayText: spokenText,
+        spokenText,
+        selectedTakeId: 'take-1',
+        selectedRenderId: 'vc-1',
+        trim: { inMs: 0, outMs: 1000, speechOnsetMs: 0, speechEndMs: 1000 },
+        approval: { state: 'approved' as const, by: 'creator', at: '2026-08-02T12:15:00.000Z' },
+        locked: true,
+        provenance: { origin: 'recorded' as const, revision: 1 },
+      }],
+    };
+
+    const approved = evaluateProductionPreflight({
+      ...input(shots, loaded),
+      dialogue: DialogueDocument.parse(base),
+    });
+    expect(approved.notes.some((item) => item.code === 'voice-reference-draft-only')).toBe(false);
+    expect(approved.notes.find((item) => item.code === 'voice-reference-minted-in-use')?.level).toBe('warn');
+
+    // Until the creator approves it, the conversion is still just a candidate
+    // and the minted reference stays an unmade decision.
+    const candidate = evaluateProductionPreflight({
+      ...input(shots, loaded),
+      dialogue: DialogueDocument.parse({
+        ...base,
+        cues: base.cues.map((cue) => ({
+          ...cue,
+          locked: false,
+          approval: { state: 'candidate' as const, by: null, at: null },
+        })),
+      }),
+    });
+    expect(candidate.notes.find((item) => item.code === 'voice-reference-draft-only')?.level).toBe('error');
+  });
+
   it('blocks candidate and unlocked dialogue until the creator approves and locks it', () => {
     const shots = lineScene();
     const spokenText = 'This is the line.';

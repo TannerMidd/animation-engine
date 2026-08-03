@@ -6,7 +6,8 @@ import type {
   SetSummary, ShotList, ShowInfo, Vocab,
 } from '../types.ts';
 import { GenerateDialog } from '../components/GenerateDialog.tsx';
-import type { AnimationEditTarget } from '../components/AnimationOverlay.tsx';
+import type { AnimationEditTarget, StagePropTarget } from '../components/AnimationOverlay.tsx';
+import { propInstanceId } from './stage/interaction.ts';
 import { AppBar, type ContextTool, type SaveState } from './AppBar.tsx';
 import { Sidebar } from './Sidebar.tsx';
 import { Inspector } from './Inspector.tsx';
@@ -17,7 +18,8 @@ import { LinesPane, MixerPane, ReadinessPane, ScriptPane, subPaneWidth } from '.
 import { CommandPalette, ConfirmDialog, PreflightPopover, type Command, type ConfirmSpec } from './overlays.tsx';
 import { Mono, Spinner } from './chrome.tsx';
 import {
-  beatStartsFor, cueForBeat, defaultTabFor, fmtTimecode, totalMsFor, type InspectorTab, type Mode,
+  beatStartsFor, cueForBeat, defaultTabFor, fmtTimecode, motionDeletionBlocker, speakerColour, totalMsFor,
+  withoutMotionSegment, type InspectorTab, type Mode,
 } from './lib.ts';
 
 type Quality = 'Draft' | 'Accurate' | 'Final';
@@ -64,6 +66,7 @@ export function EditorApp({
   const [playheadMs, setPlayheadMs] = useState(0);
   const [setDescriptor, setSetDescriptor] = useState<SetDescriptor | null>(null);
   const [animationTarget, setAnimationTarget] = useState<AnimationEditTarget | null>(null);
+  const [selectedMotionId, setSelectedMotionId] = useState<string | null>(null);
   const [quality, setQuality] = useState<Quality>('Accurate');
   const [layout, setLayout] = useState<'16:9' | '9:16'>('16:9');
   const [busy, setBusy] = useState<string | null>(null);
@@ -99,6 +102,13 @@ export function EditorApp({
     if (next !== 'animate') setAnimationTarget(null);
   }, []);
 
+  // Tab→mode: the Motion tab implies animate mode, so the stage mounts the
+  // drag surface and swaps to animate chrome (mirrors Timeline motion clicks).
+  const selectTab = useCallback((next: InspectorTab) => {
+    setTab(next);
+    if (next === 'motion') setModeRaw('animate');
+  }, []);
+
   // --- load on scene change ---
   useEffect(() => {
     let cancelled = false;
@@ -108,6 +118,7 @@ export function EditorApp({
     setDialogue(null);
     setAnimation(null);
     setAnimationTarget(null);
+    setSelectedMotionId(null);
     setPreflight(null);
     setPlayheadMs(0);
     accurateBroken.current = false;
@@ -124,6 +135,7 @@ export function EditorApp({
         if (d.shots) {
           const [dialogueDocument, animationDocument] = await Promise.all([api.dialogue(scene), api.animation(scene)]);
           if (cancelled) return;
+          dialogueRevision.current = dialogueDocument.revision;
           setDialogue(dialogueDocument);
           setAnimation(animationDocument);
         }
@@ -239,6 +251,7 @@ export function EditorApp({
   const selectedBeat: Beat | null = selected === null ? null : shots?.beats[selected] ?? null;
 
   const selectBeat = useCallback((index: number, seek = true) => {
+    setSelectedMotionId(null);
     setSelected(index);
     if (seek) {
       const ms = beatStarts[index];
@@ -253,9 +266,21 @@ export function EditorApp({
   }, [selectBeat, mode]);
 
   // --- write-through edits ---
+  /**
+   * The revision the next cue write must claim.
+   *
+   * A render-scoped copy goes stale the moment two saves run back to back —
+   * unlocking a cue and then editing it, for instance — because the second
+   * call is issued before React has committed the first result. The ref is
+   * updated by the write itself, so sequences land instead of colliding.
+   */
+  const dialogueRevision = useRef<number | undefined>(undefined);
+
   const reloadDialogue = useCallback(async () => {
     setPreflight(null);
-    setDialogue(await api.dialogue(scene));
+    const document = await api.dialogue(scene);
+    dialogueRevision.current = document.revision;
+    setDialogue(document);
   }, [scene]);
 
   /**
@@ -290,16 +315,282 @@ export function EditorApp({
 
   const saveDialogueCue = useCallback(async (cue: DialogueCue) => {
     setPreflight(null);
-    await api.saveDialogueCue(scene, cue, dialogue?.revision);
+    const result = await api.saveDialogueCue(scene, cue, dialogueRevision.current);
+    dialogueRevision.current = result.revision;
     await reloadDialogue();
     void rebuildPreview();
-  }, [scene, dialogue?.revision, reloadDialogue, rebuildPreview]);
+  }, [scene, reloadDialogue, rebuildPreview]);
+
+  /**
+   * Discard a recorded take, via the engine's revocation operation: the row
+   * stays on disk as immutable audit evidence, but it leaves every working
+   * surface — the take list, any cue selection and trim, conversions derived
+   * from it, and approvals that stood on those.
+   */
+  const discardTake = useCallback((takeId: string) => {
+    if (!dialogue) return;
+    const take = dialogue.recordedTakes.find((t) => t.id === takeId);
+    if (!take) return;
+    const affected = dialogue.cues.find((c) => c.id === take.cueId);
+    const runCueIds = new Set((take.provenance.sceneRunSegments ?? []).map((s) => s.cueId));
+    const runLines = dialogue.cues.filter((c) => runCueIds.has(c.id));
+    setConfirm({
+      title: take.capture.mode === 'scene-run' ? 'Discard this Scene Run?' : 'Discard this take?',
+      body: take.capture.mode === 'scene-run'
+        ? `The continuous ${take.speaker} run is revoked. ${runLines.length ? `Its segments cover ${runLines.length} line${runLines.length === 1 ? '' : 's'} (“${runLines[0]!.displayText.slice(0, 50)}${runLines.length > 1 ? '…” and more' : '…”'}); each` : 'Each line using it'} falls back to “no take chosen”.`
+        : affected
+          ? `The recording for ${affected.speaker} — “${affected.displayText.slice(0, 80)}${affected.displayText.length > 80 ? '…' : ''}” — is revoked: it leaves the take list, and any selection, conversion or approval built on it is cleared.`
+          : 'The recording is revoked: it leaves the take list, and any selection, conversion or approval built on it is cleared.',
+      list: [
+        { tag: 'KEEPS', fg: '#7a8fc0', text: 'The audio stays on disk as an immutable audit record.' },
+        { tag: 'RESETS', fg: '#c8834a', text: 'Lines using this take fall back to “no take chosen”.' },
+      ],
+      ok: 'Discard take',
+      okTone: 'bad',
+      onOk: () => {
+        void (async () => {
+          try {
+            setPreflight(null);
+            await api.revokeTake(scene, takeId);
+            await reloadDialogue();
+            void rebuildPreview();
+          } catch (err) {
+            setError((err as Error).message);
+          }
+        })();
+      },
+    });
+  }, [dialogue, scene, reloadDialogue, rebuildPreview]);
+
+  /** Booth opens the Voice tab; the flash is the "something happened" signal. */
+  const [voiceFlash, setVoiceFlash] = useState(0);
+  const openBooth = useCallback(() => {
+    setTab('voice');
+    setVoiceFlash((n) => n + 1);
+  }, []);
+
+  /**
+   * Approve the character's generated voice — the explicit decision that "no
+   * recording" is intentional. Approved and locked like any performance, so
+   * it clears the production gate the same way.
+   */
+  const useGenerated = useCallback((cue: DialogueCue | null, scope: 'line' | 'speaker') => {
+    if (!dialogue || !cue) return;
+    const decide = (c: DialogueCue): DialogueCue => ({
+      ...c,
+      voiceSource: 'generated',
+      selectedTakeId: null,
+      selectedRenderId: null,
+      trim: null,
+      approval: {
+        ...c.approval,
+        state: 'approved',
+        by: 'local-creator',
+        at: new Date().toISOString(),
+        notes: [...c.approval.notes, 'generated character voice approved'],
+      },
+      locked: true,
+    });
+    void (async () => {
+      try {
+        setPreflight(null);
+        if (scope === 'line') {
+          const result = await api.saveDialogueCue(scene, decide(cue), dialogueRevision.current);
+          dialogueRevision.current = result.revision;
+        } else {
+          const eligible = (c: DialogueCue) =>
+            c.speaker === cue.speaker && (c.voiceSource ?? 'performance') === 'performance'
+            && !c.selectedTakeId && !c.selectedRenderId && !c.locked;
+          await api.saveDialogue(scene, {
+            ...dialogue,
+            cues: dialogue.cues.map((c) => (eligible(c) ? decide(c) : c)),
+          });
+        }
+        await reloadDialogue();
+        void rebuildPreview();
+      } catch (err) {
+        setError((err as Error).message);
+      }
+    })();
+  }, [dialogue, scene, reloadDialogue, rebuildPreview]);
+
+  /**
+   * Speak a recorded take in the character's voice.
+   *
+   * The performance stays the performance: timing, pauses, emphasis and
+   * emotion come from the recording, and only vocal identity is replaced. The
+   * engine binds every conversion to a rights record naming the target voice,
+   * so the first conversion for a scene asks for that affirmation and registers
+   * it in the same step rather than sending the creator hunting for a form.
+   */
+  const convertToCharacter = useCallback((cue: DialogueCue | null) => {
+    if (!cue || !dialogue || !shots || !cue.selectedTakeId) return;
+    const takeId = cue.selectedTakeId;
+    const rigName = shots.cast.find((m) => m.id === cue.speaker)?.rig ?? cue.speaker;
+    if (!cast.find((c) => c.name === rigName)?.voiceRef) return;
+
+    const run = async (consentId: string) => {
+      setBusy('convert');
+      setJob({ kind: 'convert', event: null });
+      setError(null);
+      setPreflight(null);
+      try {
+        const started = await api.convertPerformance(scene, cue.id, {
+          takeId,
+          consentId,
+          registerPolicy: 'adapt-to-character',
+        });
+        const stop = followJob(started.id, (e) => {
+          setJob({ kind: 'convert', event: e });
+          if (e.type !== 'done' && e.type !== 'error') return;
+          stop();
+          setBusy(null);
+          setJob(null);
+          if (e.type === 'error') {
+            setError(e.message ?? 'voice conversion failed');
+            return;
+          }
+          void reloadDialogue().then(() => rebuildPreview());
+        });
+      } catch (err) {
+        setBusy(null);
+        setJob(null);
+        setError((err as Error).message);
+      }
+    };
+
+    const existing = dialogue.consents.find((c) => (
+      !c.revokedAt && (!c.expiresAt || Date.parse(c.expiresAt) > Date.now()) &&
+      c.permits.voiceConversion && c.permits.distribution &&
+      (c.scope === 'target-voice' || c.scope === 'both') && c.referenceChecksum
+    ));
+    if (existing) {
+      void run(existing.id);
+      return;
+    }
+
+    setConfirm({
+      title: `Speak this take in ${rigName}’s voice?`,
+      body: `Your recording stays the performance — timing, pauses, emphasis and emotion are kept exactly as you played them. Only the vocal identity is replaced with ${rigName}’s voice reference. Conversion needs a one-time rights record for that voice, which this registers.`,
+      list: [
+        { tag: 'CONFIRMS', fg: '#c8834a', text: `${rigName}’s voice and your performance are yours or licensed for distribution. Training permission stays off.` },
+        { tag: 'KEEPS', fg: '#7a8fc0', text: 'The original take is untouched and stays selectable — the conversion arrives beside it as a candidate to audition.' },
+      ],
+      ok: 'I confirm — convert',
+      okTone: 'accent',
+      onOk: () => {
+        void (async () => {
+          try {
+            const base = `self-owned-${rigName}-voice`.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+            let id = base;
+            for (let n = 2; dialogue.consents.some((c) => c.id === id); n++) id = `${base}-${n}`;
+            await api.registerVoiceConsent(scene, cue.id, {
+              id,
+              subject: 'creator',
+              basis: 'self-owned',
+              scope: 'both',
+              distribution: true,
+              training: false,
+              confirmed: true,
+              notes: [`registered from the take strip to convert ${cue.speaker} performances`],
+            });
+            await reloadDialogue();
+            await run(id);
+          } catch (err) {
+            setError((err as Error).message);
+          }
+        })();
+      },
+    });
+  }, [dialogue, shots, cast, scene, reloadDialogue, rebuildPreview]);
 
   const changeAnimationDocument = useCallback((document: AnimationDocument) => {
     setPreflight(null);
     setAnimation(document);
     void rebuildPreview();
   }, [rebuildPreview]);
+
+  // A stage prop drag edits the SET document, which is shared across scenes.
+  const commitPropMove = useCallback(async (prop: StagePropTarget, to: [number, number]) => {
+    if (!setDescriptor || busy) return;
+    const items = setDescriptor.layers[prop.layer];
+    const instance = items?.[prop.index];
+    if (!instance || propInstanceId(instance, prop.layer, prop.index) !== prop.id) {
+      // The set changed underneath the drag (another editor, a tidy pass) —
+      // resync instead of writing to the wrong instance.
+      void api.set(setName).then(setSetDescriptor).catch(() => {});
+      return;
+    }
+    setBusy('save-set');
+    setError(null);
+    try {
+      const next: SetDescriptor = {
+        ...setDescriptor,
+        layers: {
+          ...setDescriptor.layers,
+          [prop.layer]: items.map((item, index) => (index === prop.index
+            ? { ...item, x: Math.round(to[0] * 10) / 10, y: Math.round(to[1] * 10) / 10 }
+            : item)),
+        },
+      };
+      await api.saveSet(setName, next);
+      setSetDescriptor(next);
+      setInfo(`Moved ${prop.prop} in set "${setName}" — shared by every scene that uses it.`);
+      void rebuildPreview();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }, [busy, rebuildPreview, setDescriptor, setName]);
+
+  const deleteMotionSegment = useCallback(async (segmentId: string) => {
+    if (!animation || busy) return;
+    const blocker = motionDeletionBlocker(animation, segmentId);
+    if (blocker) {
+      setError(blocker);
+      return;
+    }
+    setBusy('delete-motion');
+    setError(null);
+    setPreflight(null);
+    try {
+      const saved = await api.saveAnimation(scene, withoutMotionSegment(animation, segmentId));
+      setAnimation(saved.document);
+      setSelectedMotionId(null);
+      setAnimationTarget(null);
+      void rebuildPreview();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }, [animation, busy, rebuildPreview, scene]);
+
+  const askDeleteMotion = useCallback((segmentId: string) => {
+    const segment = animation?.segments.find((item) => item.id === segmentId);
+    if (!animation || !segment) {
+      setSelectedMotionId(null);
+      return;
+    }
+    const blocker = motionDeletionBlocker(animation, segmentId);
+    if (blocker) {
+      setError(blocker);
+      return;
+    }
+    setConfirm({
+      title: 'Delete this motion segment?',
+      body: 'This removes the selected motion clip and both endpoint keys. Every other animation track and segment stays unchanged.',
+      list: [{
+        tag: 'MOTION',
+        fg: '#c8595a',
+        text: `${segment.actorId} · ${segment.channel === 'part.transform' ? segment.partId : 'root'} · ${segment.id}`,
+      }],
+      ok: 'Delete motion',
+      okTone: 'bad',
+      onOk: () => { void deleteMotionSegment(segmentId); },
+    });
+  }, [animation, deleteMotionSegment]);
 
   // --- direct: propose, confirm the diff, apply ---
   const runDirect = useCallback(async () => {
@@ -314,6 +605,7 @@ export function EditorApp({
         setShots(res.proposed);
         setSelected(null);
         const [dialogueDocument, animationDocument] = await Promise.all([api.dialogue(scene), api.animation(scene)]);
+        dialogueRevision.current = dialogueDocument.revision;
         setDialogue(dialogueDocument);
         setAnimation(animationDocument);
         setError(res.errors.length ? res.errors.join('; ') : null);
@@ -520,6 +812,11 @@ export function EditorApp({
         return;
       }
       if (isTyping(e.target)) return;
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedMotionId) {
+        e.preventDefault();
+        askDeleteMotion(selectedMotionId);
+        return;
+      }
       if (e.key === ' ') {
         e.preventDefault();
         stageRef.current?.togglePlay();
@@ -529,7 +826,7 @@ export function EditorApp({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selected, shots, selectBeat]);
+  }, [askDeleteMotion, selected, selectedMotionId, shots, selectBeat]);
 
   // --- context tools per mode ---
   const tools: ContextTool[] = useMemo(() => {
@@ -551,14 +848,14 @@ export function EditorApp({
         ];
       case 'animate':
         return [
-          { label: 'Onion', hint: 'Ghost the controller 2 frames before and after the playhead.', on: prefs.onion, go: () => setPrefs({ onion: !prefs.onion }) },
+          { label: 'Onion', hint: 'Ghost the active controller either side of the playhead — count set in the Motion panel.', on: prefs.onion, go: () => setPrefs({ onion: !prefs.onion }) },
           { label: 'Motion path', hint: 'Show the authored A→B path with waypoints.', on: prefs.path, go: () => setPrefs({ path: !prefs.path }) },
-          { label: 'Snap', hint: 'Snap handles to marks, seats and frame boundaries.', on: prefs.snap, go: () => setPrefs({ snap: !prefs.snap }) },
+          { label: 'Snap', hint: 'Snap body and prop drags to marks, seats and the walkable edges.', on: prefs.snap, go: () => setPrefs({ snap: !prefs.snap }) },
         ];
       case 'perform':
         return [
-          { label: 'Line Booth', hint: 'Perform one line with context playback and count-in — in the Voice tab.', on: tab === 'voice', go: () => setTab('voice') },
-          { label: 'Scene Run', hint: 'Perform every unlocked line for one character against the full guide track — in the Voice tab.', go: () => setTab('voice') },
+          { label: 'Line Booth', hint: 'Perform one line with context playback and count-in — in the Voice tab.', on: tab === 'voice', go: openBooth },
+          { label: 'Scene Run', hint: 'Perform every unlocked line for one character against the full guide track — in the Voice tab.', go: openBooth },
           { label: 'Voices', hint: 'Synthesize all lines with the local engine.', busy: busy === 'voices', disabled: !shots, go: () => void runJob('voices') },
         ];
       case 'sound':
@@ -580,7 +877,7 @@ export function EditorApp({
           },
         ];
     }
-  }, [mode, llm, busy, shots, prefs, tab, layout, detail, scene, runCheck, runDirect, runJob, refreshPreflight]);
+  }, [mode, llm, busy, shots, prefs, tab, layout, detail, scene, runCheck, runDirect, runJob, refreshPreflight, openBooth]);
 
   // --- command palette ---
   const commands: Command[] = useMemo(() => {
@@ -671,12 +968,20 @@ export function EditorApp({
             scene={scene}
             cue={selectedCue}
             dialogue={dialogue}
+            speakerFg={selectedCue ? speakerColour(shots?.cast.map((c) => c.id) ?? [], selectedCue.speaker) : '#6b737d'}
             castVoiceBound={speakerBound}
             recording={rec}
             onRecordingChange={setRec}
             onReload={reloadDialogue}
             onSaveCue={saveDialogueCue}
-            onOpenVoiceTab={() => setTab('voice')}
+            onDiscardTake={discardTake}
+            onUseGenerated={(scope) => useGenerated(selectedCue, scope)}
+            onOpenVoiceTab={openBooth}
+            speakerRig={selectedCue ? shots?.cast.find((m) => m.id === selectedCue.speaker)?.rig ?? null : null}
+            converting={busy === 'convert'}
+            onConvert={() => convertToCharacter(selectedCue)}
+            onOpenCastEditor={onOpenCast}
+            conversionRuntime={health?.voiceConversion?.fingerprint ?? null}
           />
         )
       : mode === 'publish'
@@ -764,6 +1069,7 @@ export function EditorApp({
               onSelectBeat={selectBeat}
               animationTarget={animationTarget}
               validArea={setDescriptor?.layout.walkable ?? null}
+              onCommitProp={(prop, to) => { void commitPropMove(prop, to); }}
               recording={rec}
               draftMarked={Boolean(preflight?.productionBlocked)}
               previewError={preview ? null : error}
@@ -774,7 +1080,8 @@ export function EditorApp({
 
         <Inspector
           tab={tab}
-          onTab={setTab}
+          onTab={selectTab}
+          flash={voiceFlash}
           scene={scene}
           shots={shots}
           vocab={vocab}
@@ -791,8 +1098,13 @@ export function EditorApp({
           onEditCast={(actorId, changes) => void editCastMember(actorId, changes)}
           onAnimationDocument={changeAnimationDocument}
           onAnimationTarget={setAnimationTarget}
+          onAnimationSeek={(ms) => stageRef.current?.seekMs(ms)}
+          selectedMotionId={selectedMotionId}
+          onDeleteMotion={askDeleteMotion}
           onReloadDialogue={reloadDialogue}
           onSaveCue={saveDialogueCue}
+          onDiscardTake={discardTake}
+          speakerVoiceBound={speakerBound}
           performContext={performContext}
           sceneRun={sceneRun}
           onOpenCastEditor={onOpenCast}
@@ -808,14 +1120,19 @@ export function EditorApp({
         totalMs={totalMs}
         playheadMs={playheadMs}
         selected={selected}
+        selectedMotionId={selectedMotionId}
+        motionBusy={busy === 'delete-motion'}
         snap={prefs.snap}
         onToggleSnap={() => setPrefs({ snap: !prefs.snap })}
         onSelect={selectBeat}
         onScrub={(ms) => stageRef.current?.seekMs(ms)}
         onSelectVoice={selectVoice}
-        onSelectMotion={() => {
+        onSelectMotion={(segmentId) => {
+          setSelected(null);
+          setSelectedMotionId(segmentId);
           setMode('animate');
         }}
+        onDeleteMotion={askDeleteMotion}
       />
 
       {/* status bar */}
@@ -847,7 +1164,11 @@ export function EditorApp({
               </Mono>
             </div>
             <div className="text-[11px] text-[#c9ccd1] leading-[1.45]">
-              {job.kind === 'render' ? 'Rendering. Held frames are skipped; the job resumes if you close the app.' : 'Synthesizing dialogue and deriving mouth cues.'}
+              {job.kind === 'render'
+                ? 'Rendering. Held frames are skipped; the job resumes if you close the app.'
+                : job.kind === 'convert'
+                  ? 'Converting your performance to the character’s voice. Your timing and delivery are preserved; only vocal identity changes. The first run loads the model into VRAM.'
+                  : 'Synthesizing dialogue and deriving mouth cues.'}
             </div>
             {job.event?.total ? (
               <div className="mt-2 h-1 rounded-[2px] bg-deep overflow-hidden">

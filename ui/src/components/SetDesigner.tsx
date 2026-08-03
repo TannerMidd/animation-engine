@@ -15,9 +15,14 @@ const LAYERS: LayerName[] = ['back', 'mid', 'fore'];
  * empty — the only question that matters is whether people read against it.
  * The layer tabs are depth: characters render between `mid` and `fore`.
  */
-export function SetDesigner({ vocab, llm }: { vocab: Vocab | null; llm: LlmStatus | null }) {
+export function SetDesigner({ vocab, llm, open }: {
+  vocab: Vocab | null;
+  llm: LlmStatus | null;
+  /** The set the caller asked for; without it the designer opens on whatever sorts first. */
+  open?: string | null;
+}) {
   const [names, setNames] = useState<string[]>([]);
-  const [name, setName] = useState<string>('');
+  const [name, setName] = useState<string>(open ?? '');
   const [desc, setDesc] = useState<SetDescriptor | null>(null);
   const [props, setProps] = useState<PropDefInfo[]>([]);
   const [tags, setTags] = useState<string[]>([]);
@@ -42,6 +47,10 @@ export function SetDesigner({ vocab, llm }: { vocab: Vocab | null; llm: LlmStatu
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (open) setName(open);
+  }, [open]);
 
   useEffect(() => {
     if (!name) return;

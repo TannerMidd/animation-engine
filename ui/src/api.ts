@@ -82,6 +82,9 @@ export const api = {
   revokeVoiceConsent: (name: string, consentId: string) => post<{ ok: true; revision: number }>(
     `/api/scenes/${name}/dialogue/consents/${encodeURIComponent(consentId)}/revoke`, {},
   ),
+  revokeTake: (name: string, takeId: string) => post<{ ok: true; revision: number; revokedAt: string }>(
+    `/api/scenes/${name}/dialogue/takes/${encodeURIComponent(takeId)}/revoke`, {},
+  ),
   uploadPerformance: (
     name: string,
     cueId: string,

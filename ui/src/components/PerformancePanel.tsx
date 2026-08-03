@@ -23,7 +23,7 @@ function cuePlaybackDurationMs(cue: DialogueCue, document: DialogueDocument): nu
 }
 
 export function PerformancePanel({
-  scene, cue, document, context, sceneRun, onReload, onSaveCue,
+  scene, cue, document, context, sceneRun, onReload, onSaveCue, onDiscardTake, speakerVoiceBound,
 }: {
   scene: string;
   cue: DialogueCue | null;
@@ -32,6 +32,14 @@ export function PerformancePanel({
   sceneRun?: { audioUrl: string; beatStarts: number[]; durationMs: number } | null;
   onReload: () => Promise<void>;
   onSaveCue: (cue: DialogueCue) => Promise<void>;
+  /** When provided, every take card carries a discard (revoke) control. */
+  onDiscardTake?: (takeId: string) => void;
+  /**
+   * Whether the speaker's character has a voice reference. Target-voice
+   * rights bind to that reference's checksum, so without one only
+   * performance-scope records can exist — the default scope follows this.
+   */
+  speakerVoiceBound?: boolean;
 }) {
   const [spokenText, setSpokenText] = useState('');
   const [intent, setIntent] = useState('');
@@ -85,6 +93,12 @@ export function PerformancePanel({
     ));
   }, [cue?.approval.notes, cue?.id, qualityAcknowledgementNote]);
 
+  // Without a bound voice reference only performance-scope records can bind,
+  // so the default scope follows the character rather than failing on submit.
+  useEffect(() => {
+    setConsentScope(speakerVoiceBound ? 'both' : 'performance');
+  }, [speakerVoiceBound, cue?.speaker]);
+
   useEffect(() => () => {
     stopJob.current?.();
     if (ticker.current !== null) window.clearInterval(ticker.current);
@@ -98,10 +112,24 @@ export function PerformancePanel({
   if (!cue || !document) return <Empty>Select a dialogue line to perform it</Empty>;
 
   const takes = document.recordedTakes.filter((take) => (
-    take.cueId === cue.id || take.provenance.sceneRunSegments?.some((segment) => segment.cueId === cue.id)
+    !take.revokedAt &&
+    (take.cueId === cue.id || take.provenance.sceneRunSegments?.some((segment) => segment.cueId === cue.id))
   ));
-  const renders = document.voiceRenders.filter((render) =>
-    render.source.kind !== 'draft-tts' && (!render.source.takeId || takes.some((take) => take.id === render.source.takeId)));
+  const matchingRenders = document.voiceRenders.filter((render) =>
+    render.source.kind !== 'draft-tts' &&
+    (!render.source.takeId || takes.some((take) => take.id === render.source.takeId)) &&
+    (render.source.kind !== 'voice-conversion' || render.source.sourceCueId === cue.id));
+  // A deterministic retry can point at the same cached audio. Show that output
+  // once instead of filling the Voice inspector with identical rejection cards.
+  const seenRenderOutputs = new Set<string>();
+  const renders = [...matchingRenders].reverse().filter((render) => {
+    const key = typeof render.model.settings['cacheKey'] === 'string'
+      ? render.model.settings['cacheKey'] as string
+      : render.id;
+    if (seenRenderOutputs.has(key)) return false;
+    seenRenderOutputs.add(key);
+    return true;
+  }).reverse();
   const selectedRender = cue.selectedRenderId
     ? document.voiceRenders.find((render) => render.id === cue.selectedRenderId && render.audio)
     : null;
@@ -451,19 +479,27 @@ export function PerformancePanel({
   };
 
   const registerConsent = async () => {
-    if (!consentId.trim() || !consentSubject.trim()) {
-      setError('Consent ID and rights holder/subject are required.');
+    if (!consentSubject.trim()) {
+      setError('Rights holder/subject is required.');
       return;
     }
     if (!rightsConfirmed) {
       setError('Confirm that you own or have permission to use this target voice.');
       return;
     }
+    // Nobody should have to invent a record ID: derive a readable unique one
+    // when the optional field is left blank.
+    let id = consentId.trim();
+    if (!id) {
+      const base = `${consentBasis}-${consentSubject.trim()}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'creator-owned-voice';
+      id = base;
+      for (let n = 2; document.consents.some((item) => item.id === id); n++) id = `${base}-${n}`;
+    }
     setBusy('registering consent');
     setError(null);
     try {
       await api.registerVoiceConsent(scene, cue.id, {
-        id: consentId.trim(),
+        id,
         subject: consentSubject.trim(),
         basis: consentBasis,
         scope: consentScope,
@@ -471,10 +507,14 @@ export function PerformancePanel({
         training: false,
         confirmed: true,
       });
+      setConsentId(id);
       setRightsConfirmed(false);
       await onReload();
     } catch (err) {
-      setError((err as Error).message);
+      const message = (err as Error).message;
+      setError(/needs a target voice reference/.test(message)
+        ? `${cue.speaker} has no voice reference yet, so target-voice rights cannot bind. Switch Rights scope to "performance" to cover your own recordings, or give ${cue.speaker} a voice in the cast editor first.`
+        : message);
     } finally {
       setBusy(null);
     }
@@ -585,6 +625,17 @@ export function PerformancePanel({
           </div>
         ) : (
           <>
+            {document.consents.some((item) => !item.revokedAt) && (
+              <div className="space-y-1">
+                <div className="text-[10px] text-ink-faint">Existing records in this scene:</div>
+                {document.consents.filter((item) => !item.revokedAt).map((item) => (
+                  <div key={item.id} className="flex items-center gap-2 text-[10px] text-ink-dim">
+                    <span className="flex-1 truncate">{item.id} · {item.subject} · {item.basis} · {item.scope}</span>
+                    <Button className="py-0.5" onClick={() => setConsentId(item.id)}>Use</Button>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="grid grid-cols-3 gap-2">
               <Field label="Rights holder / subject">
                 <TextInput value={consentSubject} onChange={setConsentSubject} />
@@ -600,7 +651,11 @@ export function PerformancePanel({
               <input type="checkbox" checked={rightsConfirmed} onChange={(event) => setRightsConfirmed(event.target.checked)} />
               I confirm the selected performance/target voice rights are mine or licensed for distribution and, when selected, voice conversion. Target-voice rights bind to the current reference-file checksum; training permission stays off.
             </label>
-            <Button disabled={!!busy || !rightsConfirmed || !consentId.trim()} onClick={() => void registerConsent()}>
+            <Button
+              disabled={!!busy || !rightsConfirmed}
+              title={!rightsConfirmed ? 'Tick the confirmation above first' : 'A record ID is generated automatically; the Rights record ID field above only matters if you want a specific one.'}
+              onClick={() => void registerConsent()}
+            >
               Register permission
             </Button>
           </>
@@ -704,6 +759,18 @@ export function PerformancePanel({
                     ) : (
                       <Badge tone="bad">{segment ? 'segment' : 'capture'} QC missing</Badge>
                     )}
+                    {onDiscardTake && (
+                      <button
+                        type="button"
+                        title={take.capture.mode === 'scene-run'
+                          ? 'Discard this Scene Run — every line using one of its segments falls back to “no take chosen”. The audio stays on disk as an audit record.'
+                          : 'Discard this take — removes it from the working set. The audio stays on disk as an audit record.'}
+                        onClick={() => onDiscardTake(take.id)}
+                        className="text-[10px] text-ink-faint hover:text-bad px-1"
+                      >
+                        Discard
+                      </button>
+                    )}
                   </div>
                   <audio controls src={`/api/scenes/${scene}/dialogue/takes/${take.id}/audio`} className="w-full h-7" />
                   {(quality?.flags ?? (segment ? ['This Scene Run segment has no structured QC report.'] : take.provenance.notes)).map((note) => (
@@ -732,7 +799,16 @@ export function PerformancePanel({
               />
             </Field>
             <div className="flex items-end pb-2.5">
-              <Button className="w-full" disabled={cue.locked || !!busy || !targetConsentActive} onClick={() => void convert()}>
+              <Button
+                className="w-full"
+                disabled={cue.locked || !!busy || !targetConsentActive}
+                title={cue.locked
+                  ? 'This line is locked. Unlock it to change its audio.'
+                  : targetConsentActive
+                    ? 'Re-voice the selected take as this character: your timing, pauses, emphasis and emotion are kept; only the vocal identity changes. The take itself is never altered.'
+                    : `Conversion needs an active rights record covering ${cue.speaker}'s target voice. Register one above with rights scope "target-voice" or "both" — that scope needs the character to have a voice reference.`}
+                onClick={() => void convert()}
+              >
                 {busy?.includes('convert') ? <><Spinner /> Converting…</> : 'Convert to character'}
               </Button>
             </div>

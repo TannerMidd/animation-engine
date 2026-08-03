@@ -36,7 +36,7 @@ export function Select({
   value, options, onChange, className = '', disabled,
 }: {
   value: string;
-  options: readonly string[];
+  options: readonly (string | { value: string; label: string })[];
   onChange: (v: string) => void;
   className?: string;
   disabled?: boolean;
@@ -48,9 +48,11 @@ export function Select({
       onChange={(e) => onChange(e.target.value)}
       className={`bg-panel-2 border border-edge rounded px-1.5 py-1 text-[12px] text-ink outline-none focus:border-accent ${className}`}
     >
-      {options.map((o) => (
-        <option key={o} value={o}>{o}</option>
-      ))}
+      {options.map((option) => {
+        const value = typeof option === 'string' ? option : option.value;
+        const label = typeof option === 'string' ? option : option.label;
+        return <option key={value} value={value}>{label}</option>;
+      })}
     </select>
   );
 }

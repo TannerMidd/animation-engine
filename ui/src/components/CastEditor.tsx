@@ -47,9 +47,14 @@ const SWATCH_LABELS: Record<LookSwatchKey, string> = {
  * question that matters about an expression is whether it is distinguishable
  * from the other nine.
  */
-export function CastEditor({ health, vocab }: { health: Health | null; vocab: Vocab | null }) {
+export function CastEditor({ health, vocab, open }: {
+  health: Health | null;
+  vocab: Vocab | null;
+  /** The character the caller asked for. Landing on somebody else is how takes end up on the wrong voice. */
+  open?: string | null;
+}) {
   const [cast, setCast] = useState<CastSummary[]>([]);
-  const [name, setName] = useState<string>('');
+  const [name, setName] = useState<string>(open ?? '');
   const [rig, setRig] = useState<RigDoc | null>(null);
   const [look, setLook] = useState<Look | null>(null);
   const [outfit, setOutfit] = useState<Outfit | null>(null);
@@ -71,6 +76,10 @@ export function CastEditor({ health, vocab }: { health: Health | null; vocab: Vo
   useEffect(() => {
     void refreshCast().then(() => undefined);
   }, [refreshCast]);
+
+  useEffect(() => {
+    if (open) setName(open);
+  }, [open]);
 
   useEffect(() => {
     if (!name && cast[0]) setName(cast[0].name);

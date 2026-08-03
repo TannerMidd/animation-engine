@@ -11,6 +11,7 @@ import {
   createDialogueDocument,
   dialoguePath,
   readDialogueDocument,
+  revokeRecordedTake,
   revokeVoiceConsent,
   updateDialogueDocument,
   writeDialogueDocument,
@@ -353,6 +354,86 @@ describe('dialogue scene persistence', () => {
       revision: 3,
       consents: [{ ...revoked.consents[0]!, revokedAt: null }],
     }), outDir)).rejects.toThrow(/immutable consent record/);
+  });
+
+  it('treats an approved generated-voice cue as valid without a selection', () => {
+    const complete = completeDocument();
+    const generated = DialogueDocument.parse({
+      ...complete,
+      recordedTakes: [],
+      voiceRenders: [],
+      cues: [{
+        ...complete.cues[0]!,
+        selectedTakeId: null,
+        selectedRenderId: null,
+        trim: null,
+        voiceSource: 'generated',
+      }],
+    });
+    expect(generated.cues[0]!.voiceSource).toBe('generated');
+    expect(generated.cues[0]!.approval.state).toBe('approved');
+
+    // A generated decision and a selected performance are mutually exclusive.
+    expect(() => DialogueDocument.parse({
+      ...complete,
+      cues: [{ ...complete.cues[0]!, voiceSource: 'generated' }],
+    })).toThrow(/cannot also select a performance/);
+  });
+
+  it('revokes a take once through the dedicated operation, clearing what stood on it', async () => {
+    const outDir = await tempDir('dialogue-take-revoke');
+    const complete = completeDocument();
+
+    // The fixture cue is locked and references the take; revocation must
+    // refuse to edit it behind the lock rather than clearing it silently.
+    await writeDialogueDocument(complete.scene, complete, outDir);
+    await expect(revokeRecordedTake(complete.scene, 'take-001', '2026-08-02T19:00:00.000Z', outDir))
+      .rejects.toThrow(/locked dialogue cue "cue-001".*unlock before revoking/);
+
+    const unlockedDir = await tempDir('dialogue-take-revoke-unlocked');
+    const doc = DialogueDocument.parse({
+      ...complete,
+      cues: [{ ...complete.cues[0]!, locked: false }],
+    });
+    await writeDialogueDocument(doc.scene, doc, unlockedDir);
+
+    const revokedAt = '2026-08-02T19:00:00.000Z';
+    const revoked = await revokeRecordedTake(doc.scene, 'take-001', revokedAt, unlockedDir);
+    expect(revoked.revision).toBe(2);
+    expect(revoked.recordedTakes[0]).toEqual({ ...doc.recordedTakes[0]!, revokedAt });
+    // The derived render survives as audit evidence, but nothing points at
+    // the revoked take any more — selection, trim, and approval all reset.
+    expect(revoked.voiceRenders).toHaveLength(1);
+    expect(revoked.cues[0]).toMatchObject({
+      selectedTakeId: null,
+      selectedRenderId: null,
+      trim: null,
+      approval: { state: 'draft', by: null, at: null },
+    });
+    expect(revoked.cues[0]!.approval.notes).toContain('approval withdrawn: take take-001 was revoked');
+
+    const repeated = await revokeRecordedTake(doc.scene, 'take-001', '2026-08-02T20:00:00.000Z', unlockedDir);
+    expect(repeated.revision).toBe(2);
+    expect(repeated.recordedTakes[0]!.revokedAt).toBe(revokedAt);
+
+    // Un-revoking, and revoking outside the operation, both stay forbidden.
+    await expect(writeDialogueDocument(doc.scene, DialogueDocument.parse({
+      ...revoked,
+      revision: 3,
+      recordedTakes: [{ ...revoked.recordedTakes[0]!, revokedAt: null }],
+    }), unlockedDir)).rejects.toThrow(/dedicated revocation operation/);
+  });
+
+  it('rejects a revocation timestamp before the take was recorded', async () => {
+    const outDir = await tempDir('dialogue-take-revoke-early');
+    const complete = completeDocument();
+    const doc = DialogueDocument.parse({
+      ...complete,
+      cues: [{ ...complete.cues[0]!, locked: false }],
+    });
+    await writeDialogueDocument(doc.scene, doc, outDir);
+    await expect(revokeRecordedTake(doc.scene, 'take-001', '2026-08-02T17:00:00.000Z', outDir))
+      .rejects.toThrow(/cannot be revoked before it was recorded/);
   });
 
   it('rejects a document stored under the wrong scene', async () => {

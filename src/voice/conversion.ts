@@ -11,7 +11,15 @@ import type { RegisterPolicy } from '../schema/dialogue.ts';
 
 const SCRIPT = path.join(ROOT, 'src', 'voice', 'engines', 'chatterbox_vc_worker.py');
 const CACHE_DIR = path.join(ROOT, '.cache', 'voice-conversion');
-const CACHE_VERSION = 3;
+// 4: the register policy corrects the conversion's residual against the target
+// instead of re-applying the source-to-target interval to an already-converted
+// signal. Cached output from 3 and earlier is over-shifted and must not be reused.
+// 5: references below the speaker encoder's floor are lifted into range for
+// conditioning, which is the difference between a character voice and noise for
+// every low-pitched member of a cast.
+// 6: external silence is removed while the model runs and restored afterwards;
+// short lines otherwise collapse even when the same target converts long lines.
+const CACHE_VERSION = 6;
 
 export interface VoiceConversionRuntimeProvenance {
   /** Hash of the worker, package RECORDs, and content-addressed model snapshot. */
@@ -41,8 +49,19 @@ export interface VoiceConversionResult {
   cacheKey: string;
   registerPolicy: RegisterPolicy;
   registerShiftSemitones: number;
+  /**
+   * Semitones the target reference was lifted before conditioning. Non-zero
+   * only for voices under the encoder's floor; the output still lands in the
+   * character's own register.
+   */
+  conditioningLiftSemitones: number;
   sourceMedianPitchHz: number | null;
   targetMedianPitchHz: number | null;
+  /** Where the conversion actually landed, after any register correction. */
+  outputMedianPitchHz: number | null;
+  /** Share of frames carrying detectable pitch, in the source and the output. */
+  sourceVoicedRatio: number | null;
+  outputVoicedRatio: number | null;
   warnings: string[];
   runtime: VoiceConversionRuntimeProvenance;
 }
@@ -66,8 +85,12 @@ interface WorkerEvent {
   message?: string;
   registerPolicy?: RegisterPolicy;
   registerShiftSemitones?: number;
+  conditioningLiftSemitones?: number;
   sourceMedianPitchHz?: number | null;
   targetMedianPitchHz?: number | null;
+  outputMedianPitchHz?: number | null;
+  sourceVoicedRatio?: number | null;
+  outputVoicedRatio?: number | null;
   warnings?: string[];
 }
 
@@ -230,6 +253,65 @@ export async function compareConversionAudio(
   return { sourceSpeechRatio, outputSpeechRatio, clippedSampleRatio, cadenceSimilarity, flags };
 }
 
+/**
+ * A conversion that kept less than this share of the source's voiced frames
+ * has stopped being speech in the target voice. Measured on this engine, good
+ * conversions retain 0.9-1.3 and collapsed ones sit at 0.2-0.5.
+ */
+export const CONVERSION_VOICED_RETENTION_FLOOR = 0.65;
+
+/**
+ * How far the conversion may land from the character's own register. The model
+ * normally lands within a semitone; several semitones off means it did not
+ * take the target speaker, whatever it did take.
+ */
+export const CONVERSION_PITCH_ERROR_CEILING_SEMITONES = 4;
+
+export interface ConversionIdentityCheck {
+  /** Output voiced-frame share over the source's. Null when unmeasurable. */
+  voicedRetention: number | null;
+  /** Distance from the target voice's register, in semitones. */
+  pitchErrorSemitones: number | null;
+  /** Human-readable reasons the conversion is not usable. Empty means usable. */
+  failures: string[];
+}
+
+/**
+ * Did the conversion actually become the character?
+ *
+ * Loudness and envelope checks cannot answer this: a collapsed conversion is
+ * still loud and still follows the performance's energy contour. What it loses
+ * is voicing, and where it lands in register.
+ */
+export function checkConversionIdentity(result: {
+  sourceVoicedRatio: number | null;
+  outputVoicedRatio: number | null;
+  outputMedianPitchHz: number | null;
+  targetMedianPitchHz: number | null;
+}): ConversionIdentityCheck {
+  const failures: string[] = [];
+  const voicedRetention = result.sourceVoicedRatio && result.outputVoicedRatio !== null
+    ? result.outputVoicedRatio / result.sourceVoicedRatio
+    : null;
+  const pitchErrorSemitones = result.outputMedianPitchHz && result.targetMedianPitchHz
+    ? 12 * Math.log2(result.outputMedianPitchHz / result.targetMedianPitchHz)
+    : null;
+
+  if (voicedRetention !== null && voicedRetention < CONVERSION_VOICED_RETENTION_FLOOR) {
+    failures.push(
+      `the conversion lost ${Math.round((1 - voicedRetention) * 100)}% of the performance's voiced speech; ` +
+      'it came out as noise rather than the character',
+    );
+  }
+  if (pitchErrorSemitones !== null && Math.abs(pitchErrorSemitones) > CONVERSION_PITCH_ERROR_CEILING_SEMITONES) {
+    failures.push(
+      `the conversion landed ${Math.abs(pitchErrorSemitones).toFixed(1)} semitones from the character's own register; ` +
+      'the target voice reference is likely outside what conversion can reproduce',
+    );
+  }
+  return { voicedRetention, pitchErrorSemitones, failures };
+}
+
 /** Content key for a derived voice render. Paths never define identity. */
 export async function voiceConversionCacheKey(request: VoiceConversionRequest): Promise<string> {
   const runtime = await voiceConversionRuntimeProvenance();
@@ -310,8 +392,12 @@ export async function convertPerformances(
       const metadata = JSON.parse(await fs.readFile(path.join(CACHE_DIR, `${cacheKey}.json`), 'utf8')) as {
         registerPolicy: RegisterPolicy;
         registerShiftSemitones: number;
+        conditioningLiftSemitones: number;
         sourceMedianPitchHz: number | null;
         targetMedianPitchHz: number | null;
+        outputMedianPitchHz: number | null;
+        sourceVoicedRatio: number | null;
+        outputVoicedRatio: number | null;
         warnings: string[];
         runtime: VoiceConversionRuntimeProvenance;
       };
@@ -390,8 +476,12 @@ export async function convertPerformances(
               cacheKey: miss.cacheKey,
               registerPolicy: event.registerPolicy ?? miss.registerPolicy,
               registerShiftSemitones: event.registerShiftSemitones ?? 0,
+              conditioningLiftSemitones: event.conditioningLiftSemitones ?? 0,
               sourceMedianPitchHz: event.sourceMedianPitchHz ?? null,
               targetMedianPitchHz: event.targetMedianPitchHz ?? null,
+              outputMedianPitchHz: event.outputMedianPitchHz ?? null,
+              sourceVoicedRatio: event.sourceVoicedRatio ?? null,
+              outputVoicedRatio: event.outputVoicedRatio ?? null,
               warnings: event.warnings ?? [],
               runtime,
             });
@@ -420,8 +510,12 @@ export async function convertPerformances(
     await fs.writeFile(path.join(CACHE_DIR, `${miss.cacheKey}.json`), JSON.stringify({
       registerPolicy: result.registerPolicy,
       registerShiftSemitones: result.registerShiftSemitones,
+      conditioningLiftSemitones: result.conditioningLiftSemitones,
       sourceMedianPitchHz: result.sourceMedianPitchHz,
       targetMedianPitchHz: result.targetMedianPitchHz,
+      outputMedianPitchHz: result.outputMedianPitchHz,
+      sourceVoicedRatio: result.sourceVoicedRatio,
+      outputVoicedRatio: result.outputVoicedRatio,
       warnings: result.warnings,
       runtime: result.runtime,
     }, null, 2), 'utf8');

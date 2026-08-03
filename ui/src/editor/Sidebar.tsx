@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { AnimationDocument, CastSummary, DialogueDocument, Health, SceneDetail, SceneSummary, SetSummary, ShotList } from '../types.ts';
 import { Dot, SectionRule } from './chrome.tsx';
-import { cueApproval, type Mode } from './lib.ts';
+import { cueUndecided, type Mode } from './lib.ts';
 
 interface Row {
   key: string;
@@ -89,14 +89,14 @@ export function Sidebar({
   const [open, setOpen] = useState<Record<string, boolean>>({ scripts: true, cast: true, sets: true });
 
   const lineCues = dialogue?.cues ?? [];
-  const missing = lineCues.filter((cue) => cueApproval(cue) !== 'approved').length;
+  const missing = lineCues.filter((cue) => cueUndecided(cue)).length;
   const lockedBeats = shots?.beats.filter((b) => b.locked).length ?? 0;
   const lockedSegments = animation?.segments.filter((s) => s.locked).length ?? 0;
 
   const chips = [
     { label: 'modified', dot: '#c8834a', hint: dirty ? 'Script has unsaved edits' : 'Nothing modified since the last save' },
     { label: 'locked', dot: '#a89050', hint: `${lockedBeats} locked beat${lockedBeats === 1 ? '' : 's'}, ${lockedSegments} locked segment${lockedSegments === 1 ? '' : 's'}` },
-    { label: 'missing', dot: '#c8595a', hint: `${missing} of ${lineCues.length} dialogue lines without an approved take` },
+    { label: 'missing', dot: '#c8595a', hint: `${missing} of ${lineCues.length} dialogue lines still undecided (no approved take or generated-voice choice)` },
   ];
 
   const match = (name: string) => !filter || name.toLowerCase().includes(filter.toLowerCase());
@@ -124,7 +124,7 @@ export function Sidebar({
       });
       rows.push({
         key: 'dialogue', label: 'dialogue.json', glyph: '▤', pad: 22, h: 22,
-        dot: missing ? { color: '#c8595a', hint: `${missing} of ${lineCues.length} lines have no approved take` } : { color: '#6f9b5a', hint: 'All lines approved' },
+        dot: missing ? { color: '#c8595a', hint: `${missing} of ${lineCues.length} lines undecided` } : { color: '#6f9b5a', hint: 'Every line has a decided voice' },
         hint: 'Immutable takes, trims, approvals, timing.', go: () => onMode('perform'),
       });
       rows.push({

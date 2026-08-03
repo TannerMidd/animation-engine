@@ -49,7 +49,7 @@ import { generateScript } from '../llm/script.ts';
 import { generateSet } from '../llm/set.ts';
 import {
   syncDialogueDocument, readDialogueDocument, updateDialogueDocument, writeDialogueDocument,
-  assessSceneRunSegment, revokeVoiceConsent,
+  assessSceneRunSegment, revokeVoiceConsent, revokeRecordedTake,
 } from '../pipeline/dialogue.ts';
 import {
   DialogueDocument, DialogueCue, VoiceConsentRecord,
@@ -59,7 +59,10 @@ import {
   savePerformanceRecording, audioAssetForSceneFile, performanceAssetPath, extractPerformanceSegment,
 } from '../voice/recording.ts';
 import { readWav, toInt16 } from '../voice/wav.ts';
-import { compareConversionAudio, convertPerformances, chatterboxVcAvailable } from '../voice/conversion.ts';
+import {
+  compareConversionAudio, convertPerformances, chatterboxVcAvailable, checkConversionIdentity,
+  voiceConversionRuntimeProvenance,
+} from '../voice/conversion.ts';
 import { readAnimationOrDefault, retimeAnimationForDialogue, writeAnimation } from '../pipeline/animation.ts';
 import { AnimationDocument } from '../schema/animation.ts';
 import { estimatedAnimationTimeline, runProductionPreflight } from '../pipeline/preflight.ts';
@@ -242,11 +245,16 @@ router.get('/api/health', async ({ res }) => {
   // Cheap: /api/tags is a local HTTP call with a short timeout, unlike the
   // Python engine probes.
   const llm = await new Ollama().available();
+  // Identity of the conversion runtime as it stands now. Renders carry the
+  // fingerprint they were made with, so a client can tell which of its
+  // conversions this build would still produce.
+  const voiceConversion = await voiceConversionRuntimeProvenance();
 
   json(res, {
     ffmpeg: ff,
     rhubarb: rhubarb ? path.relative(ROOT, rhubarb) : null,
     engines,
+    voiceConversion,
     llm: llm.ok
       ? { ok: true, models: llm.models.map((m) => m.name), recommended: pickModel(llm.models) }
       : { ok: false, reason: llm.reason, models: [], recommended: null },
@@ -592,6 +600,7 @@ router.post('/api/scenes/:name/dialogue/:cue/takes', async ({ req, res, params }
       consentId: body.consentId ?? null,
     },
     provenance: { createdBy: body.createdBy ?? null, notes: captured.warnings, sceneRunSegments: [] },
+    revokedAt: null,
   };
 
   const next = await updateDialogueDocument(scene, (current) => ({
@@ -749,6 +758,7 @@ router.post('/api/scenes/:name/dialogue/scene-runs', async ({ req, res, params }
         };
       }),
     },
+    revokedAt: null,
   };
   const segmentByCue = new Map(normalizedSegments.map((segment) => [segment.cueId, segment]));
   const next = await updateDialogueDocument(scene, (current) => ({
@@ -859,6 +869,23 @@ router.post('/api/scenes/:name/dialogue/consents/:consent/revoke', async ({ res,
   json(res, { ok: true, revision: next.revision, revokedAt });
 });
 
+/**
+ * The creator's "discard": the take row stays as immutable audit evidence,
+ * but it leaves every working surface — selections, trims and approvals that
+ * stood on it are cleared in the same revision.
+ */
+router.post('/api/scenes/:name/dialogue/takes/:take/revoke', async ({ res, params }) => {
+  const scene = params['name']!;
+  const takeId = params['take']!;
+  const document = await dialogueFor(scene);
+  if (!document.recordedTakes.some((item) => item.id === takeId)) {
+    throw new HttpError(404, `no recorded take "${takeId}"`);
+  }
+  const next = await revokeRecordedTake(scene, takeId);
+  const revokedAt = next.recordedTakes.find((item) => item.id === takeId)!.revokedAt;
+  json(res, { ok: true, revision: next.revision, revokedAt });
+});
+
 router.post('/api/scenes/:name/dialogue/:cue/convert', async ({ req, res, params }) => {
   const scene = params['name']!;
   const cueId = params['cue']!;
@@ -953,9 +980,29 @@ router.post('/api/scenes/:name/dialogue/:cue/convert', async ({ req, res, params
       (done, total, message) => handle.progress({ stage: 'voice-conversion', done, total, message }),
     )).get(cueId)!;
 
+    // The cache key already identifies the source audio, target reference,
+    // policy, seed, runtime, and worker. Re-clicking the same rejected result
+    // is not a new attempt and should not add another identical blocker card.
+    const duplicate = document.voiceRenders.find((render) =>
+      render.source.kind === 'voice-conversion' &&
+      render.source.sourceCueId === cue.id &&
+      render.source.takeId === take.id &&
+      render.model.settings['cacheKey'] === converted.cacheKey,
+    );
+    if (duplicate) {
+      return {
+        renderId: duplicate.id,
+        state: duplicate.state,
+        verdict: duplicate.quality.verdict,
+        durationMs: duplicate.audio?.durationMs ?? 0,
+        revision: document.revision,
+        reused: true,
+      };
+    }
+
     // A conversion attempt is immutable audit evidence. Even when model output
-    // comes from the deterministic cache, rerunning appends a new record/file
-    // instead of rewriting a prior VoiceRender under the same ID.
+    // comes from the deterministic cache, a genuinely different attempt
+    // appends a new record/file instead of rewriting a prior VoiceRender.
     const renderId = `vc-${converted.cacheKey.slice(0, 20)}-${randomUUID().slice(0, 8)}`;
     const relative = `dialogue/renders/${renderId}.wav`;
     const destination = sceneAsset(scene, relative);
@@ -963,13 +1010,18 @@ router.post('/api/scenes/:name/dialogue/:cue/convert', async ({ req, res, params
     await fs.copyFile(converted.audio, destination);
     const audio = await audioAssetForSceneFile(scene, relative);
     const acoustic = await compareConversionAudio(source, destination);
+    // Loudness and envelope alone cannot tell a character voice from a
+    // pitch-mangled one, so identity is checked on its own terms: voicing kept,
+    // and where the result landed against the character's register.
+    const identity = checkConversionIdentity(converted);
     const deltaRatio = Math.abs(converted.durationDeltaMs) / Math.max(1, converted.sourceDurationMs);
     const frameMs = 1000 / shots.fps;
     const severeQualityFailure = (
       deltaRatio > cue.durationPolicy.maxVoicedStretchRatio ||
       acoustic.outputSpeechRatio < 0.04 ||
       acoustic.clippedSampleRatio > 0.01 ||
-      acoustic.cadenceSimilarity < 0.45
+      acoustic.cadenceSimilarity < 0.45 ||
+      identity.failures.length > 0
     );
     const state = severeQualityFailure ? 'rejected' as const : 'ready' as const;
     // Without a local ASR verifier we do not call a conversion an automatic
@@ -1002,6 +1054,11 @@ router.post('/api/scenes/:name/dialogue/:cue/convert', async ({ req, res, params
         `duration changed by ${(deltaRatio * 100).toFixed(1)}%; re-record or use the original take`,
       );
     }
+    for (const failure of identity.failures) {
+      qualityFlags.unshift(
+        `${failure}. Give ${member.rig} a recorded voice reference, or reroll the minted one, and convert again.`,
+      );
+    }
     const voiceRender = {
       id: renderId,
       source: {
@@ -1027,6 +1084,8 @@ router.post('/api/scenes/:name/dialogue/:cue/convert', async ({ req, res, params
           registerShiftSemitones: converted.registerShiftSemitones,
           sourceMedianPitchHz: converted.sourceMedianPitchHz,
           targetMedianPitchHz: converted.targetMedianPitchHz,
+          outputMedianPitchHz: converted.outputMedianPitchHz,
+          conditioningLiftSemitones: converted.conditioningLiftSemitones,
           cacheKey: converted.cacheKey,
           runtimeFingerprint: converted.runtime.fingerprint,
           packageRevision: converted.runtime.packageRevision,
@@ -1052,9 +1111,13 @@ router.post('/api/scenes/:name/dialogue/:cue/convert', async ({ req, res, params
         stretchRatio: audio.durationMs / sourceDurationMs,
         speakerSimilarity: null,
         cadenceSimilarity: acoustic.cadenceSimilarity,
+        voicedRetention: identity.voicedRetention,
+        pitchErrorSemitones: identity.pitchErrorSemitones,
         flags: qualityFlags,
       },
-      failure: state === 'rejected' ? 'conversion failed duration/cadence/signal quality checks' : null,
+      failure: state === 'rejected'
+        ? (identity.failures[0] ?? 'conversion failed duration/cadence/signal quality checks')
+        : null,
     };
 
     const next = await updateDialogueDocument(scene, (current) => {

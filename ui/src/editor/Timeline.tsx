@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import type { AnimationDocument, Beat, DialogueDocument, ShotList } from '../types.ts';
 import { Mono } from './chrome.tsx';
-import { cueApproval, estimateBeatMs, resolveAnchor, speakerColour } from './lib.ts';
+import { cueApproval, estimateBeatMs, motionDeletionBlocker, resolveAnchor, speakerColour } from './lib.ts';
 
 interface Clip {
   key: string;
@@ -17,6 +17,7 @@ interface Clip {
   iconFg?: string;
   stripe?: boolean;
   shadow?: string;
+  selected?: boolean;
   weight?: number;
   fontSize?: number;
   hint: string;
@@ -59,7 +60,7 @@ const STRIPE = 'repeating-linear-gradient(135deg,rgba(255,255,255,.09) 0 3px,tra
  */
 export function Timeline({
   shots, dialogue, animation, beatStarts, totalMs, playheadMs, selected, snap,
-  onToggleSnap, onSelect, onScrub, onSelectVoice, onSelectMotion,
+  selectedMotionId, motionBusy, onToggleSnap, onSelect, onScrub, onSelectVoice, onSelectMotion, onDeleteMotion,
 }: {
   shots: ShotList | null;
   dialogue: DialogueDocument | null;
@@ -68,12 +69,15 @@ export function Timeline({
   totalMs: number;
   playheadMs: number;
   selected: number | null;
+  selectedMotionId: string | null;
+  motionBusy: boolean;
   snap: boolean;
   onToggleSnap: () => void;
   onSelect: (index: number) => void;
   onScrub: (ms: number) => void;
   onSelectVoice: (index: number) => void;
-  onSelectMotion: () => void;
+  onSelectMotion: (segmentId: string) => void;
+  onDeleteMotion: (segmentId: string) => void;
 }) {
   const [zoom, setZoom] = useState(1);
   const [locks, setLocks] = useState<Record<string, boolean>>({});
@@ -126,7 +130,7 @@ export function Timeline({
       if (beat.kind !== 'line') return [];
       const cue = dialogue?.cues.find((c) => c.id === beat.id);
       const state = cueApproval(cue);
-      const tone = state === 'approved' ? '#6f9b5a' : state === 'candidate' ? '#c8834a' : '#c8595a';
+      const tone = state === 'approved' ? '#6f9b5a' : state === 'generated' ? '#7a8fc0' : state === 'candidate' ? '#c8834a' : '#c8595a';
       const p = pos(i);
       return [{
         key: `d-${beat.id}`,
@@ -134,13 +138,17 @@ export function Timeline({
         top: 3,
         bg: state === 'missing' ? 'rgba(200,89,90,.10)' : `${tone}22`,
         border: state === 'missing' ? 'rgba(200,89,90,.5)' : `${tone}99`,
-        stripe: state === 'missing',
-        icon: state === 'approved' ? '✓' : state === 'missing' ? '○' : '◔',
+        stripe: state === 'missing' || state === 'generated',
+        icon: state === 'approved' ? '✓' : state === 'generated' ? '◇' : state === 'missing' ? '○' : '◔',
         iconFg: tone,
-        fg: state === 'missing' ? '#8c6f72' : '#9aa1ab',
+        fg: state === 'missing' ? '#8c6f72' : state === 'generated' ? '#a8b6d4' : '#9aa1ab',
         fontSize: 9,
         label: beat.text,
-        hint: `${beat.speaker} — “${beat.text}”\n${state === 'approved' ? 'approved take, locked to picture' : state === 'candidate' ? 'candidate take, not approved' : 'no take recorded'}`,
+        hint: `${beat.speaker} — “${beat.text}”\n${
+          state === 'approved' ? 'approved take, locked to picture'
+          : state === 'generated' ? 'generated character voice, approved'
+          : state === 'candidate' ? 'candidate take, not approved'
+          : 'undecided — no take recorded'}`,
         onClick: () => onSelectVoice(i),
       }];
     });
@@ -154,13 +162,16 @@ export function Timeline({
       const to = anchorMs(segment.to.time);
       const creator = layerOwnership.get(segment.layerId) !== 'generated';
       const label = `${segment.actorId} · ${segment.channel === 'part.transform' ? segment.partId : 'root'}`;
+      const isSelected = selectedMotionId === segment.id;
       return {
         key: segment.id,
         leftPct: (from / total) * 100,
         widthPct: Math.max(0.4, ((to - from) / total) * 100),
         top: 3,
         bg: creator ? 'rgba(200,131,74,.20)' : 'rgba(122,143,192,.16)',
-        border: creator ? 'rgba(200,131,74,.65)' : 'rgba(122,143,192,.5)',
+        border: isSelected ? '#e6e3dc' : creator ? 'rgba(200,131,74,.65)' : 'rgba(122,143,192,.5)',
+        shadow: isSelected ? '0 0 0 1px #e6e3dc' : undefined,
+        selected: isSelected,
         stripe: !creator,
         icon: segment.locked ? '🔒' : undefined,
         iconFg: '#a89050',
@@ -168,7 +179,7 @@ export function Timeline({
         fontSize: 9,
         label,
         hint: `${label}\n${creator ? 'creator-authored — survives regeneration' : 'generated — editable, replaced on rerun'}${segment.locked ? '\nlocked' : ''}`,
-        onClick: onSelectMotion,
+        onClick: () => onSelectMotion(segment.id),
       };
     });
 
@@ -261,7 +272,7 @@ export function Timeline({
       { id: 'caption', h: 18, clips: captionClips, keys: [] },
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [beats, castIds.join('|'), dialogue, animation, beatStarts, total, selected]);
+  }, [beats, castIds.join('|'), dialogue, animation, beatStarts, total, selected, selectedMotionId]);
 
   /** Entrances and the button beat, derived straight from the shot list. */
   const markers = useMemo(() => {
@@ -314,6 +325,12 @@ export function Timeline({
   };
 
   const playPct = Math.min(100, (playheadMs / total) * 100);
+  const selectedMotion = selectedMotionId
+    ? animation?.segments.find((segment) => segment.id === selectedMotionId) ?? null
+    : null;
+  const deleteBlocker = selectedMotion && animation
+    ? motionDeletionBlocker(animation, selectedMotion.id)
+    : null;
 
   return (
     <div className="h-[264px] shrink-0 flex flex-col bg-[#22262c] border-t border-edge">
@@ -324,6 +341,17 @@ export function Timeline({
         <ToolChip label="Snap" on={snap} hint="Snap clips to beat boundaries, speech onsets and frames" onClick={onToggleSnap} />
         <ToolChip label="Ripple" hint="Downstream animation follows retimed dialogue — set per line via Follow Performance" />
         <ToolChip label="Waveform" on hint="Dialogue waveforms are drawn in the Perform strip" />
+        {selectedMotion && (
+          <button
+            type="button"
+            disabled={motionBusy || Boolean(deleteBlocker)}
+            title={deleteBlocker ?? `Delete ${selectedMotion.actorId} motion · Delete/Backspace`}
+            onClick={() => onDeleteMotion(selectedMotion.id)}
+            className="h-[19px] px-[7px] rounded-[3px] border border-bad/55 bg-bad/10 text-bad text-[10px] cursor-pointer hover:bg-bad/20 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Delete motion
+          </button>
+        )}
         <div className="flex-1" />
         <Mono className="text-ink-faint">{zoom.toFixed(1)}×</Mono>
         <input
