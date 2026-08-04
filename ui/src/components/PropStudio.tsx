@@ -5,7 +5,7 @@ import type {
 } from '../types.ts';
 import { Badge, Button, Empty, Field, Panel, Select, Spinner, TextInput } from './ui.tsx';
 import { PropCanvas, type Tool } from './PropCanvas.tsx';
-import { ParamControl, ParamEditor, PrimitiveInspector } from './PropInspector.tsx';
+import { InteractionEditor, ParamControl, ParamEditor, PrimitiveInspector } from './PropInspector.tsx';
 
 /**
  * Making a prop.
@@ -45,6 +45,31 @@ function blankDocument(key: string): PropDocument {
 }
 
 const slug = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+/**
+ * Present a format-1 document as primitives.
+ *
+ * A bake writes flat shapes, and the engine reads them as polygons — so the
+ * studio has to as well, or opening a baked prop shows a picture with nothing
+ * behind it. Editing one converts it, which is the honest outcome: it is a
+ * drawing now, and its geometry no longer came only from Blender.
+ */
+function normalise(doc: PropDocument): PropDocument {
+  const views: PropDocument['views'] = {};
+  for (const [name, view] of Object.entries(doc.views)) {
+    views[name] = {
+      primitives: view.primitives ?? (view.shapes ?? []).map((s): Primitive => ({
+        k: 'poly',
+        p: s.p,
+        ...(s.c === undefined ? {} : { c: s.c }),
+        f: s.f ?? null,
+        ...(s.l === undefined ? {} : { l: s.l }),
+        ...(s.e === undefined ? {} : { e: s.e }),
+      })),
+    };
+  }
+  return { ...doc, format: 2, views };
+}
 
 // --- addressing a primitive inside nested repeats --------------------------
 
@@ -148,7 +173,7 @@ export function PropStudio({ open, onCatalogueChanged }: {
     let live = true;
     void api.prop(key).then((detail) => {
       if (!live) return;
-      setDoc(detail.document ?? null);
+      setDoc(detail.document ? normalise(detail.document) : null);
       setReadOnly(!detail.editable);
       setSaved(true);
       setRenames({});
@@ -433,12 +458,30 @@ export function PropStudio({ open, onCatalogueChanged }: {
                   }}
                   onRaise={() => setPrimitives(movePrimitive(primitives, selected!, 1))}
                   onLower={() => setPrimitives(movePrimitive(primitives, selected!, -1))}
+                  onRepeat={() => {
+                    // Step down and to the right by default: visible at once, so
+                    // the count control has something to obviously act on.
+                    const count = doc.params.find((p) => p.type === 'number' && /count|shelves|drawers|steps|rows|panes/i.test(p.key));
+                    setPrimitives(replacePrimitive(primitives, selected!, (p) => ({
+                      k: 'repeat', n: count?.key ?? 4, dx: 0, dy: -70, of: [p],
+                    })));
+                    setSelected([...selected!]);
+                  }}
+                  onUnwrap={() => setPrimitives(replacePrimitive(primitives, selected!, (p) =>
+                    p.k === 'repeat' ? p.of[0] ?? null : p))}
                 />
               ) : (
                 <div className="text-[11px] text-ink-faint">
                   Pick a shape on the canvas, or draw one with the tools above.
                 </div>
               )}
+            </Section>
+
+            <Section title="Being used">
+              <InteractionEditor
+                doc={doc}
+                onChange={(interaction) => mutate((d) => ({ ...d, interaction }))}
+              />
             </Section>
 
             <Section title="Controls">

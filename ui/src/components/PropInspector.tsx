@@ -1,5 +1,5 @@
 import type {
-  Num, Palette, ParamSpec, ParamValue, Primitive, PropDocument,
+  HandleKind, Num, Palette, ParamSpec, ParamValue, Primitive, PropDocument,
 } from '../types.ts';
 import { Button, Field, NumberInput, Select, Slider, TextInput } from './ui.tsx';
 
@@ -48,7 +48,7 @@ function fieldsOf(prim: Primitive): Array<{ key: string; label: string }> {
 }
 
 export function PrimitiveInspector({
-  primitive, params, palette, onChange, onDelete, onRaise, onLower,
+  primitive, params, palette, onChange, onDelete, onRaise, onLower, onRepeat, onUnwrap,
 }: {
   primitive: Primitive;
   params: ParamSpec[];
@@ -57,6 +57,8 @@ export function PrimitiveInspector({
   onDelete: () => void;
   onRaise: () => void;
   onLower: () => void;
+  onRepeat: () => void;
+  onUnwrap: () => void;
 }) {
   const bindable = params.filter((p) => p.type === 'number' || p.type === 'boolean').map((p) => p.key);
   const booleans = params.filter((p) => p.type === 'boolean').map((p) => p.key);
@@ -186,6 +188,22 @@ export function PrimitiveInspector({
           <div className="text-[11px] text-ink-faint -mt-1.5">
             Add a switch parameter to make a shape optional.
           </div>
+        )}
+      </div>
+
+      {/* Shelves, drawers, window panes, fence posts, stair treads: the shape
+          that repeats is drawn once and stepped, so a count can be a control. */}
+      <div className="border-t border-edge mt-3 pt-2.5">
+        {primitive.k === 'repeat' ? (
+          <>
+            <div className="text-[11px] text-ink-faint mb-1.5">
+              Repeats {typeof primitive.n === 'number' ? primitive.n : `“${primitive.n}”`} times.
+              Inside it, <span className="font-mono text-ink-dim">i</span> counts from zero.
+            </div>
+            <Button onClick={onUnwrap}>Stop repeating</Button>
+          </>
+        ) : (
+          <Button onClick={onRepeat}>Repeat this shape…</Button>
         )}
       </div>
     </div>
@@ -368,6 +386,116 @@ export function ParamControl({ spec, value, onChange }: {
     <Field label={spec.label}>
       <NumberInput value={Number(value)} step={spec.step ?? 1} onChange={onChange} />
     </Field>
+  );
+}
+
+const HANDLE_KINDS: Array<{ value: HandleKind; label: string }> = [
+  { value: 'grip', label: 'grip — pick it up' },
+  { value: 'contact', label: 'contact — touch or reach' },
+  { value: 'placement', label: 'placement — put things on' },
+  { value: 'control', label: 'control — operate it' },
+  { value: 'seat', label: 'seat — sit on it' },
+];
+
+/**
+ * Where a character can touch the prop.
+ *
+ * Without bounds and handles a prop is scenery: staging has no way to address
+ * it, so nobody can pick it up, sit on it or set a mug down on it. Everything
+ * here takes an expression too, so a wider desk gets a wider work surface
+ * rather than a reach target that stayed the size it was drawn at.
+ */
+export function InteractionEditor({ doc, onChange }: {
+  doc: PropDocument;
+  onChange: (interaction: PropDocument['interaction']) => void;
+}) {
+  const bindable = doc.params.filter((p) => p.type === 'number').map((p) => p.key);
+  const it = doc.interaction;
+
+  if (!it) {
+    return (
+      <>
+        <div className="text-[11px] text-ink-faint mb-1.5">
+          Nothing can touch this prop yet — it is scenery.
+        </div>
+        <Button
+          onClick={() => onChange({
+            portable: false,
+            bounds: { x: -60, y: -120, width: 120, height: 120 },
+            handles: [],
+          })}
+        >
+          Let characters use it
+        </Button>
+      </>
+    );
+  }
+
+  const patch = (p: Partial<NonNullable<PropDocument['interaction']>>) => onChange({ ...it, ...p });
+
+  return (
+    <>
+      <label className="flex items-center gap-2 mb-2 text-[12px] text-ink-dim cursor-pointer">
+        <input type="checkbox" checked={it.portable} onChange={(e) => patch({ portable: e.target.checked })} />
+        Can be carried
+      </label>
+
+      <div className="grid grid-cols-2 gap-1.5">
+        {(['x', 'y', 'width', 'height'] as const).map((f) => (
+          <NumField
+            key={f}
+            label={f}
+            value={it.bounds[f]}
+            bindable={bindable}
+            onChange={(v) => patch({ bounds: { ...it.bounds, [f]: v ?? 0 } })}
+          />
+        ))}
+      </div>
+
+      {it.handles.map((h, i) => (
+        <div key={i} className="border border-edge rounded p-2 mb-2">
+          <div className="flex gap-1.5 mb-1.5">
+            <TextInput value={h.label} onChange={(label) => patch({ handles: it.handles.map((x, n) => n === i ? { ...x, label } : x) })} />
+            <Button variant="danger" onClick={() => patch({ handles: it.handles.filter((_, n) => n !== i) })}>×</Button>
+          </div>
+          <Select
+            value={h.kind}
+            options={HANDLE_KINDS}
+            className="w-full mb-1.5"
+            onChange={(kind) => patch({ handles: it.handles.map((x, n) => n === i ? { ...x, kind: kind as HandleKind } : x) })}
+          />
+          <div className="grid grid-cols-3 gap-1.5">
+            {(['x', 'y', 'radius'] as const).map((f) => (
+              <NumField
+                key={f}
+                label={f}
+                value={h[f]}
+                bindable={bindable}
+                onChange={(v) => patch({ handles: it.handles.map((x, n) => n === i ? { ...x, [f]: v ?? 0 } : x) })}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+
+      <div className="flex gap-1.5">
+        <Button
+          onClick={() => patch({
+            handles: [...it.handles, {
+              id: `handle-${it.handles.length + 1}`,
+              label: 'Handle',
+              kind: 'contact',
+              x: 0,
+              y: -60,
+              radius: 30,
+            }],
+          })}
+        >
+          + Add a handle
+        </Button>
+        <Button variant="danger" onClick={() => onChange(undefined)}>Remove</Button>
+      </div>
+    </>
   );
 }
 

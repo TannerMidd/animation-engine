@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { PropDocument, propFromDocument, countView, BAKE_BUDGET, PALETTE_SLOTS } from '../src/sets/props/document.ts';
+import {
+  PropDocument, propFromDocument, documentBoxes, countView, BAKE_BUDGET, PALETTE_SLOTS,
+} from '../src/sets/props/document.ts';
 import { rect, ellipse, poly, line, type PropContext } from '../src/sets/props/types.ts';
 import { getPalette, PALETTE_NAMES } from '../src/sets/palettes.ts';
 import { geometryFor, type ParamValue } from '../src/sets/schema.ts';
@@ -451,6 +453,103 @@ describe('validation', () => {
   it('counts a repeat against the budget rather than treating it as free', () => {
     const view = { primitives: [{ k: 'repeat' as const, n: 10, of: [{ k: 'rect' as const, f: 'wood', x: 0, y: 0, w: 1, h: 1 }] }] };
     expect(countView(view as never).shapes).toBe(10);
+  });
+});
+
+describe('measuring where the primitives landed', () => {
+  const boxes = (overrides: Record<string, unknown>, params: Record<string, ParamValue> = {}) =>
+    documentBoxes(PropDocument.parse(doc(overrides)), params);
+
+  it('reports the authored geometry, so a handle sits where the shape was drawn', () => {
+    // Not the drawn geometry: the wobble pushes outlines a few units past this,
+    // and a handle that chased the wobble would sit somewhere nobody put anything.
+    expect(boxes({})).toEqual([
+      { path: [0], kind: 'rect', x: -40, y: -60, width: 80, height: 60, copy: [] },
+    ]);
+  });
+
+  it('measures each primitive kind by what it covers', () => {
+    const [ellipse, line, poly] = boxes({
+      views: {
+        default: {
+          primitives: [
+            { k: 'ellipse', f: 'wood', cx: 10, cy: -20, rx: 30, ry: 15 },
+            { k: 'line', f: 'line', x1: 40, y1: 0, x2: -10, y2: -50 },
+            { k: 'poly', f: 'wood', p: [0, 0, 60, -10, 20, -70] },
+          ],
+        },
+      },
+    });
+    expect(ellipse).toMatchObject({ x: -20, y: -35, width: 60, height: 30 });
+    expect(line).toMatchObject({ x: -10, y: -50, width: 50, height: 50 });
+    expect(poly).toMatchObject({ x: 0, y: -70, width: 60, height: 70 });
+  });
+
+  it('follows expressions, so the boxes move when the params do', () => {
+    const parametric = {
+      params: [{ key: 'width', label: 'W', type: 'number', default: 100, min: 10, max: 400 }],
+      views: { default: { primitives: [{ k: 'rect', f: 'wood', x: '-width / 2', y: -10, w: 'width', h: 10 }] } },
+    };
+    expect(boxes(parametric)[0]).toMatchObject({ x: -50, width: 100 });
+    expect(boxes(parametric, { width: 300 })[0]).toMatchObject({ x: -150, width: 300 });
+  });
+
+  it('gives every expansion of a repeat its own box, under one authored address', () => {
+    // The canvas needs a handle per copy but a selection per shape: clicking the
+    // third shelf must select the shelf, not a third of one.
+    const shelves = boxes({
+      params: [{ key: 'shelves', label: 'S', type: 'number', default: 3 }],
+      views: {
+        default: {
+          primitives: [{
+            k: 'repeat', n: 'shelves', dy: -70,
+            of: [{ k: 'rect', f: 'wood', x: -90, y: -12, w: 180, h: 12 }],
+          }],
+        },
+      },
+    });
+    expect(shelves).toHaveLength(3);
+    expect(shelves.map((b) => b.y)).toEqual([-12, -82, -152]);
+    expect(new Set(shelves.map((b) => b.path.join('.'))).size).toBe(1);
+    expect(shelves.map((b) => b.copy)).toEqual([[0], [1], [2]]);
+  });
+
+  it('leaves out what the params have hidden', () => {
+    const lamp = {
+      params: [{ key: 'on', label: 'Lit', type: 'boolean', default: true }],
+      views: {
+        default: {
+          primitives: [
+            { k: 'rect', f: 'metal', x: -6, y: -40, w: 12, h: 40 },
+            { k: 'ellipse', f: 'light', cx: 0, cy: -44, rx: 20, ry: 10, show: 'on' },
+          ],
+        },
+      },
+    };
+    expect(boxes(lamp, { on: true })).toHaveLength(2);
+    expect(boxes(lamp, { on: false })).toHaveLength(1);
+  });
+
+  it('caps a runaway repeat rather than handing the canvas a hundred thousand targets', () => {
+    const many = boxes({
+      params: [{ key: 'n', label: 'N', type: 'number', default: 100000 }],
+      views: {
+        default: {
+          primitives: [{ k: 'repeat', n: 'n', dx: 1, of: [{ k: 'rect', f: 'wood', x: 0, y: 0, w: 1, h: 1 }] }],
+        },
+      },
+    });
+    expect(many.length).toBeLessThanOrEqual(400);
+  });
+
+  it('measures a format-1 baked shape as the polygon it becomes', () => {
+    const upgraded = documentBoxes(PropDocument.parse(doc({
+      format: 1,
+      views: { front: { shapes: [{ f: 'wood', l: 1, c: 1, p: [-60, 0, 60, 0, 60, -90, -60, -90] }] } },
+    })));
+    expect(upgraded).toEqual([
+      { path: [0], kind: 'poly', x: -60, y: -90, width: 120, height: 90, copy: [] },
+    ]);
   });
 });
 
