@@ -1,0 +1,557 @@
+{
+  "name": "mark",
+  "charId": "72c86d60f0",
+  "locks": [],
+  "identity": {
+    "id": "house",
+    "version": "1.0.0",
+    "hash": "845ceeea2d52"
+  },
+  "canvas": {
+    "width": 200,
+    "height": 400
+  },
+  "anchor": [
+    100,
+    400
+  ],
+  "focus": [
+    100,
+    77.68603446853496
+  ],
+  "look": {
+    "build": "squat",
+    "head": "square",
+    "nose": "hook",
+    "ears": "small",
+    "hair": "crop",
+    "facialHair": "moustache",
+    "glasses": "halfrim",
+    "eyes": "oval",
+    "brows": "thin",
+    "skin": "#d9a066",
+    "shirt": "#996b5b",
+    "hairColour": "#767268",
+    "trousers": "#3a3f4a",
+    "line": "#1a1a1a",
+    "headSize": 0.9819597096927465,
+    "bodyWidth": 1.0700279160588981,
+    "bodyHeight": 1.0425434257858432,
+    "limbLength": 0.9663916748203337,
+    "limbWidth": 1.0844965973682703,
+    "eyeSize": 1.1396660897880793,
+    "eyeSpread": 1.0828549322206527
+  },
+  "outfit": {
+    "sleeves": "long",
+    "collar": "flat",
+    "neckwear": "lanyard",
+    "pattern": "solid",
+    "hat": "none",
+    "shoes": "round",
+    "accent": "#3f6b6b"
+  },
+  "parts": [
+    {
+      "id": "torso",
+      "parent": null,
+      "pivot": [
+        100,
+        218.05506407674972
+      ],
+      "z": 0
+    },
+    {
+      "id": "leg_L",
+      "parent": "torso",
+      "pivot": [
+        73.71840233692777,
+        218.05506407674972
+      ],
+      "z": -1
+    },
+    {
+      "id": "leg_R",
+      "parent": "torso",
+      "pivot": [
+        126.28159766307223,
+        218.05506407674972
+      ],
+      "z": -1
+    },
+    {
+      "id": "arm_L_upper",
+      "parent": "torso",
+      "pivot": [
+        43.424767468875636,
+        158.17602411147502
+      ],
+      "z": 1
+    },
+    {
+      "id": "arm_L_fore",
+      "parent": "arm_L_upper",
+      "pivot": [
+        43.424767468875636,
+        197.72077144512306
+      ],
+      "z": 1
+    },
+    {
+      "id": "arm_R_upper",
+      "parent": "torso",
+      "pivot": [
+        156.57523253112436,
+        158.17602411147502
+      ],
+      "z": 1
+    },
+    {
+      "id": "arm_R_fore",
+      "parent": "arm_R_upper",
+      "pivot": [
+        156.57523253112436,
+        197.72077144512306
+      ],
+      "z": 1
+    },
+    {
+      "id": "head",
+      "parent": "torso",
+      "pivot": [
+        100,
+        134.17602411147502
+      ],
+      "z": 2
+    }
+  ],
+  "swapSets": [
+    {
+      "slot": "mouth",
+      "variants": [
+        "mouth_A",
+        "mouth_B",
+        "mouth_C",
+        "mouth_D",
+        "mouth_E",
+        "mouth_F",
+        "mouth_G",
+        "mouth_H",
+        "mouth_X",
+        "mouth_smile",
+        "mouth_frown",
+        "mouth_smirk",
+        "mouth_grimace",
+        "mouth_oh",
+        "mouth_flat"
+      ],
+      "default": "mouth_X"
+    },
+    {
+      "slot": "eyes",
+      "variants": [
+        "eyes_open",
+        "eyes_half",
+        "eyes_wide",
+        "eyes_closed",
+        "eyes_squint",
+        "eyes_side"
+      ],
+      "default": "eyes_open"
+    },
+    {
+      "slot": "brows",
+      "variants": [
+        "brows_neutral",
+        "brows_flat",
+        "brows_angry",
+        "brows_raised",
+        "brows_sad",
+        "brows_confused",
+        "brows_worried",
+        "brows_single"
+      ],
+      "default": "brows_neutral"
+    }
+  ],
+  "poses": [
+    {
+      "name": "IDLE",
+      "parts": {
+        "arm_L_upper": {
+          "rot": 6,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        },
+        "arm_R_upper": {
+          "rot": -6,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        },
+        "arm_L_fore": {
+          "rot": 4,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        },
+        "arm_R_fore": {
+          "rot": -4,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        }
+      }
+    },
+    {
+      "name": "POINT",
+      "parts": {
+        "arm_R_upper": {
+          "rot": -68,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        },
+        "arm_R_fore": {
+          "rot": -34,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        },
+        "arm_L_upper": {
+          "rot": 8,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        },
+        "arm_L_fore": {
+          "rot": 6,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        }
+      }
+    },
+    {
+      "name": "SHRUG",
+      "parts": {
+        "arm_L_upper": {
+          "rot": 38,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        },
+        "arm_R_upper": {
+          "rot": -38,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        },
+        "arm_L_fore": {
+          "rot": 58,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        },
+        "arm_R_fore": {
+          "rot": -58,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        },
+        "head": {
+          "rot": 0,
+          "x": 0,
+          "y": 4,
+          "scale": 1
+        }
+      }
+    },
+    {
+      "name": "ARMS_UP",
+      "parts": {
+        "arm_L_upper": {
+          "rot": 148,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        },
+        "arm_R_upper": {
+          "rot": -148,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        },
+        "arm_L_fore": {
+          "rot": 18,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        },
+        "arm_R_fore": {
+          "rot": -18,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        }
+      }
+    },
+    {
+      "name": "LEAN_IN",
+      "parts": {
+        "torso": {
+          "rot": -7,
+          "x": 0,
+          "y": 6,
+          "scale": 1
+        },
+        "head": {
+          "rot": 4,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        },
+        "arm_L_upper": {
+          "rot": 14,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        },
+        "arm_R_upper": {
+          "rot": -10,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        }
+      }
+    },
+    {
+      "name": "TALK_A",
+      "parts": {
+        "arm_L_upper": {
+          "rot": 16,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        },
+        "arm_L_fore": {
+          "rot": 38,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        },
+        "arm_R_upper": {
+          "rot": -8,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        },
+        "arm_R_fore": {
+          "rot": -12,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        }
+      }
+    },
+    {
+      "name": "TALK_B",
+      "parts": {
+        "arm_L_upper": {
+          "rot": 9,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        },
+        "arm_L_fore": {
+          "rot": 20,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        },
+        "arm_R_upper": {
+          "rot": -18,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        },
+        "arm_R_fore": {
+          "rot": -42,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        }
+      }
+    }
+  ],
+  "expressions": [
+    {
+      "name": "NEUTRAL",
+      "swaps": {
+        "eyes": "eyes_open",
+        "brows": "brows_neutral",
+        "mouth": "mouth_X"
+      },
+      "parts": {},
+      "suppressBlink": false
+    },
+    {
+      "name": "DEADPAN",
+      "swaps": {
+        "eyes": "eyes_half",
+        "brows": "brows_flat",
+        "mouth": "mouth_X"
+      },
+      "parts": {},
+      "suppressBlink": false
+    },
+    {
+      "name": "ANGRY",
+      "swaps": {
+        "eyes": "eyes_squint",
+        "brows": "brows_angry",
+        "mouth": "mouth_grimace"
+      },
+      "parts": {},
+      "suppressBlink": false
+    },
+    {
+      "name": "SHOCKED",
+      "swaps": {
+        "eyes": "eyes_wide",
+        "brows": "brows_raised",
+        "mouth": "mouth_oh"
+      },
+      "parts": {},
+      "suppressBlink": true
+    },
+    {
+      "name": "SMUG",
+      "swaps": {
+        "eyes": "eyes_half",
+        "brows": "brows_single",
+        "mouth": "mouth_smirk"
+      },
+      "parts": {
+        "head": {
+          "rot": -4,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        }
+      },
+      "suppressBlink": false
+    },
+    {
+      "name": "SAD",
+      "swaps": {
+        "eyes": "eyes_half",
+        "brows": "brows_sad",
+        "mouth": "mouth_frown"
+      },
+      "parts": {
+        "head": {
+          "rot": 0,
+          "x": 0,
+          "y": 3,
+          "scale": 1
+        }
+      },
+      "suppressBlink": false
+    },
+    {
+      "name": "CONFUSED",
+      "swaps": {
+        "eyes": "eyes_open",
+        "brows": "brows_confused",
+        "mouth": "mouth_X"
+      },
+      "parts": {
+        "head": {
+          "rot": 7,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        }
+      },
+      "suppressBlink": false
+    },
+    {
+      "name": "JOY",
+      "swaps": {
+        "eyes": "eyes_squint",
+        "brows": "brows_raised",
+        "mouth": "mouth_smile"
+      },
+      "parts": {
+        "head": {
+          "rot": 0,
+          "x": 0,
+          "y": -2,
+          "scale": 1
+        }
+      },
+      "suppressBlink": false
+    },
+    {
+      "name": "SUSPICIOUS",
+      "swaps": {
+        "eyes": "eyes_side",
+        "brows": "brows_single",
+        "mouth": "mouth_flat"
+      },
+      "parts": {
+        "head": {
+          "rot": -3,
+          "x": 0,
+          "y": 0,
+          "scale": 1
+        }
+      },
+      "suppressBlink": false
+    },
+    {
+      "name": "EXHAUSTED",
+      "swaps": {
+        "eyes": "eyes_half",
+        "brows": "brows_worried",
+        "mouth": "mouth_frown"
+      },
+      "parts": {
+        "head": {
+          "rot": 2,
+          "x": 0,
+          "y": 5,
+          "scale": 1
+        }
+      },
+      "suppressBlink": false
+    }
+  ],
+  "idle": {
+    "breathAmplitude": 3.7,
+    "breathPeriod": 3.7,
+    "blinkRateHz": 0.31,
+    "blinkDuration": 0.12
+  },
+  "voice": "Zira",
+  "voiceRate": -2,
+  "voiceRef": "mark.ref.wav",
+  "voiceProvenance": {
+    "source": "minted",
+    "seed": 345265923,
+    "hash": "bec665b8d7e58957dd5b999d0954fac9eaa45d06",
+    "bankVoice": "am_puck"
+  },
+  "acting": {
+    "reactionMs": 373,
+    "gestureBias": 1.35,
+    "fidgetAmp": 1.9
+  },
+  "voicePersona": {
+    "energy": 1.11,
+    "pace": 1.12
+  },
+  "svg": "mark.svg"
+}

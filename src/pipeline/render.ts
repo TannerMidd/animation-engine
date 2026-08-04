@@ -105,6 +105,7 @@ export async function renderScene(
   report({ stage: 'audio', done: 0, total: 1 });
   const audio = await mixProductionAudio(scene, shots, compiled.audio, compiled.durationMs, {
     stageActions: compiled.stageActions,
+    engine: opts.engine,
     guideMuteCueIds: Object.fromEntries(shots.cast.map((member) => [
       member.id,
       (dialogue?.cues ?? []).filter((cue) => cue.speaker === member.id && !cue.locked).map((cue) => cue.id),

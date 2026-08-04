@@ -18,6 +18,19 @@ export interface SynthRequest {
   exaggeration: number;
   /** Chatterbox classifier-free guidance. Lower is slower and more deliberate. */
   cfgWeight: number;
+  /**
+   * Sampling temperature. Scales expressive variance: calm expressions stay
+   * controlled at low values, hot ones get room to move at high ones.
+   */
+  temperature: number;
+  /**
+   * Chatterbox token-sampling knobs, pinned by the orchestrator rather than
+   * left to the library's defaults — an upstream default change must never
+   * silently change rendered audio out from under the cache.
+   */
+  repetitionPenalty: number;
+  minP: number;
+  topP: number;
   /** Reference clip to clone the voice from, if the character has one. */
   ref: string | null;
   seed: number;

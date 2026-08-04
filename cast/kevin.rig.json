@@ -540,8 +540,9 @@
   "voiceRef": "kevin.ref.wav",
   "voiceProvenance": {
     "source": "minted",
-    "seed": 956588265,
-    "hash": "ce0a35531941cc2f88f3b0fe5abd47b7baa1b093"
+    "seed": 821349357,
+    "hash": "ddf34bbe2a819a8df900efc02b8244a92f80eda0",
+    "bankVoice": "am_fenrir"
   },
   "acting": {
     "reactionMs": 184,

@@ -1,8 +1,11 @@
-import { useMemo } from 'react';
-import type { DialogueDocument, ProductionPreflightReport, ShotList } from '../types.ts';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { api, fmtMs } from '../api.ts';
+import type {
+  DialogueDocument, ProductionPreflightNote, ProductionPreflightReport, SceneSoundInfo, ShotList, StemId,
+} from '../types.ts';
 import { ScriptEditor } from '../components/ScriptEditor.tsx';
-import { Dot } from './chrome.tsx';
-import { cueApproval, cueUndecided, speakerColour, type Mode } from './lib.ts';
+import { Dot, Spinner } from './chrome.tsx';
+import { cueApproval, cueUndecided, humanHint, speakerColour, type Mode } from './lib.ts';
 
 /** Sub-pane widths per mode, from the design. */
 export function subPaneWidth(mode: Mode): number {
@@ -129,33 +132,15 @@ export interface ReadinessGroup {
     levelFg: string;
     msg: string;
     code: string;
+    /** Set when the note names something the editor can select. */
+    targeted: boolean;
     go?: () => void;
   }>;
 }
 
-/**
- * Plain-language repair hints per preflight code. The server states what is
- * wrong; this says what to actually do about it, in creator words.
- */
-const HUMAN_HINTS: Array<{ test: RegExp; hint: string }> = [
-  { test: /^dialogue-selection-unresolved/, hint: 'This line has no audio chosen. In Perform: record a take, pick an existing one, or press “Use character voice” to approve the generated voice.' },
-  { test: /^dialogue-unapproved/, hint: 'Approve each line once you are happy with its audio — the big button in the Voice tab approves and locks in one step.' },
-  { test: /^dialogue-unlocked/, hint: 'Locking freezes a line against reruns. “Approve and lock performance” in the Voice tab does both.' },
-  { test: /^performance-consent-missing/, hint: 'Your recordings need a rights record. In the Voice tab: tick the confirmation under Voice and performance rights and press Register permission — one self-owned record covers your recordings, including ones already made.' },
-  { test: /^voice-reference-draft-only/, hint: 'This character speaks with a machine-invented voice and some lines have no decision yet. Approve the generated voice per line, approve a conversion of your own take into it, or give the character a recorded reference in the cast editor.' },
-  { test: /^voice-reference-minted-in-use/, hint: 'This character speaks with a machine-invented voice you approved — as generated lines, or as your performance converted into it. Audition it, then acknowledge this warning in the readiness report.' },
-  { test: /^voice-reference-missing/, hint: 'Nothing to do — a voice is minted automatically the next time Voices runs.' },
-  { test: /^voice-render-qc-warning/, hint: 'A converted line passed the automatic checks but nothing verified the words. Use A / B in the Perform strip to hear your recording against the character voice, then acknowledge this warning in the readiness report.' },
-  { test: /^soundtrack-stale/, hint: 'The mixed audio predates your latest edits. Run Voices to rebuild it.' },
-  { test: /^render-stale/, hint: 'The last video predates your latest edits. Re-render once the blockers clear.' },
-  { test: /^action-unstructured|^staging-/, hint: 'Select the beat in Direct and stage it with structured actions in the inspector.' },
-  { test: /^capture-qc-rejected|^scene-run-segment-qc-rejected/, hint: 'The selected recording failed capture checks (usually silence or clipping). Select a different take, re-record, or discard it.' },
-  { test: /^dialogue-take-stale|^dialogue-cue-stale/, hint: 'The script line changed after this was recorded. Re-record the line, or revert the script text.' },
-];
-
-export function humanHint(code: string): string | null {
-  return HUMAN_HINTS.find((h) => h.test.test(code))?.hint ?? null;
-}
+// Repair hints live in lib.ts so a test can hold them against the engine's
+// code list without pulling React into the test.
+export { humanHint };
 
 const GROUPS: Array<{ name: string; test: RegExp }> = [
   { name: 'Script', test: /action|script|beat|parse/ },
@@ -169,7 +154,7 @@ const GROUPS: Array<{ name: string; test: RegExp }> = [
 
 export function groupPreflight(
   report: ProductionPreflightReport | null,
-  onJump?: (code: string) => void,
+  onJump?: (note: ProductionPreflightNote) => void,
 ): ReadinessGroup[] {
   if (!report) return [];
   const buckets = new Map<string, ReadinessGroup['items']>();
@@ -181,7 +166,8 @@ export function groupPreflight(
       levelFg: note.level === 'error' ? '#c8595a' : note.level === 'warn' ? '#c8834a' : '#7a8fc0',
       msg: note.message,
       code: note.code,
-      go: onJump ? () => onJump(note.code) : undefined,
+      targeted: Boolean(note.target),
+      go: onJump ? () => onJump(note) : undefined,
     });
     buckets.set(group, list);
   }
@@ -217,7 +203,7 @@ export function ReadinessGroupCard({ group, dark }: { group: ReadinessGroup; dar
           key={`${item.code}-${i}`}
           type="button"
           onClick={item.go}
-          title={item.go ? 'Jump to the affected mode' : undefined}
+          title={!item.go ? undefined : item.targeted ? 'Select the line, clip or asset this is about' : 'Jump to the affected mode'}
           className="w-full flex gap-[7px] items-start px-2 py-1.5 border-0 border-t border-t-[#262b32] bg-transparent text-left cursor-pointer hover:bg-[#282d34]"
         >
           <span
@@ -243,7 +229,7 @@ export function ReadinessPane({
   report, onJump,
 }: {
   report: ProductionPreflightReport | null;
-  onJump: (code: string) => void;
+  onJump: (note: ProductionPreflightNote) => void;
 }) {
   const groups = groupPreflight(report, onJump);
   const errors = report?.notes.filter((n) => n.level === 'error').length ?? 0;
@@ -286,42 +272,259 @@ function StatCell({ n, label, color }: { n: number; label: string; color: string
   );
 }
 
-/** Sound: the proposed mix surface. Explicitly designed ahead of the engine. */
-export function MixerPane() {
-  const strips = [
-    { name: 'Dialogue', color: '#6f9b5a', rest: 22, db: '−6.0 dB' },
-    { name: 'Foley', color: '#5e8f8a', rest: 48, db: '−15.5 dB' },
-    { name: 'Room tone', color: '#5e6874', rest: 72, db: '−28.0 dB' },
-    { name: 'Music', color: '#8f7fb0', rest: 88, db: '−34.0 dB' },
-    { name: 'Programme', color: '#c8834a', rest: 16, db: '−14.1 LUFS' },
-  ];
+// --- sound: the production stems ------------------------------------------
+
+const STEM_META: Record<StemId, { label: string; color: string; blurb: string }> = {
+  dialogue: { label: 'Dialogue', color: '#6f9b5a', blurb: 'every selected take and generated line, levelled per speaker' },
+  foley: { label: 'Foley', color: '#5e8f8a', blurb: 'deterministic one-shots derived from staged actions' },
+  ambience: { label: 'Room tone', color: '#5e6874', blurb: 'the set’s acoustic bed, from the identity profile' },
+  stings: { label: 'Stings', color: '#8f7fb0', blurb: 'title and end card music, seeded from the identity' },
+};
+
+/**
+ * Sound: the production stems as they stand on disk.
+ *
+ * The mixer writes dialogue, Foley, room tone and stings beside the master in
+ * one pass; this pane plays them together with per-stem gain, solo and mute —
+ * client-side monitoring only, since the master on disk is the deliverable.
+ */
+export function MixerPane({
+  scene, sound, loading, rebuilding, onRebuild,
+}: {
+  scene: string;
+  sound: SceneSoundInfo | null;
+  loading: boolean;
+  rebuilding: boolean;
+  onRebuild: () => void;
+}) {
+  const [playing, setPlaying] = useState(false);
+  const [gains, setGains] = useState<Record<StemId, number>>({ dialogue: 1, ambience: 1, foley: 1, stings: 1 });
+  const [muted, setMuted] = useState<Record<StemId, boolean>>({ dialogue: false, ambience: false, foley: false, stings: false });
+  const [solo, setSolo] = useState<StemId | null>(null);
+  const players = useRef(new Map<StemId, HTMLAudioElement>());
+
+  const playable = Boolean(sound?.available && sound.current);
+  const stems = (sound?.stems ?? []).filter((stem) => stem.exists);
+
+  /** A stem is audible when not muted and either nothing or itself is soloed. */
+  const audible = (id: StemId) => !muted[id] && (solo === null || solo === id);
+
+  const applyVolumes = (nextGains = gains, nextMuted = muted, nextSolo = solo) => {
+    for (const [id, el] of players.current) {
+      const on = !nextMuted[id] && (nextSolo === null || nextSolo === id);
+      el.volume = on ? Math.min(1, nextGains[id]) : 0;
+    }
+  };
+
+  const stopAll = () => {
+    for (const el of players.current.values()) {
+      el.pause();
+      el.currentTime = 0;
+    }
+    setPlaying(false);
+  };
+
+  const playAll = () => {
+    applyVolumes();
+    for (const el of players.current.values()) {
+      el.currentTime = 0;
+      void el.play().catch(() => {});
+    }
+    setPlaying(true);
+  };
+
+  // Stems change identity when the scene or mix does; stale elements must not
+  // keep playing an old room.
+  useEffect(() => stopAll, [scene, sound?.durationMs]);
+
   return (
     <>
-      <SubPaneHeader title="Mix" meta="48 kHz · stereo" />
+      <SubPaneHeader
+        title="Mix"
+        meta={sound ? `${sound.engine}${sound.durationMs ? ` · ${fmtMs(sound.durationMs)}` : ''}` : '—'}
+      />
       <div className="flex-1 min-h-0 overflow-y-auto px-[9px] py-2.5 pb-4 flex flex-col gap-2">
-        <div className="border border-gen/45 bg-gen/10 rounded-[3px] px-[9px] py-[7px] text-[11px] text-[#a8b6d4] leading-[1.5]">
-          Designed ahead of the engine. Mixing, stems and Foley run in the CLI render today — this pane is the proposed surface, not a shipped one.
-        </div>
-        {strips.map((strip) => (
-          <div key={strip.name} className="flex items-center gap-2 px-2 py-[7px] border border-[#2f353d] rounded-[3px] bg-[#22262c]">
-            <span className="w-[3px] h-[26px] rounded-px shrink-0" style={{ background: strip.color }} />
-            <span className="w-[74px] shrink-0 text-[10px] tracking-[.05em] uppercase text-ink-dim">{strip.name}</span>
-            <span className="flex-1 h-1.5 rounded-[3px] bg-deep overflow-hidden relative block">
-              <span className="absolute inset-y-0 left-0" style={{ right: `${strip.rest}%`, background: strip.color }} />
-            </span>
-            <span className="font-mono text-[10px] text-ink-faint w-[52px] text-right shrink-0">{strip.db}</span>
+        {loading && !sound && (
+          <div className="py-6 text-center text-[11px] text-ink-ghost"><Spinner /> reading the mix…</div>
+        )}
+
+        {sound && !sound.available && (
+          <div className="border border-gen/45 bg-gen/10 rounded-[3px] px-[9px] py-[7px] text-[11px] text-[#a8b6d4] leading-[1.5]">
+            No stems yet. Run Voices — the mix writes dialogue, Foley, room tone and stings beside the master in one pass.
           </div>
-        ))}
-        <div className="flex gap-1.5 mt-0.5">
-          <div className="flex-1 border border-[#2f353d] rounded-[3px] px-2 py-1.5 bg-[#22262c]">
-            <div className="text-[9px] tracking-[.07em] uppercase text-ink-faint">integrated</div>
-            <div className="font-mono text-[14px] text-good mt-[2px]">−14.1 LUFS</div>
+        )}
+        {sound?.available && !sound.current && (
+          <div className="border border-accent/45 bg-accent/10 rounded-[3px] px-[9px] py-[7px] text-[11px] text-[#e0b489] leading-[1.5] flex items-center gap-2">
+            <span className="flex-1">The stems predate the current scene — the server will not play stale audio.</span>
+            <button
+              type="button"
+              onClick={onRebuild}
+              disabled={rebuilding}
+              className="h-[22px] px-2 rounded-[3px] border border-accent bg-accent/20 text-accent text-[10.5px] cursor-pointer hover:bg-accent/30 disabled:opacity-50 shrink-0 inline-flex items-center gap-1.5"
+            >
+              {rebuilding ? <Spinner /> : null}
+              Rebuild stems
+            </button>
           </div>
-          <div className="flex-1 border border-[#2f353d] rounded-[3px] px-2 py-1.5 bg-[#22262c]">
-            <div className="text-[9px] tracking-[.07em] uppercase text-ink-faint">true peak</div>
-            <div className="font-mono text-[14px] text-good mt-[2px]">−1.4 dBTP</div>
+        )}
+
+        {playable && stems.length > 0 && (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => (playing ? stopAll() : playAll())}
+              className={`h-6 px-3 rounded-[3px] border text-[11px] font-semibold cursor-pointer ${
+                playing ? 'bg-bad/20 border-bad text-[#e0a0a1]' : 'bg-accent border-accent text-stage'
+              }`}
+            >
+              {playing ? '■ Stop' : '▶ Play stems'}
+            </button>
+            <span className="text-[10px] text-ink-faint">gain, solo and mute are monitoring only — the master on disk is untouched</span>
           </div>
-        </div>
+        )}
+
+        {stems.map((stem) => {
+          const meta = STEM_META[stem.id];
+          const on = audible(stem.id);
+          return (
+            <div key={stem.id} className="px-2 py-[7px] border border-[#2f353d] rounded-[3px] bg-[#22262c] flex flex-col gap-1">
+              <div className="flex items-center gap-2">
+                <span className="w-[3px] h-[22px] rounded-px shrink-0" style={{ background: meta.color, opacity: on ? 1 : 0.35 }} />
+                <span className="w-[74px] shrink-0 text-[10px] tracking-[.05em] uppercase" style={{ color: on ? '#9aa1ab' : '#5d656e' }}>
+                  {meta.label}
+                </span>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={gains[stem.id]}
+                  onChange={(e) => {
+                    const next = { ...gains, [stem.id]: Number(e.target.value) };
+                    setGains(next);
+                    applyVolumes(next);
+                  }}
+                  className="flex-1 h-1 cursor-pointer"
+                  style={{ accentColor: meta.color }}
+                />
+                <button
+                  type="button"
+                  title="Solo this stem"
+                  onClick={() => {
+                    const next = solo === stem.id ? null : stem.id;
+                    setSolo(next);
+                    applyVolumes(gains, muted, next);
+                  }}
+                  className={`w-[20px] h-[18px] rounded-[2px] border text-[9px] cursor-pointer ${
+                    solo === stem.id ? 'border-accent bg-accent/25 text-accent' : 'border-edge text-ink-faint hover:text-ink'
+                  }`}
+                >
+                  S
+                </button>
+                <button
+                  type="button"
+                  title="Mute this stem"
+                  onClick={() => {
+                    const next = { ...muted, [stem.id]: !muted[stem.id] };
+                    setMuted(next);
+                    applyVolumes(gains, next);
+                  }}
+                  className={`w-[20px] h-[18px] rounded-[2px] border text-[9px] cursor-pointer ${
+                    muted[stem.id] ? 'border-bad/60 bg-bad/20 text-bad' : 'border-edge text-ink-faint hover:text-ink'
+                  }`}
+                >
+                  M
+                </button>
+              </div>
+              <div className="text-[9.5px] text-ink-ghost pl-[85px] leading-[1.35]">{meta.blurb}</div>
+              {playable && (
+                <audio
+                  ref={(el) => {
+                    if (el) players.current.set(stem.id, el);
+                    else players.current.delete(stem.id);
+                  }}
+                  src={api.stemUrl(scene, stem.id)}
+                  preload="none"
+                  onEnded={stem.id === 'dialogue' ? () => setPlaying(false) : undefined}
+                  className="hidden"
+                />
+              )}
+            </div>
+          );
+        })}
+
+        {sound?.quality && (
+          <div className="flex gap-1.5 mt-0.5">
+            <div
+              className="flex-1 border rounded-[3px] px-2 py-1.5"
+              style={{
+                borderColor: sound.quality.loudnessPassed ? '#3a4a38' : 'rgba(200,89,90,.5)',
+                background: '#22262c',
+              }}
+            >
+              <div className="text-[9px] tracking-[.07em] uppercase text-ink-faint">integrated</div>
+              <div className={`font-mono text-[14px] mt-[2px] ${sound.quality.loudnessPassed ? 'text-good' : 'text-bad'}`}>
+                {sound.quality.integratedLufs === null ? 'silence' : `${sound.quality.integratedLufs.toFixed(1)} LUFS`}
+              </div>
+              <div className="text-[9px] text-ink-ghost">target {sound.quality.targetIntegratedLufs?.toFixed(0) ?? '—'}</div>
+            </div>
+            <div
+              className="flex-1 border rounded-[3px] px-2 py-1.5"
+              style={{
+                borderColor: sound.quality.truePeakPassed ? '#3a4a38' : 'rgba(200,89,90,.5)',
+                background: '#22262c',
+              }}
+            >
+              <div className="text-[9px] tracking-[.07em] uppercase text-ink-faint">true peak</div>
+              <div className={`font-mono text-[14px] mt-[2px] ${sound.quality.truePeakPassed ? 'text-good' : 'text-bad'}`}>
+                {sound.quality.truePeakDbtp === null ? 'silence' : `${sound.quality.truePeakDbtp.toFixed(1)} dBTP`}
+              </div>
+              <div className="text-[9px] text-ink-ghost">ceiling {sound.quality.truePeakCeilingDbtp?.toFixed(1) ?? '—'}</div>
+            </div>
+          </div>
+        )}
+
+        {sound && (
+          <div className="px-2 py-[7px] border border-[#2f353d] rounded-[3px] bg-[#22262c]">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] tracking-[.05em] uppercase text-ink-dim">Room tone</span>
+              <div className="flex-1" />
+              <span className="font-mono text-[10px] text-ink-faint">
+                {sound.ambience.enabled ? `${sound.ambience.profile} · ${sound.ambience.levelDb.toFixed(0)} dB` : 'off (identity)'}
+              </span>
+            </div>
+            <div className="text-[9.5px] text-ink-ghost leading-[1.4] mt-[2px]">
+              The acoustic profile follows the scene's set through the identity profile — change the set in the Scene tab,
+              or the profile's ambience settings, and rebuild.
+            </div>
+          </div>
+        )}
+
+        {sound && sound.foley.count > 0 && (
+          <div className="border border-[#2f353d] rounded-[3px] bg-[#22262c] overflow-hidden">
+            <div className="h-6 flex items-center gap-2 px-2 border-b border-[#2f353d]">
+              <span className="text-[10px] tracking-[.05em] uppercase text-ink-dim">Foley events</span>
+              <div className="flex-1" />
+              <span className="font-mono text-[9px] text-ink-ghost">{sound.foley.count}</span>
+            </div>
+            <div className="max-h-[180px] overflow-y-auto">
+              {sound.foley.events.map((event) => (
+                <div key={event.id} className="flex items-center gap-2 px-2 h-[22px] border-b border-[#262b32] last:border-b-0">
+                  <span className="font-mono text-[9px] text-ink-ghost w-[44px] shrink-0">{fmtMs(event.placementMs)}</span>
+                  <span className="text-[10px] text-[#9fc0bb] w-[64px] shrink-0">{event.type.replace('_', ' ')}</span>
+                  <span className="text-[10px] text-ink-dim flex-1 truncate">{event.actor}</span>
+                  <span className="font-mono text-[9px] text-ink-ghost shrink-0">{event.gainDb.toFixed(0)} dB</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {sound && sound.guides.length > 0 && (
+          <div className="text-[10px] text-ink-faint leading-[1.5]">
+            Scene Run guides: {sound.guides.join(', ')} — served to the booth with each performer's open lines muted.
+          </div>
+        )}
       </div>
     </>
   );

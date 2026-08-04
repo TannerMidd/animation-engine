@@ -56,6 +56,10 @@ export interface StageAction {
 export interface ShotList {
   scene: string;
   set: string | null;
+  /** Title and end cards around the scene; wording below, treatment from the identity. */
+  cards: boolean;
+  title: string | null;
+  subtitle: string | null;
   fps: number;
   characterFps: number;
   seed: number;
@@ -104,6 +108,11 @@ export interface PreviewInfo {
   layout: 'horizontal' | 'vertical';
   beatStarts: number[];
   estimated: boolean;
+  /**
+   * Whether the rendered mix still belongs to this scene. `stale` means a
+   * dialogue.wav exists but the server will not serve it — run Voices.
+   */
+  soundtrack: 'missing' | 'current' | 'stale' | 'error';
 }
 
 export interface Vocab {
@@ -285,7 +294,7 @@ export interface RigDoc {
   voice: string;
   voiceRate: number;
   voiceRef: string | null;
-  voiceProvenance?: { source: 'minted' | 'recorded' | 'uploaded' } | null;
+  voiceProvenance?: { source: 'minted' | 'recorded' | 'uploaded'; bankVoice?: string } | null;
   look?: Look;
   outfit?: Outfit;
   expressions: { name: string }[];
@@ -463,16 +472,25 @@ export interface PreflightWarningAcknowledgement {
   acknowledgedBy: string;
 }
 
+/** What a note is about, so a click can select it (mirrors src/pipeline/preflight.ts). */
+export interface ProductionPreflightTarget {
+  kind: 'beat' | 'cue' | 'actor' | 'motion' | 'set';
+  id: string;
+}
+
+export interface ProductionPreflightNote {
+  level: 'error' | 'warn' | 'info';
+  code: string;
+  message: string;
+  blocking?: boolean;
+  target?: ProductionPreflightTarget;
+}
+
 export interface ProductionPreflightReport {
   ok: boolean;
   productionBlocked: boolean;
   renderEndpointBlocked: boolean;
-  notes: Array<{
-    level: 'error' | 'warn' | 'info';
-    code: string;
-    message: string;
-    blocking?: boolean;
-  }>;
+  notes: ProductionPreflightNote[];
   warningReview: {
     required: boolean;
     current: boolean;
@@ -557,4 +575,129 @@ export interface AnimationDocument {
 export interface FacePlate {
   label: string;
   svg: string;
+}
+
+// --- system report (mirrors src/pipeline/doctor.ts) -------------------------
+
+export interface DoctorReport {
+  ffmpeg: { version: string | null; path: string; old: boolean };
+  chromium: { ok: boolean; version: string | null; error: string | null };
+  rhubarb: { ok: boolean; path: string | null };
+  models: {
+    root: string;
+    onSystemDrive: boolean;
+    caches: Array<{ name: string; dir: string; bytes: number }>;
+    strays: Array<{ label: string; dir: string; bytes: number; fix: string }>;
+  };
+  llm: { ok: boolean; models: string[]; reason: string | null };
+  engines: Array<{ name: string; ok: boolean; reason: string | null; checking?: boolean }>;
+  asr: { ok: boolean; reason: string | null };
+  cast: string[];
+}
+
+export interface ProfileValidation {
+  id: string;
+  ok: boolean;
+  version: string | null;
+  hash: string | null;
+  error: string | null;
+}
+
+export interface MigrationInfo {
+  identity: { id: string; version: string; hash: string; name: string };
+  createProfile: boolean;
+  changes: Array<{ kind: 'profile' | 'rig' | 'set' | 'shotlist'; target: string; actions: string[] }>;
+}
+
+// --- cast tools (mirrors src/pipeline/cast-tools.ts) ------------------------
+
+export interface RigCheckResult {
+  name: string;
+  ok: boolean;
+  errors: string[];
+}
+
+// --- voice bench and conversion check (mirrors src/pipeline/bench.ts) -------
+
+export interface BenchLine {
+  expression: string;
+  text: string;
+  file: string;
+  qa: { passed: boolean; wer: number; transcript: string } | null;
+}
+
+export interface BenchCharacter {
+  name: string;
+  badge: string;
+  refFile: string;
+  lines: BenchLine[];
+}
+
+export interface BenchResult {
+  engine: string;
+  characters: BenchCharacter[];
+  renderedAt: string;
+}
+
+export interface ConversionCheckRow {
+  name: string;
+  ok: boolean;
+  missing: boolean;
+  failures: string[];
+  targetMedianPitchHz: number | null;
+  conditioningLiftSemitones: number | null;
+  outputMedianPitchHz: number | null;
+  voicedRetention: number | null;
+  pitchErrorSemitones: number | null;
+  file: string | null;
+}
+
+export interface ConversionCheckResult {
+  source: string;
+  rows: ConversionCheckRow[];
+  failures: number;
+  checkedAt: string;
+}
+
+// --- sound mode (mirrors src/pipeline/sound.ts) -----------------------------
+
+export type StemId = 'dialogue' | 'ambience' | 'foley' | 'stings';
+
+export interface FoleyEventInfo {
+  id: string;
+  type: string;
+  actor: string;
+  beatIndex: number;
+  placementMs: number;
+  gainDb: number;
+  renderedDurationMs: number;
+  contact?: { propId?: string } | null;
+}
+
+export interface SceneSoundInfo {
+  available: boolean;
+  current: boolean;
+  engine: string;
+  durationMs: number | null;
+  stems: Array<{ id: StemId; exists: boolean; bytes: number }>;
+  foley: { count: number; events: FoleyEventInfo[] };
+  ambience: { enabled: boolean; profile: string; levelDb: number };
+  quality: {
+    integratedLufs: number | null;
+    truePeakDbtp: number | null;
+    targetIntegratedLufs: number | null;
+    truePeakCeilingDbtp: number | null;
+    loudnessPassed: boolean;
+    truePeakPassed: boolean;
+    passed: boolean;
+    speakerLeveling: Array<{ speaker: string; measuredLufs: number; adjustmentDb: number; levelledLufs: number }>;
+  } | null;
+  guides: string[];
+}
+
+/** A flat field-by-field identity diff, from POST /api/show/compare. */
+export interface ProfileDiff {
+  path: string;
+  a: unknown;
+  b: unknown;
 }

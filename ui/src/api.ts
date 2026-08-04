@@ -1,7 +1,8 @@
 import type {
-  AnimationDocument, CastSummary, CheckResult, DialogueCue, DialogueDocument, FacePlate, Health, JobEvent,
-  JobSummary, LlmStatus, Look, PreviewInfo, Outfit, ProductionPreflightReport, PropDefInfo, RecordedTake, RigDoc, SceneDetail,
-  SceneSummary, SetDescriptor, SetSummary, ShotList, ShowInfo, Vocab,
+  AnimationDocument, BenchResult, CastSummary, CheckResult, ConversionCheckResult, DialogueCue, DialogueDocument,
+  DoctorReport, FacePlate, Health, JobEvent, JobSummary, LlmStatus, Look, MigrationInfo, PreviewInfo, Outfit,
+  ProductionPreflightReport, ProfileDiff, ProfileValidation, PropDefInfo, RecordedTake, RigCheckResult, RigDoc,
+  SceneDetail, SceneSoundInfo, SceneSummary, SetDescriptor, SetSummary, ShotList, ShowInfo, StemId, Vocab,
 } from './types.ts';
 
 /** Thin typed wrappers over the engine server. */
@@ -27,8 +28,15 @@ const del = <T>(url: string) => call<T>(url, { method: 'DELETE' });
 export const api = {
   health: () => call<Health>('/api/health'),
   vocab: () => call<Vocab>('/api/vocab'),
+  doctor: () => call<DoctorReport>('/api/doctor'),
   show: () => call<ShowInfo>('/api/show'),
   setActiveShow: (id: string) => put<{ ok: true }>('/api/show/active', { id }),
+  validateShow: () => call<{ ok: boolean; results: ProfileValidation[] }>('/api/show/validate'),
+  compareShow: (a: string, b: string) => post<{ diffs: ProfileDiff[] }>('/api/show/compare', { a, b }),
+  renderReel: (body: { script?: string; a?: string; b?: string; engine?: string } = {}) =>
+    post<JobSummary>('/api/show/reel', body),
+  migrationPlan: () => call<MigrationInfo>('/api/migrate'),
+  applyMigration: () => post<{ ok: true; applied: number; changes: MigrationInfo['changes'] }>('/api/migrate'),
 
   scenes: () => call<SceneSummary[]>('/api/scenes'),
   scene: (name: string) => call<SceneDetail>(`/api/scenes/${name}`),
@@ -134,15 +142,39 @@ export const api = {
   preview: (name: string, withAudio: boolean, layout: 'horizontal' | 'vertical' = 'horizontal') =>
     post<PreviewInfo>(`/api/scenes/${name}/preview`, { withAudio, layout }),
 
-  voices: (name: string) => post<JobSummary>(`/api/scenes/${name}/voices`),
-  render: (name: string, engine?: string) => post<JobSummary>(`/api/scenes/${name}/render`, { engine }),
+  voices: (name: string, engine?: string) => post<JobSummary>(`/api/scenes/${name}/voices`, { engine }),
+  render: (name: string, opts: { engine?: string; draft?: boolean } = {}) =>
+    post<JobSummary>(`/api/scenes/${name}/render`, opts),
   job: (id: string) => call<JobSummary>(`/api/jobs/${id}`),
+
+  sound: (name: string) => call<SceneSoundInfo>(`/api/scenes/${name}/sound`),
+  rebuildStems: (name: string, engine?: string) =>
+    post<JobSummary>(`/api/scenes/${name}/sound/rebuild`, { engine }),
+  stemUrl: (name: string, stem: StemId) => `/api/scenes/${name}/stems/${stem}`,
 
   cast: () => call<CastSummary[]>('/api/cast'),
   rig: (name: string) => call<{ rig: RigDoc; svg: string; look: Look }>(`/api/cast/${name}`),
   saveRig: (name: string, rig: RigDoc) => put<{ ok: true }>(`/api/cast/${name}`, { rig }),
   newCharacter: (name: string) => post<{ name: string; look: Look }>('/api/cast', { name }),
-  regenerateRig: (name: string) => post<{ rig: RigDoc; look: Look }>(`/api/cast/${name}/regenerate`),
+  regenerateRig: (name: string, reroll = false) =>
+    post<{ rig: RigDoc; look: Look }>(`/api/cast/${name}/regenerate`, { reroll }),
+
+  checkCast: (names?: string[]) =>
+    post<{ ok: boolean; results: RigCheckResult[] }>('/api/cast/check', { names }),
+  castSheet: (body: { names?: string[]; expression?: string } = {}) =>
+    post<JobSummary>('/api/cast/sheet', body),
+  still: (name: string, body: { pose?: string; expression?: string; scale?: number; seed?: number } = {}) =>
+    post<JobSummary>(`/api/cast/${name}/still`, body),
+  idle: (name: string, body: { seconds?: number; fps?: number; characterFps?: number; seed?: number } = {}) =>
+    post<JobSummary>(`/api/cast/${name}/idle`, body),
+
+  bench: () => call<{ result: BenchResult | null }>('/api/voices/bench'),
+  runBench: (only?: string[]) => post<JobSummary>('/api/voices/bench', { only }),
+  benchAudioUrl: (character: string, file: string) =>
+    `/api/voices/bench/${encodeURIComponent(character)}/${encodeURIComponent(file)}`,
+  voicesCheck: (body: { scene?: string; takeId?: string; source?: string; only?: string[] }) =>
+    post<JobSummary>('/api/voices/check', body),
+  voicesCheckAudioUrl: (file: string) => `/api/voices/check/audio/${encodeURIComponent(file)}`,
 
   saveLook: (name: string, look: Look, outfit?: Outfit) =>
     put<{ rig: RigDoc; look: Look }>(`/api/cast/${name}/look`, { look, outfit }),
@@ -201,15 +233,30 @@ export function followJob(
   onEvent: (e: JobEvent) => void,
 ): () => void {
   const source = new EventSource(`/api/jobs/${id}/events`);
+  let settled = false;
   source.onmessage = (msg) => {
     try {
-      onEvent(JSON.parse(msg.data) as JobEvent);
+      const event = JSON.parse(msg.data) as JobEvent;
+      if (event.type === 'done' || event.type === 'error') settled = true;
+      onEvent(event);
     } catch {
       // A malformed frame should not kill the stream.
     }
   };
-  source.onerror = () => source.close();
-  return () => source.close();
+  // The server ends the stream normally once a job reports its outcome, and
+  // EventSource surfaces that as an error too — so only a drop *before* an
+  // outcome is a real failure. Reporting it matters: staying silent left the
+  // caller waiting on a job that would never speak again.
+  source.onerror = () => {
+    source.close();
+    if (settled) return;
+    settled = true;
+    onEvent({ type: 'error', message: 'lost the connection to the engine while the job was running' });
+  };
+  return () => {
+    settled = true;
+    source.close();
+  };
 }
 
 /**

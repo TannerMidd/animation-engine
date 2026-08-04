@@ -97,8 +97,8 @@ export function ShotStrip({
  */
 export function TakeStrip({
   scene, cue, dialogue, speakerFg, castVoiceBound, recording, onRecordingChange, onReload, onSaveCue,
-  onDiscardTake, onUseGenerated, onOpenVoiceTab, speakerRig, converting, onConvert, onOpenCastEditor,
-  conversionRuntime,
+  onDiscardTake, onUseGenerated, onOpenVoiceTab, speakerRig, converting, onConvert, onScoreAcrossCast,
+  onOpenCastEditor, conversionRuntime,
 }: {
   scene: string;
   cue: DialogueCue | null;
@@ -117,6 +117,8 @@ export function TakeStrip({
   speakerRig: string | null;
   converting: boolean;
   onConvert: () => void;
+  /** Score this take against every cast voice — the conversion check, asked where it comes up. */
+  onScoreAcrossCast: (() => void) | null;
   onOpenCastEditor: (name: string | null) => void;
   /** Fingerprint of the conversion runtime running now; older output is not offered. */
   conversionRuntime: string | null;
@@ -646,6 +648,16 @@ export function TakeStrip({
                 Follow Performance
                 <span className="text-ink-faint">{follow ? ' · your timing rules' : ' · fit to picture'}</span>
               </span>
+              {onScoreAcrossCast && (
+                <button
+                  type="button"
+                  title="Convert this take into every cast voice and score each result — voicing kept, register hit. Runs the conversion model per character."
+                  onClick={onScoreAcrossCast}
+                  className="h-[18px] px-1.5 rounded-[2px] border border-gen/50 text-[#a8b6d4] text-[9px] cursor-pointer hover:bg-gen/15 shrink-0"
+                >
+                  score vs cast
+                </button>
+              )}
             </div>
           </div>
 

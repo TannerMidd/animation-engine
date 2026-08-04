@@ -29,6 +29,12 @@ class FakeTensor:
     def clamp(self, lo, hi):
         return self
 
+    def abs(self):
+        return self
+
+    def max(self):
+        return 0.5  # under the normalization ceiling: hot-take scaling stays off
+
     def __mul__(self, other):
         return self
 
@@ -64,7 +70,8 @@ class FakeModel:
         # and leaves them resident — which is exactly the leak.
         self.conds = f"REF:{ref}"
 
-    def generate(self, text, exaggeration=0.5, cfg_weight=0.5):
+    def generate(self, text, exaggeration=0.5, cfg_weight=0.5,
+                 temperature=0.8, repetition_penalty=1.2, min_p=0.05, top_p=1.0):
         self.used.append(self.conds)
         return FakeTensor()
 

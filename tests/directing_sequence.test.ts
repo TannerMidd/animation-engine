@@ -3,6 +3,7 @@ import { buildPlaceholderRig, buildPlaceholderSvg } from '../src/cast/placeholde
 import type { LoadedRig } from '../src/cast/store.ts';
 import {
   autoDirect,
+  REACTION_MAX_WORDS,
   SIGNATURE_MOVE_GLOBAL_COOLDOWN_BEATS,
 } from '../src/direct/index.ts';
 import { parseScript } from '../src/parse/index.ts';
@@ -48,6 +49,38 @@ describe('sequence-level directing', () => {
     expect(dialogue.some((beat, index) => index > 0 && signature(beat) === signature(dialogue[index - 1]!))).toBe(true);
     expect(direct(source).beats.map(({ id, purpose, shot, focus, camera }) => ({ id, purpose, shot, focus, camera })))
       .toEqual(shots.beats.map(({ id, purpose, shot, focus, camera }) => ({ id, purpose, shot, focus, camera })));
+  });
+
+  it('never leaves a substantial line off-camera, while quips may play as reactions', () => {
+    // Alternating content lines plus terse replies: the exact mix where the
+    // old planner held a single on one performer while the other delivered
+    // whole sentences unseen.
+    const source = `# Visibility\n\nINT. OFFICE - DAY\n\n` + [
+      ['ALICE', 'The quarterly numbers arrived this morning and they are strange.'],
+      ['BOB', 'Strange how?'],
+      ['ALICE', 'Every department reported exactly the same total revenue.'],
+      ['BOB', 'That cannot possibly be a coincidence at this scale.'],
+      ['ALICE', 'The auditors want a meeting before anyone says anything.'],
+      ['BOB', 'Fine.'],
+      ['ALICE', 'They also want the printer logs going back a year.'],
+      ['BOB', 'The printer logs are gone.'],
+    ].map(([speaker, text]) => `${speaker}\n${text}`).join('\n\n') + '\n';
+
+    const shots = direct(source);
+    const dialogue = shots.beats.filter((beat) => beat.kind === 'line');
+
+    for (const beat of dialogue) {
+      const visible = beat.focus.length === 0 || beat.focus.includes(beat.speaker);
+      const quip = beat.text.trim().split(/\s+/).length <= REACTION_MAX_WORDS;
+      // Ensemble frames show everyone; a single must contain its speaker
+      // unless the line is short enough to read as a reaction beat.
+      expect(visible || quip, `"${beat.text}" plays off-camera on ${JSON.stringify(beat.focus)}`).toBe(true);
+    }
+
+    // The rhythm survives the rule: still fewer cuts than lines.
+    const cuts = dialogue.slice(1).filter((beat, index) =>
+      signature(beat) !== signature(dialogue[index]!));
+    expect(cuts.length).toBeLessThan(dialogue.length - 1);
   });
 
   it('cools down special shots and camera punctuation instead of repeating signatures', () => {

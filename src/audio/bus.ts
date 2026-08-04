@@ -48,31 +48,105 @@ export function toBusSamples(wav: WavData, label: string): Float64Array {
   }
 
   if (wav.sampleRate === BUS_RATE) return mono;
-  return resampleLinear(mono, wav.sampleRate, BUS_RATE);
+  return resample(mono, wav.sampleRate, BUS_RATE);
 }
 
 /**
- * Deterministic linear resampler.
+ * Deterministic Kaiser-windowed-sinc resampler.
  *
- * Linear, not windowed-sinc, on purpose: the inputs are 22.05 kHz speech and
- * noise beds heading into a 24 kHz bus under compressed video audio — the
- * difference is inaudible there, and thirty lines of exact, obviously-correct
- * arithmetic beats a filter bank that has to be proven deterministic.
+ * This replaced a linear interpolator once dialogue moved to a 24 kHz neural
+ * engine under the 48 kHz master: linear interpolation's imaging distortion
+ * sits right on top of speech consonants, and the master is the deliverable,
+ * not a scratch preview. Determinism survives the upgrade because everything
+ * here is fixed-order float64 arithmetic on rational rate ratios — no FFT, no
+ * platform resampler, and the coefficient table depends only on (from, to).
+ *
+ * Shape: per output sample, a sinc kernel at cutoff just under the narrower
+ * Nyquist, Kaiser-windowed (beta 8.6 ~ -90 dB stopband), normalized by the
+ * actual coefficient sum so DC passes at unity and edges don't droop. Sample
+ * rates are integers, so output phases repeat with period to/gcd(from,to);
+ * coefficients are built once per phase and reused, which keeps the whole
+ * thing ~33 multiplies per output sample.
  */
-export function resampleLinear(input: Float64Array, from: number, to: number): Float64Array {
+export function resample(input: Float64Array, from: number, to: number): Float64Array {
   if (from === to) return input;
   const outLength = Math.max(1, Math.round((input.length * to) / from));
   const out = new Float64Array(outLength);
-  const step = (input.length - 1) / Math.max(1, outLength - 1);
 
-  for (let i = 0; i < outLength; i++) {
-    const pos = i * step;
-    const lo = Math.floor(pos);
-    const hi = Math.min(input.length - 1, lo + 1);
-    const t = pos - lo;
-    out[i] = input[lo]! * (1 - t) + input[hi]! * t;
+  const ratio = Math.min(1, to / from);
+  // Slight band-edge rolloff keeps the transition inside Nyquist both up and
+  // down; at 24k -> 48k the passband still reaches ~11.3 kHz, transparent for
+  // speech.
+  const cutoff = 0.5 * ratio * 0.945;
+  const half = Math.ceil(16 / ratio);
+
+  const div = gcd(from, to);
+  const period = to / div;
+  const phases = new Array<{ base: number; coeffs: Float64Array }>(period);
+  for (let p = 0; p < period; p++) {
+    // Output sample p sits at input position p*from/to; base is the first
+    // input tap of its kernel window.
+    const pos = (p * from) / to;
+    const base = Math.ceil(pos - half);
+    const taps = Math.floor(pos + half) - base + 1;
+    const coeffs = new Float64Array(taps);
+    let norm = 0;
+    for (let t = 0; t < taps; t++) {
+      const c = sincKernel(pos - (base + t), cutoff, half);
+      coeffs[t] = c;
+      norm += c;
+    }
+    for (let t = 0; t < taps; t++) coeffs[t]! /= norm;
+    phases[p] = { base, coeffs };
+  }
+
+  for (let j = 0; j < outLength; j++) {
+    const p = j % period;
+    const { base, coeffs } = phases[p]!;
+    // Integer arithmetic: exact for any realistic clip length.
+    const shift = ((j - p) / period) * (from / div);
+    let acc = 0;
+    for (let t = 0; t < coeffs.length; t++) {
+      let idx = base + t + shift;
+      // Edge replication, matching what normalization assumes.
+      if (idx < 0) idx = 0;
+      else if (idx >= input.length) idx = input.length - 1;
+      acc += input[idx]! * coeffs[t]!;
+    }
+    out[j] = acc;
   }
   return out;
+}
+
+/** One Kaiser-windowed sinc tap at offset d from the kernel centre. */
+function sincKernel(d: number, cutoff: number, half: number): number {
+  const t = d / half;
+  const w = besselI0(KAISER_BETA * Math.sqrt(Math.max(0, 1 - t * t))) / I0_BETA;
+  const x = 2 * cutoff * d;
+  const s = x === 0 ? 1 : Math.sin(Math.PI * x) / (Math.PI * x);
+  return s * w;
+}
+
+const KAISER_BETA = 8.6;
+
+/** Modified Bessel function of the first kind, order zero. Series expansion. */
+function besselI0(x: number): number {
+  let sum = 1;
+  let term = 1;
+  const h = x / 2;
+  for (let k = 1; k <= 32; k++) {
+    term *= (h / k) * (h / k);
+    sum += term;
+    if (term < 1e-14 * sum) break;
+  }
+  return sum;
+}
+
+const I0_BETA = besselI0(KAISER_BETA);
+
+function gcd(a: number, b: number): number {
+  while (b) [a, b] = [b, a % b];
+  return a;
 }
 
 /** Short linear fades, applied in place. Clicks live at clip boundaries. */

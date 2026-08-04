@@ -16,7 +16,7 @@ import { supportedText } from '../render/glyphs.ts';
 import type { AnimationDocument } from '../schema/animation.ts';
 import type { DialogueCue, DialogueDocument } from '../schema/dialogue.ts';
 import { stampOf, type ShowIdentity } from '../schema/identity.ts';
-import { MARKS, type ShotList } from '../schema/script.ts';
+import { MARKS, type Screenplay, type ShotList } from '../schema/script.ts';
 import { activeIdentity } from '../show/context.ts';
 import { BUILTIN_SETS } from '../sets/builtins.ts';
 import { interactionHandle, propHandlePoint, resolveSetProps } from '../sets/interaction.ts';
@@ -26,12 +26,17 @@ import { performanceAssetPath } from '../voice/recording.ts';
 import { readAnimation } from './animation.ts';
 import { dialogueScriptHash, readDialogueDocument } from './dialogue.ts';
 import { applySceneOutfits } from './check.ts';
-import { exists, readShotList } from './scene.ts';
+import { splitCaptionCues } from '../compile/captions.ts';
+import { parseScript } from '../parse/index.ts';
+import { beatSpine, screenplaySpine, spineDrift } from './propose.ts';
+import { exists, readScript, readShotList } from './scene.ts';
 import {
+  collectGeneratedLineQa,
   estimateSelectedDialogueTimings,
   soundtrackIsCurrent,
   soundtrackManifestPath,
 } from './voices.ts';
+import type { LineQa } from '../voice/qa.ts';
 import type { ProgrammeQualityGate } from '../audio/quality.ts';
 import {
   evaluatePublishingSafety,
@@ -41,12 +46,25 @@ import { reframeScenePortrait } from './reframe.ts';
 
 export type ProductionPreflightLevel = 'error' | 'warn' | 'info';
 
+/**
+ * What a note is *about*, so the editor can put you in front of it.
+ *
+ * A message that names `sarah:line-19293i4` is unusable as a destination —
+ * that id appears nowhere on screen. Carrying the reference structurally lets
+ * a click select the thing rather than merely switch modes and hope.
+ */
+export interface ProductionPreflightTarget {
+  kind: 'beat' | 'cue' | 'actor' | 'motion' | 'set';
+  id: string;
+}
+
 export interface ProductionPreflightNote {
   code: string;
   level: ProductionPreflightLevel;
   /** Errors block a production-ready decision; warnings and information do not. */
   blocking: boolean;
   message: string;
+  target?: ProductionPreflightTarget;
 }
 
 /**
@@ -71,12 +89,55 @@ export interface ProductionPreflightReport {
   notes: ProductionPreflightNote[];
 }
 
+/**
+ * Every code preflight can raise.
+ *
+ * The list exists so the editor can be held to explaining all of them: a
+ * blocker whose message states a fact but not a remedy is a dead end, and a
+ * test over this list is what stops the next code from becoming one.
+ */
+export const PREFLIGHT_CODES = [
+  'action-unstructured', 'action-unsupported', 'animation-contact-invalid',
+  'animation-contact-set-missing', 'animation-invalid', 'animation-long-pose-hold',
+  'animation-outside-walkable', 'animation-resolve-failed', 'animation-scene-mismatch',
+  'animation-target-invalid', 'animation-timing-deferred', 'caption-reading-rate',
+  'caption-safe-area-failed', 'capture-qc-missing', 'capture-qc-rejected', 'capture-qc-warning',
+  'continuity-invalid', 'dialogue-approval-rejected', 'dialogue-approval-stale',
+  'dialogue-approval-unresolved', 'dialogue-asset-missing', 'dialogue-asset-stale',
+  'dialogue-cue-stale', 'dialogue-editorial-missing', 'dialogue-fps-drift',
+  'dialogue-identity-drift', 'dialogue-invalid', 'dialogue-scene-mismatch',
+  'dialogue-script-stale', 'dialogue-selection-unresolved', 'dialogue-take-stale',
+  'dialogue-trim-unreviewed', 'dialogue-unapproved', 'dialogue-unlocked', 'director-locks',
+  'identity-drift', 'performance-consent-expired', 'performance-consent-fallback',
+  'performance-consent-missing', 'performance-consent-revoked', 'performance-consent-scope',
+  'portrait-safe-area-failed', 'prop-action-invalid', 'prop-action-set-missing',
+  'rig-invalid', 'rig-missing', 'scene-run-segment-qc-missing', 'scene-run-segment-qc-rejected',
+  'scene-run-segment-qc-warning', 'scene-undirected', 'script-unreadable', 'set-invalid',
+  'set-missing', 'set-unavailable', 'shotlist-invalid', 'shotlist-script-stale',
+  'soundtrack-intentional-silence', 'soundtrack-loudness-failed', 'soundtrack-missing',
+  'soundtrack-qc-missing', 'soundtrack-qc-passed', 'soundtrack-stale',
+  'soundtrack-true-peak-failed', 'soundtrack-unverifiable', 'title-undrawable',
+  'voice-conversion-source-stale', 'voice-conversion-source-unmapped', 'voice-consent-expired',
+  'voice-consent-missing', 'voice-consent-reference-stale', 'voice-consent-revoked',
+  'voice-consent-scope', 'voice-line-unintelligible', 'voice-reference-draft-only',
+  'voice-reference-minted-in-use', 'voice-reference-missing', 'voice-render-draft-only',
+  'voice-render-not-ready', 'voice-render-qc-warning', 'voice-render-rejected',
+  'voice-target-reference-stale',
+] as const;
+
 export type SoundtrackState = 'missing' | 'current' | 'stale' | 'error';
 
 export interface ProductionPreflightInput {
   scene: string;
   shots: ShotList | null;
   shotListError?: string;
+  /**
+   * The screenplay as it stands on disk, for detecting a shot list that has
+   * fallen behind it. Omitted by callers that supply their own shot list and
+   * have no script to compare against.
+   */
+  screenplay?: Screenplay | null;
+  scriptError?: string;
   identity: ShowIdentity;
   rigs: Map<string, LoadedRig>;
   missingRigs?: ReadonlySet<string>;
@@ -91,6 +152,12 @@ export interface ProductionPreflightInput {
   dialogueError?: string;
   missingDialogueAssets?: ReadonlySet<string>;
   staleDialogueAssets?: ReadonlySet<string>;
+  /**
+   * ASR verdicts by cue id for lines that would ship as generated takes.
+   * A failed verdict means every seeded attempt was transcribed and none of
+   * them said the script line.
+   */
+  generatedLineQa?: ReadonlyMap<string, LineQa>;
   animation: AnimationDocument | null;
   animationError?: string;
   soundtrack: SoundtrackState;
@@ -117,9 +184,20 @@ function note(
   level: ProductionPreflightLevel,
   code: string,
   message: string,
+  target?: ProductionPreflightTarget,
 ): void {
   if (notes.some((item) => item.code === code && item.message === message)) return;
-  notes.push({ code, level, blocking: level === 'error', message });
+  notes.push({ code, level, blocking: level === 'error', message, ...(target ? { target } : {}) });
+}
+
+/**
+ * A caption cue id back to the line it came from.
+ *
+ * A split caption's later pieces are suffixed (`line-abc~2`); the creator only
+ * has the one line to go to, so strip it.
+ */
+function captionTarget(cueId: string): ProductionPreflightTarget {
+  return { kind: 'cue', id: cueId.replace(/~\d+$/, '') };
 }
 
 function inspectReleaseQuality(input: ProductionPreflightInput, notes: ProductionPreflightNote[]): void {
@@ -166,8 +244,9 @@ function inspectReleaseQuality(input: ProductionPreflightInput, notes: Productio
 
   const safety = input.publishingSafety;
   if (!safety) return;
-  if (!safety.captions.ok) {
-    const detail = safety.captions.violations
+  const overflowing = safety.captions.violations.filter((item) => item.reason === 'too-many-lines');
+  if (overflowing.length) {
+    const detail = overflowing
       .map((item) => `${item.speaker}:${item.cueId} (${item.estimatedLines} lines)`)
       .join(', ');
     note(
@@ -175,6 +254,22 @@ function inspectReleaseQuality(input: ProductionPreflightInput, notes: Productio
       'error',
       'caption-safe-area-failed',
       `caption text exceeds the ${safety.captions.maxLines}-line mobile safe area: ${detail}`,
+      captionTarget(overflowing[0]!.cueId),
+    );
+  }
+  // A cue that fits but goes by too fast to read. Advisory: readability is a
+  // judgement, where the line budget is a layout fact.
+  const rushed = safety.captions.violations.filter((item) => item.reason === 'too-fast');
+  if (rushed.length) {
+    const detail = rushed
+      .map((item) => `${item.speaker}:${item.cueId} (${item.charactersPerSecond}/s)`)
+      .join(', ');
+    note(
+      notes,
+      'warn',
+      'caption-reading-rate',
+      `caption is on screen too briefly to read at ${safety.captions.maxCharactersPerSecond} characters per second: ${detail}`,
+      captionTarget(rushed[0]!.cueId),
     );
   }
   if (safety.portrait.status === 'fail') {
@@ -188,6 +283,39 @@ function inspectReleaseQuality(input: ProductionPreflightInput, notes: Productio
       `the recomposed portrait master leaves action-safe composition: ${detail}`,
     );
   }
+}
+
+/**
+ * Has the script moved on without the shot list?
+ *
+ * Everything downstream of directing — timeline, dialogue, animation, preview
+ * and the render itself — reads the shot list, so a script edited after the
+ * last Direct is invisible until someone applies it. Rendering that state
+ * publishes a scene nobody is looking at, which is why this blocks.
+ *
+ * The comparison is the script-owned spine only, so staging a beat or
+ * retiming a pause by hand never reads as the script having changed.
+ */
+function inspectScriptCurrency(
+  input: ProductionPreflightInput,
+  notes: ProductionPreflightNote[],
+): void {
+  const { shots, screenplay } = input;
+  if (!shots) return;
+  if (input.scriptError) {
+    note(notes, 'warn', 'script-unreadable', `the screenplay cannot be read: ${input.scriptError}`);
+    return;
+  }
+  if (!screenplay) return;
+
+  const drift = spineDrift(screenplaySpine(screenplay), beatSpine(shots.beats));
+  if (!drift) return;
+  note(
+    notes,
+    'error',
+    'shotlist-script-stale',
+    `the script has ${drift} beat${drift === 1 ? '' : 's'} the shot list does not reflect; run Direct to apply it`,
+  );
 }
 
 function classifyShotListError(message: string): string {
@@ -268,17 +396,35 @@ function inspectDialogue(
 
   for (const beat of lines) {
     const cue = cues.get(beat.id);
+    // Every note below is about this one line; carrying the reference is what
+    // lets a click in the readiness report select it.
+    const at: ProductionPreflightTarget = { kind: 'cue', id: beat.id };
     if (!cue) {
-      note(notes, 'error', 'dialogue-selection-unresolved', `line "${beat.id}" has no production dialogue cue or selected audio`);
+      note(notes, 'error', 'dialogue-selection-unresolved', `line "${beat.id}" has no production dialogue cue or selected audio`, at);
       continue;
     }
     const label = `${cue.speaker}:${cue.id}`;
     if (cue.speaker !== beat.speaker || cue.displayText !== beat.text) {
-      note(notes, 'error', 'dialogue-cue-stale', `dialogue cue "${label}" no longer matches its screenplay line`);
+      note(notes, 'error', 'dialogue-cue-stale', `dialogue cue "${label}" no longer matches its screenplay line`, at);
+    }
+
+    // The verdict map only carries lines that would ship generated, so a
+    // failure here means the audience would hear a take that demonstrably
+    // does not say the script line.
+    const qa = input.generatedLineQa?.get(cue.id);
+    if (qa && !qa.passed) {
+      note(
+        notes,
+        'error',
+        'voice-line-unintelligible',
+        `generated take for "${label}" failed speech verification after ${qa.attempt + 1} seeded attempts ` +
+          `(heard: ${qa.transcript ? `"${qa.transcript}"` : 'nothing'}) — reroll the line's seed, reword the line, or record it`,
+        at,
+      );
     }
 
     if (cue.approval.state === 'rejected' || cue.approval.state === 'stale' || cue.approval.state === 'unresolved') {
-      note(notes, 'error', `dialogue-approval-${cue.approval.state}`, `dialogue cue "${label}" is ${cue.approval.state}`);
+      note(notes, 'error', `dialogue-approval-${cue.approval.state}`, `dialogue cue "${label}" is ${cue.approval.state}`, at);
     } else if (cue.approval.state !== 'approved') {
       unapproved.push(label);
     }
@@ -292,13 +438,13 @@ function inspectDialogue(
     }
 
     if (!cue.selectedTakeId && !cue.selectedRenderId) {
-      note(notes, 'error', 'dialogue-selection-unresolved', `dialogue cue "${label}" has no selected take or render`);
+      note(notes, 'error', 'dialogue-selection-unresolved', `dialogue cue "${label}" has no selected take or render`, at);
       continue;
     }
 
     const take = cue.selectedTakeId ? takes.get(cue.selectedTakeId) : undefined;
     if (cue.selectedTakeId && !take) {
-      note(notes, 'error', 'dialogue-selection-unresolved', `dialogue cue "${label}" selects missing take "${cue.selectedTakeId}"`);
+      note(notes, 'error', 'dialogue-selection-unresolved', `dialogue cue "${label}" selects missing take "${cue.selectedTakeId}"`, at);
     }
     if (take) {
       const currentHash = crypto.createHash('sha256').update(cue.spokenText).digest('hex');
@@ -397,7 +543,7 @@ function inspectDialogue(
 
     const render = cue.selectedRenderId ? renders.get(cue.selectedRenderId) : undefined;
     if (cue.selectedRenderId && !render) {
-      note(notes, 'error', 'dialogue-selection-unresolved', `dialogue cue "${label}" selects missing render "${cue.selectedRenderId}"`);
+      note(notes, 'error', 'dialogue-selection-unresolved', `dialogue cue "${label}" selects missing render "${cue.selectedRenderId}"`, at);
     }
     if (render) {
       if (render.state !== 'ready') {
@@ -452,16 +598,23 @@ function inspectDialogue(
       }
     }
     if (!cue.trim) {
-      note(notes, 'warn', 'dialogue-trim-unreviewed', `dialogue cue "${label}" has no reviewed trim and speech boundaries`);
+      note(notes, 'warn', 'dialogue-trim-unreviewed', `dialogue cue "${label}" has no reviewed trim and speech boundaries`, at);
     }
   }
 
+  // These aggregate every offending cue, so they point at the first one — far
+  // more use than a mode switch when the list runs to dozens of lines.
+  const firstOf = (labels: string[]): ProductionPreflightTarget | undefined => {
+    const id = labels[0]?.split(':').slice(1).join(':');
+    return id ? { kind: 'cue', id } : undefined;
+  };
   if (unapproved.length) {
     note(
       notes,
       'error',
       'dialogue-unapproved',
       `${unapproved.length} dialogue cue(s) are not approved: ${unapproved.join(', ')}`,
+      firstOf(unapproved),
     );
   }
   if (unlocked.length) {
@@ -470,6 +623,7 @@ function inspectDialogue(
       'error',
       'dialogue-unlocked',
       `${unlocked.length} dialogue cue(s) are not fully locked: ${unlocked.join(', ')}`,
+      firstOf(unlocked),
     );
   }
 }
@@ -527,6 +681,7 @@ function inspectVoiceReferences(input: ProductionPreflightInput, notes: Producti
       'error',
       'voice-reference-draft-only',
       `minted draft voice reference "${rig.voiceRef}" is still used for ${actors.join(', ')}; approve a recorded/uploaded reference, select an original performance, or approve the character voice per line — generated, or converted from your own take`,
+      actors[0] ? { kind: 'actor', id: actors[0] } : undefined,
     );
   }
   for (const [rigName, actors] of chosenByRig) {
@@ -536,7 +691,8 @@ function inspectVoiceReferences(input: ProductionPreflightInput, notes: Producti
       notes,
       'warn',
       'voice-reference-minted-in-use',
-      `${actors.join(', ')} speak with the minted voice reference "${rig.voiceRef}" by explicit approval; audition it before release, or record/upload a reference in the cast editor`,
+      `${actors.join(', ')} speak with the minted voice reference "${rig.voiceRef}"${rig.voiceProvenance?.bankVoice ? ` (bank voice ${rig.voiceProvenance.bankVoice})` : ''} by explicit approval; audition it before release, or record/upload a reference in the cast editor`,
+      actors[0] ? { kind: 'actor', id: actors[0] } : undefined,
     );
   }
 }
@@ -820,21 +976,40 @@ function inspectAnimation(
 
   const cast = new Map(shots.cast.map((member) => [member.id, member]));
   for (const track of animation.tracks) {
+    const at: ProductionPreflightTarget = { kind: 'motion', id: track.id };
     const actor = cast.get(track.actorId);
     if (!actor) {
-      note(notes, 'error', 'animation-target-invalid', `animation track "${track.id}" references unknown actor "${track.actorId}"`);
+      note(notes, 'error', 'animation-target-invalid', `animation track "${track.id}" references unknown actor "${track.actorId}"`, at);
       continue;
     }
     if (track.channel === 'part.transform') {
       const rig = input.rigs.get(actor.rig)?.rig;
       if (!rig?.parts.some((part) => part.id === track.partId)) {
-        note(notes, 'error', 'animation-target-invalid', `animation track "${track.id}" references missing part "${track.partId}" on "${track.actorId}"`);
+        note(notes, 'error', 'animation-target-invalid', `animation track "${track.id}" references missing part "${track.partId}" on "${track.actorId}"`, at);
+      }
+    }
+  }
+  // Segments carry the same actor reference as tracks and are validated just
+  // as strictly by the compiler, which throws rather than reporting. Left out
+  // here, a scene re-directed onto a new cast fails as an opaque 500 from the
+  // preview instead of a named blocker anyone can act on.
+  for (const segment of animation.segments) {
+    const at: ProductionPreflightTarget = { kind: 'motion', id: segment.id };
+    const actor = cast.get(segment.actorId);
+    if (!actor) {
+      note(notes, 'error', 'animation-target-invalid', `motion segment "${segment.id}" references unknown actor "${segment.actorId}"`, at);
+      continue;
+    }
+    if (segment.channel === 'part.transform') {
+      const rig = input.rigs.get(actor.rig)?.rig;
+      if (!rig?.parts.some((part) => part.id === segment.partId)) {
+        note(notes, 'error', 'animation-target-invalid', `motion segment "${segment.id}" references missing part "${segment.partId}" on "${segment.actorId}"`, at);
       }
     }
   }
   for (const event of animation.events) {
     if ((event.kind === 'attach' || event.kind === 'contact') && !cast.has(event.actorId)) {
-      note(notes, 'error', 'animation-target-invalid', `animation event "${event.id}" references unknown actor "${event.actorId}"`);
+      note(notes, 'error', 'animation-target-invalid', `animation event "${event.id}" references unknown actor "${event.actorId}"`, { kind: 'motion', id: event.id });
     }
   }
   inspectInteractionSurfaces(input, notes);
@@ -898,19 +1073,20 @@ export function evaluateProductionPreflight(input: ProductionPreflightInput): Pr
   }
 
   for (const member of shots.cast) {
+    const at: ProductionPreflightTarget = { kind: 'actor', id: member.id };
     if (input.rigErrors?.has(member.rig)) {
-      note(notes, 'error', 'rig-invalid', `rig "${member.rig}" cannot be read: ${input.rigErrors.get(member.rig)}`);
+      note(notes, 'error', 'rig-invalid', `rig "${member.rig}" cannot be read: ${input.rigErrors.get(member.rig)}`, at);
     } else if (input.missingRigs?.has(member.rig)) {
-      note(notes, 'warn', 'rig-missing', `"${member.rig}" has no saved rig — a placeholder will be cast at render time`);
+      note(notes, 'warn', 'rig-missing', `"${member.rig}" has no saved rig — a placeholder will be cast at render time`, at);
     }
     const rig = input.rigs.get(member.rig)?.rig;
     if (rig && !rig.voiceRef) {
-      note(notes, 'info', 'voice-reference-missing', `"${member.rig}" has no voice yet — one will be minted during Voices`);
+      note(notes, 'info', 'voice-reference-missing', `"${member.rig}" has no voice yet — one will be minted during Voices`, at);
     }
   }
 
   if (shots.set && !input.knownSets.has(shots.set)) {
-    note(notes, 'error', 'set-missing', `set "${shots.set}" does not exist`);
+    note(notes, 'error', 'set-missing', `set "${shots.set}" does not exist`, { kind: 'set', id: shots.set });
   }
   if (shots.cards && shots.title && !supportedText(shots.title).trim()) {
     note(notes, 'warn', 'title-undrawable', 'the title contains no characters the card alphabet can draw');
@@ -924,6 +1100,7 @@ export function evaluateProductionPreflight(input: ProductionPreflightInput): Pr
   } catch (error) {
     note(notes, 'error', 'shotlist-invalid', `shot-list capability validation failed: ${(error as Error).message}`);
   }
+  inspectScriptCurrency(input, notes);
   inspectGestureQuality(shots, notes);
   inspectWalkableBlocking(input, notes);
 
@@ -1043,6 +1220,17 @@ export async function runProductionPreflight(
     });
   }
 
+  // The screenplay the shot list is supposed to be telling. A script that no
+  // longer parses is worth saying out loud, but it is not a render blocker —
+  // the directed shot list is what renders.
+  let screenplay: Screenplay | null = null;
+  let scriptError: string | undefined;
+  try {
+    screenplay = parseScript(await readScript(scene), scene);
+  } catch (error) {
+    scriptError = error instanceof Error ? error.message : String(error);
+  }
+
   const onDisk = new Set(await listRigs());
   const missingRigs = new Set<string>();
   const rigErrors = new Map<string, string>();
@@ -1077,6 +1265,18 @@ export async function runProductionPreflight(
     animation = await readAnimation(scene);
   } catch (error) {
     animationError = error instanceof Error ? error.message : String(error);
+  }
+
+  // Verification verdicts for generated takes. Cache-only reads: preflight
+  // must never wake the engine, and a line with no cached take simply has no
+  // verdict yet (its absence is already reported as a stale soundtrack).
+  let generatedLineQa: ReadonlyMap<string, LineQa> | undefined;
+  if (dialogue) {
+    try {
+      generatedLineQa = await collectGeneratedLineQa(scene, shots, rigs, dialogue);
+    } catch {
+      // Unreadable cache metadata is not itself a release question.
+    }
   }
 
   const missingDialogueAssets = new Set<string>();
@@ -1135,14 +1335,18 @@ export async function runProductionPreflight(
     }
   }
 
-  const captionCues = shots.beats.flatMap((beat, index) => beat.kind === 'line' ? [{
+  // A stand-in for when the scene will not compile: real line text in beat
+  // order, stamped with the index rather than a clock. It goes through the
+  // same split the compiler applies, so the layout verdict matches what would
+  // ship — but its windows are fiction, so it is marked as such.
+  const captionCues = splitCaptionCues(shots.beats.flatMap((beat, index) => beat.kind === 'line' ? [{
     id: beat.id,
     speaker: beat.speaker,
     text: beat.text,
     startMs: index,
     endMs: index + 1,
-  }] : []);
-  let publishingSafety = evaluatePublishingSafety(captionCues);
+  }] : []));
+  let publishingSafety = evaluatePublishingSafety(captionCues, null, { timings: 'placeholder' });
   try {
     const compiledForSafety = compileShotList(
       shots,
@@ -1181,6 +1385,8 @@ export async function runProductionPreflight(
   return evaluateProductionPreflight({
     scene,
     shots,
+    screenplay,
+    scriptError,
     identity: activeIdentity(),
     rigs,
     missingRigs,
@@ -1193,6 +1399,7 @@ export async function runProductionPreflight(
     dialogueError,
     missingDialogueAssets,
     staleDialogueAssets,
+    generatedLineQa,
     animation,
     animationError,
     soundtrack,

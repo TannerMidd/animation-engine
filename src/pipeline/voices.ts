@@ -6,9 +6,10 @@ import { deriveSeed } from '../core/rng.ts';
 import { activeIdentity } from '../show/context.ts';
 import { stampOf } from '../schema/identity.ts';
 import {
-  synthesizeLines, loadRecordedVo, estimateMouthCues, lineCacheKey,
+  synthesizeLines, loadRecordedVo, estimateMouthCues, lineCacheKey, readCachedLineMeta,
   type LineTiming, type VoiceLine,
 } from '../voice/index.ts';
+import type { LineQa } from '../voice/qa.ts';
 import { mouthAt, type MouthCue, type WordTiming } from '../voice/visemes.ts';
 import { ensureVoiceRefs } from '../voice/casting.ts';
 import { decodeWav, readWav } from '../voice/wav.ts';
@@ -484,6 +485,52 @@ export async function resolveTimings(
 }
 
 /**
+ * Verification verdicts for every line that would ship as a *generated* take.
+ *
+ * Mirrors resolveTimings' line construction exactly — same cache key, same
+ * engine constant (the same hardcode soundtrackIsCurrent lives with) — but
+ * only reads cache metadata, so preflight can ask "does every generated line
+ * demonstrably say its text?" without waking the engine. Lines covered by a
+ * selected performance or legacy VO are exempt: a human chose those.
+ */
+export async function collectGeneratedLineQa(
+  scene: string,
+  shots: ShotList,
+  rigs: Map<string, LoadedRig>,
+  dialogue: DialogueDocumentType,
+): Promise<Map<string, LineQa>> {
+  const cues = new Map(dialogue.cues.map((cue) => [cue.id, cue]));
+  const verdicts = new Map<string, LineQa>();
+
+  for (let i = 0; i < shots.beats.length; i++) {
+    const beat = shots.beats[i]!;
+    if (beat.kind !== 'line') continue;
+    const cue = cues.get(beat.id);
+    if (!cue) continue;
+    if (cue.selectedRenderId || cue.selectedTakeId) continue;
+    if (await exists(voPath(scene, i, beat.speaker))) continue;
+
+    const member = shots.cast.find((c) => c.id === beat.speaker);
+    const rig = member ? rigs.get(member.rig)?.rig : undefined;
+    if (!rig) continue;
+
+    const meta = await readCachedLineMeta('chatterbox', {
+      id: `${scene}-${i}`,
+      text: cue.spokenText,
+      expression: cue.delivery.expression || beat.expression,
+      voice: rig.voice,
+      rate: rig.voiceRate,
+      ref: rig.voiceRef ? path.join(CAST_DIR, rig.voiceRef) : null,
+      persona: cuePersona(rig, cue),
+      seed: cue.seed ?? shots.seed * 1000 + i,
+    });
+    if (meta?.qa) verdicts.set(cue.id, meta.qa);
+  }
+
+  return verdicts;
+}
+
+/**
  * Placeholder timings from word counts alone.
  *
  * Lets the editor scrub a scene the instant it is typed, before any TTS has
@@ -546,6 +593,12 @@ export interface ProductionAudioOptions {
   foleyLibrary?: FoleyAssetLibrary;
   /** Per performer, mute only the unlocked cues being captured; locked own lines remain punch-in context. */
   guideMuteCueIds?: Readonly<Record<string, readonly string[]>>;
+  /**
+   * The TTS engine that resolved these placements. Recorded in the manifest so
+   * currentness recomputes cache keys against the engine that actually built
+   * the track, rather than assuming the default.
+   */
+  engine?: string;
 }
 
 export function shouldMuteGuidePlacement(
@@ -559,7 +612,7 @@ export function shouldMuteGuidePlacement(
   return mutedCueIds.includes(placement.cueId);
 }
 
-function productionAudioPaths(scene: string) {
+export function productionAudioPaths(scene: string) {
   const dir = sceneDir(scene);
   const stems = path.join(dir, 'stems');
   return {
@@ -712,7 +765,7 @@ export async function mixProductionAudio(
     ...guideWrites,
   ]);
 
-  const fingerprint = await soundtrackFingerprint(scene, shots, placements, durationMs);
+  const fingerprint = await soundtrackFingerprint(scene, shots, placements, durationMs, options.engine ?? 'chatterbox');
   const soundtrackManifest = soundtrackManifestPath(scene);
   await atomicWriteFile(soundtrackManifest, `${JSON.stringify({
     ...fingerprint,
@@ -808,6 +861,22 @@ export function trimPlacementSamples(
   return fitted;
 }
 
+/**
+ * The engine whose cache the on-disk soundtrack points into.
+ *
+ * Anything replaying an existing mix — the preview above all — must resolve
+ * timings against this engine, not the default, or a track built with another
+ * engine reads as missing takes and triggers synthesis nobody asked for.
+ */
+export async function soundtrackEngine(scene: string): Promise<string> {
+  try {
+    const stored = JSON.parse(await fs.readFile(soundtrackManifestPath(scene), 'utf8')) as { engine?: string };
+    return stored.engine ?? 'chatterbox';
+  } catch {
+    return 'chatterbox';
+  }
+}
+
 /** The scene's room-tone bed, or null when the show or profile says silence. */
 async function sceneAmbience(shots: ShotList, durationMs: number): Promise<BusClip | null> {
   const identity = activeIdentity();
@@ -826,7 +895,8 @@ async function sceneAmbience(shots: ShotList, durationMs: number): Promise<BusCl
   return { samples: bed, startMs: 0, gain: db(settings.levelDb - measured) };
 }
 
-async function resolveAcousticProfile(setName: string | null): Promise<AcousticProfile> {
+/** The acoustic profile the scene's room tone renders with, set overrides included. */
+export async function resolveAcousticProfile(setName: string | null): Promise<AcousticProfile> {
   const identity = activeIdentity();
   if (setName) {
     const override = identity.audio.ambience.setProfiles[setName];
@@ -852,7 +922,9 @@ export function soundtrackManifestPath(scene: string): string {
   return path.join(sceneDir(scene), 'soundtrack.json');
 }
 
-export const AUDIO_TIMELINE_VERSION = 5;
+// v6: dialogue upsampling moved from linear interpolation to windowed sinc,
+// which changes master bytes; stale soundtracks must remix.
+export const AUDIO_TIMELINE_VERSION = 6;
 
 export interface SoundtrackPlacementFingerprint {
   key: string;
@@ -879,6 +951,8 @@ export interface SoundtrackPlacementFingerprint {
 export interface SoundtrackFingerprint {
   /** Everything the track depends on, hashed field-by-field for diffability. */
   timelineVersion: number;
+  /** The TTS engine whose cache the placements point into. */
+  engine: string;
   programKey: string;
   durationMs: number;
   identity: { id: string; version: string; hash: string };
@@ -902,6 +976,7 @@ export async function soundtrackFingerprint(
   shots: ShotList,
   placements: AudioPlacement[],
   durationMs: number,
+  engine = 'chatterbox',
 ): Promise<SoundtrackFingerprint> {
   const identity = activeIdentity();
   const keyed: SoundtrackPlacementFingerprint[] = [];
@@ -911,6 +986,7 @@ export async function soundtrackFingerprint(
 
   return {
     timelineVersion: AUDIO_TIMELINE_VERSION,
+    engine,
     programKey: soundtrackProgramKey(shots, keyed),
     durationMs,
     identity: stampOf(identity),
@@ -1055,6 +1131,8 @@ export async function soundtrackIsCurrent(
     return false;
   }
   if (stored.timelineVersion !== AUDIO_TIMELINE_VERSION) return false;
+  // Tracks built before the engine was recorded were all chatterbox.
+  const engine = stored.engine ?? 'chatterbox';
 
   // Recompute what the placements *would* be, purely from cache keys — no
   // synthesis. A line whose take isn't cached yet makes the track stale by
@@ -1092,7 +1170,7 @@ export async function soundtrackIsCurrent(
 
       const rig = rigs.get(shots.cast.find((c) => c.id === beat.speaker)?.rig ?? '')?.rig;
       if (!rig) return false;
-      const key = await lineCacheKey('chatterbox', {
+      const key = await lineCacheKey(engine, {
         id: String(i),
         text: cue?.spokenText ?? beat.text,
         expression: cue?.delivery.expression || beat.expression,
@@ -1103,7 +1181,7 @@ export async function soundtrackIsCurrent(
         seed: cue?.seed ?? shots.seed * 1000 + i,
       });
       const placement: Omit<AudioPlacement, 'file'> = cue
-        ? placementForCue(cue, 'tts:chatterbox', shots.fps)
+        ? placementForCue(cue, `tts:${engine}`, shots.fps)
         : { startMs: 0, speaker: beat.speaker };
       expected.push(placementFingerprint(placement, `${key}.wav`));
     }

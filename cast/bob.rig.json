@@ -540,8 +540,9 @@
   "voiceRef": "bob.ref.wav",
   "voiceProvenance": {
     "source": "minted",
-    "seed": 233760991,
-    "hash": "643543fab2d4821350c2e0523e7a4a4cf36061f6"
+    "seed": 607775417,
+    "hash": "86481fff091656085160818f377ad4f5f8cf7a5a",
+    "bankVoice": "am_michael"
   },
   "acting": {
     "reactionMs": 326,

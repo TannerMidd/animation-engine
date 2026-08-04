@@ -540,8 +540,9 @@
   "voiceRef": "dolores.ref.wav",
   "voiceProvenance": {
     "source": "minted",
-    "seed": 352576135,
-    "hash": "9c243c6132c71e6ec7a0cdb679bfcef9db30e08f"
+    "seed": 891898790,
+    "hash": "3f35f14af8df5afe13da4de2e29063fb02a5cd53",
+    "bankVoice": "af_heart"
   },
   "acting": {
     "reactionMs": 322,

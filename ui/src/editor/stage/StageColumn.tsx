@@ -7,12 +7,34 @@ import {
   type StagePropTarget,
 } from '../../components/AnimationOverlay.tsx';
 import { Mono } from '../chrome.tsx';
-import { MARK_X, fmtTimecode, speakerColour, type Mode } from '../lib.ts';
+import { MARK_X, captionAt, fmtTimecode, speakerColour, type Mode } from '../lib.ts';
 import { buildSnapCandidates, listPropTargets } from './interaction.ts';
 
 interface RuntimeWindow extends Window {
   __ready?: boolean;
   __seek?: (frame: number) => number;
+}
+
+/**
+ * A media failure in creator words.
+ *
+ * The two codes that matter here both mean the same thing in practice: the
+ * audio endpoint refused the request, which it does when the rendered mix no
+ * longer belongs to the scene. `SRC_NOT_SUPPORTED` is what a JSON error body
+ * looks like to a media element.
+ */
+function mediaErrorMessage(error: MediaError | null): string {
+  switch (error?.code) {
+    case MediaError.MEDIA_ERR_NETWORK:
+    case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+      return 'The mixed audio is out of date — run Voices to rebuild it. The picture is playing without sound.';
+    case MediaError.MEDIA_ERR_DECODE:
+      return 'The mixed audio could not be decoded — run Voices to rebuild it.';
+    case MediaError.MEDIA_ERR_ABORTED:
+      return 'Loading the preview audio was interrupted.';
+    default:
+      return 'The preview audio could not be loaded. The picture is playing without sound.';
+  }
 }
 
 export interface StageHandle {
@@ -61,16 +83,21 @@ export const StageColumn = forwardRef<StageHandle, {
   recording: boolean;
   draftMarked: boolean;
   previewError?: string | null;
+  /** Reports a media failure the creator would otherwise experience as silence. */
+  onAudioError?: (message: string) => void;
   toolbarExtra?: ReactNode;
   bottomStrip?: ReactNode;
 }>(function StageColumn({
   mode, preview, audioUrl, shots, beatStarts, totalMs, selected, setDescriptor,
   prefs, onPrefs, onPlayhead, onSelectBeat, animationTarget, validArea, onCommitProp,
-  recording, draftMarked, previewError, bottomStrip,
+  recording, draftMarked, previewError, onAudioError, bottomStrip,
 }, ref) {
   const host = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  // Held in a ref so a new callback identity cannot restart playback.
+  const onAudioErrorRef = useRef(onAudioError);
+  onAudioErrorRef.current = onAudioError;
   const [ready, setReady] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [loop, setLoop] = useState(false);
@@ -169,12 +196,24 @@ export const StageColumn = forwardRef<StageHandle, {
   }, [playing, ready, fps, frameCount, apply, loop, selected, beatStarts, durationMs]);
 
   // Audio follows the frame clock; the picture is what gets rendered.
+  //
+  // Failures are reported rather than swallowed. Silence during playback is
+  // indistinguishable from a scene with no dialogue, so a discarded rejection
+  // here is a bug nobody can see — which is exactly what happened when the
+  // audio endpoint began refusing a mix that had gone stale.
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !audioUrl) return;
     if (playing) {
       audio.currentTime = frameRef.current / fps;
-      void audio.play().catch(() => {});
+      void audio.play().catch((err: unknown) => {
+        // A blocked autoplay is the browser's policy, not a broken scene, and
+        // it clears the moment the creator interacts with the page.
+        const message = err instanceof DOMException && err.name === 'NotAllowedError'
+          ? 'The browser blocked audio until you interact with the page — press play again.'
+          : `Preview audio could not play: ${err instanceof Error ? err.message : String(err)}`;
+        onAudioErrorRef.current?.(message);
+      });
     } else {
       audio.pause();
     }
@@ -257,6 +296,15 @@ export const StageColumn = forwardRef<StageHandle, {
 
   const walk = setDescriptor?.layout.walkable ?? null;
   const captionBeat = showCaptions && activeBeat?.kind === 'line' ? activeBeat : null;
+  // A long line ships as several cues in sequence, so show the one that is on
+  // screen now rather than the whole line at once.
+  const captionText = captionBeat
+    ? captionAt(captionBeat.text, (() => {
+        const from = beatStarts[activeBeatIndex] ?? 0;
+        const to = beatStarts[activeBeatIndex + 1] ?? durationMs;
+        return to > from ? (playMs - from) / (to - from) : 0;
+      })())
+    : '';
 
   // Draggable set instances, decorated with seat occupancy. Seats are matched
   // by explicit instance id or by prop kind — the same references cast[].seat uses.
@@ -485,8 +533,8 @@ export const StageColumn = forwardRef<StageHandle, {
           {/* captions */}
           {captionBeat && (
             <div className="absolute left-[10%] right-[10%] bottom-[9%] flex justify-center pointer-events-none">
-              <span className="bg-[rgba(12,13,15,.86)] text-ink text-[13px] leading-[1.35] px-2.5 py-1 text-center [text-wrap:balance]">
-                {captionBeat.speaker[0]?.toUpperCase()}{captionBeat.speaker.slice(1)}: {captionBeat.text}
+              <span className="bg-[rgba(12,13,15,.86)] text-ink text-[13px] leading-[1.35] px-2.5 py-1 text-center [text-wrap:balance] whitespace-pre-line">
+                {captionBeat.speaker[0]?.toUpperCase()}{captionBeat.speaker.slice(1)}: {captionText}
               </span>
             </div>
           )}
@@ -587,14 +635,26 @@ export const StageColumn = forwardRef<StageHandle, {
             />
           </div>
         </div>
+        {/* Fidelity claim. With no preview at all there is nothing to be
+            accurate about, and saying so beats implying the picture on screen
+            is the one that renders. */}
         <span
-          title={preview?.estimated
-            ? 'Timing estimated from word counts — instant, no synthesis'
-            : 'Real audio and Rhubarb mouth cues'}
+          title={!preview
+            ? 'No preview has built for this scene — see the error for what is blocking it.'
+            : !preview.estimated
+              ? 'Real audio and Rhubarb mouth cues'
+              : preview.soundtrack === 'stale'
+                ? 'Timing estimated from word counts — the mixed audio predates this direction and will not play. Run Voices to rebuild it.'
+                : preview.soundtrack === 'missing'
+                  ? 'Timing estimated from word counts — no audio has been rendered yet. Run Voices.'
+                  : 'Timing estimated from word counts — instant, no synthesis'}
           className="text-[9px] tracking-[.07em] uppercase border rounded-[2px] px-[5px] py-px"
-          style={{ color: preview?.estimated ? '#c8834a' : '#6f9b5a', borderColor: preview?.estimated ? '#c8834a' : '#6f9b5a' }}
+          style={{
+            color: !preview ? '#c8595a' : preview.estimated ? '#c8834a' : '#6f9b5a',
+            borderColor: !preview ? '#c8595a' : preview.estimated ? '#c8834a' : '#6f9b5a',
+          }}
         >
-          {preview?.estimated ? 'estimated' : 'accurate'}
+          {!preview ? 'no preview' : preview.estimated ? 'estimated' : 'accurate'}
         </span>
         <button
           type="button"
@@ -610,7 +670,15 @@ export const StageColumn = forwardRef<StageHandle, {
       </div>
 
       {bottomStrip}
-      {audioUrl && <audio ref={audioRef} src={audioUrl} preload="auto" className="hidden" />}
+      {audioUrl && (
+        <audio
+          ref={audioRef}
+          src={audioUrl}
+          preload="auto"
+          className="hidden"
+          onError={() => onAudioErrorRef.current?.(mediaErrorMessage(audioRef.current?.error ?? null))}
+        />
+      )}
     </div>
   );
 });

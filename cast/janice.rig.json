@@ -540,8 +540,9 @@
   "voiceRef": "janice.ref.wav",
   "voiceProvenance": {
     "source": "minted",
-    "seed": 834087563,
-    "hash": "5651d70c1a0b8122b3ce7f551e7f80b68d515605"
+    "seed": 87492658,
+    "hash": "427cbcf29e9ed6494329b45455a62a3fb933f80a",
+    "bankVoice": "bf_isabella"
   },
   "acting": {
     "reactionMs": 430,

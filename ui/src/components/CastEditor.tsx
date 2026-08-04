@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api } from '../api.ts';
+import { api, followJob } from '../api.ts';
 import type {
-  CastSummary, FacePlate, Health, Look, LookChoiceKey, LookSwatchKey, Outfit, OutfitKey, RigDoc, Vocab,
+  CastSummary, FacePlate, Health, JobEvent, JobSummary, Look, LookChoiceKey, LookSwatchKey, Outfit, OutfitKey,
+  RigCheckResult, RigDoc, Vocab,
 } from '../types.ts';
 import { Button, Panel, Select, Slider, Swatches, Field, Empty, Badge, Spinner } from './ui.tsx';
 import { ScaledFrame } from './ScaledFrame.tsx';
@@ -70,6 +71,54 @@ export function CastEditor({ health, vocab, open }: {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const rollCount = useRef(0);
+
+  // --- cast tools: validation, sheets, stills, idle clips ---
+  const [toolBusy, setToolBusy] = useState<string | null>(null);
+  const [toolEvent, setToolEvent] = useState<JobEvent | null>(null);
+  const [checkResults, setCheckResults] = useState<RigCheckResult[] | null>(null);
+  const [artifact, setArtifact] = useState<{ kind: 'image' | 'video'; url: string; title: string } | null>(null);
+  const stopTool = useRef<(() => void) | null>(null);
+
+  useEffect(() => () => stopTool.current?.(), []);
+
+  /** One tool job at a time, progress on the rail, result into the artifact viewer. */
+  const runTool = useCallback((label: string, kind: 'image' | 'video', start: () => Promise<JobSummary>) => {
+    setToolBusy(label);
+    setToolEvent(null);
+    setError(null);
+    void (async () => {
+      try {
+        const started = await start();
+        stopTool.current = followJob(started.id, (e) => {
+          setToolEvent(e);
+          if (e.type !== 'done' && e.type !== 'error') return;
+          stopTool.current?.();
+          setToolBusy(null);
+          if (e.type === 'error') {
+            setError(e.message ?? `${label} failed`);
+            return;
+          }
+          const url = (e.result as { url?: string } | undefined)?.url;
+          if (url) setArtifact({ kind, url, title: label });
+        });
+      } catch (err) {
+        setToolBusy(null);
+        setError((err as Error).message);
+      }
+    })();
+  }, []);
+
+  const validateRigs = useCallback(async () => {
+    setToolBusy('validate');
+    setError(null);
+    try {
+      setCheckResults((await api.checkCast()).results);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setToolBusy(null);
+    }
+  }, []);
 
   const refreshCast = useCallback(async () => setCast(await api.cast()), []);
 
@@ -211,31 +260,100 @@ export function CastEditor({ health, vocab, open }: {
 
   return (
     <div className="flex h-full min-h-0 gap-2 p-2">
-      <Panel
-        title="Cast"
-        className="w-44 shrink-0"
-        bodyClass="p-1"
-        actions={<Button variant="ghost" onClick={() => void addCharacter()} title="New character">+</Button>}
-      >
-        {cast.map((c) => (
-          <button
-            key={c.name}
-            type="button"
-            onClick={() => setName(c.name)}
-            className={`w-full text-left px-2 py-1.5 rounded text-[12px] ${
-              name === c.name ? 'bg-accent/20 text-ink' : 'text-ink-dim hover:bg-panel-2'
-            }`}
-          >
-            <div className="flex items-center gap-1">
-              <span className="flex-1 truncate">{c.name}</span>
-              {name === c.name && dirty && <span className="text-accent text-[14px] leading-none">•</span>}
-            </div>
-            <div className="text-[10px] text-ink-faint truncate">
-              {c.look.build} · {c.voiceRef ? 'cloned voice' : c.voice}
-            </div>
-          </button>
-        ))}
-      </Panel>
+      <div className="w-48 shrink-0 flex flex-col gap-2 min-h-0">
+        <Panel
+          title="Cast"
+          className="flex-1 min-h-0"
+          bodyClass="p-1"
+          actions={<Button variant="ghost" onClick={() => void addCharacter()} title="New character">+</Button>}
+        >
+          {cast.map((c) => {
+            const check = checkResults?.find((r) => r.name === c.name);
+            return (
+              <button
+                key={c.name}
+                type="button"
+                onClick={() => setName(c.name)}
+                className={`w-full text-left px-2 py-1.5 rounded text-[12px] ${
+                  name === c.name ? 'bg-accent/20 text-ink' : 'text-ink-dim hover:bg-panel-2'
+                }`}
+              >
+                <div className="flex items-center gap-1">
+                  <span className="flex-1 truncate">{c.name}</span>
+                  {check && (
+                    <span
+                      title={check.ok ? 'Rig valid against its SVG' : check.errors.join('\n')}
+                      className={`text-[9px] uppercase tracking-wide ${check.ok ? 'text-good' : 'text-bad'}`}
+                    >
+                      {check.ok ? 'ok' : 'fail'}
+                    </span>
+                  )}
+                  {name === c.name && dirty && <span className="text-accent text-[14px] leading-none">•</span>}
+                </div>
+                <div className="text-[10px] text-ink-faint truncate">
+                  {c.look.build} · {c.voiceRef ? 'cloned voice' : c.voice}
+                </div>
+              </button>
+            );
+          })}
+        </Panel>
+
+        {/*
+          The cast tool rail: everything that used to require the terminal —
+          rig validation, contact sheets, stills and idle clips — attached to
+          the editor that owns per-character work.
+        */}
+        <Panel title="Tools" className="shrink-0" bodyClass="p-1.5">
+          <div className="flex flex-col gap-1">
+            <Button
+              onClick={() => void validateRigs()}
+              disabled={toolBusy !== null}
+              title="Validate every rig against its SVG. Verdicts land beside each name above."
+              className="w-full text-left"
+            >
+              {toolBusy === 'validate' ? <Spinner /> : null} Validate rigs
+            </Button>
+            <Button
+              onClick={() => runTool('Cast contact sheet', 'image', () => api.castSheet())}
+              disabled={toolBusy !== null || cast.length < 2}
+              title="The whole cast side by side as one PNG — the question is never “does this one look right” but “do these read as different people”."
+              className="w-full text-left"
+            >
+              Contact sheet — cast
+            </Button>
+            <Button
+              onClick={() => runTool(`${name} expressions`, 'image', () => api.castSheet({ names: [name] }))}
+              disabled={toolBusy !== null || !name}
+              title={`Every expression ${name || 'this character'} has, as one PNG.`}
+              className="w-full text-left"
+            >
+              Expressions sheet
+            </Button>
+            <Button
+              onClick={() => runTool(`${name} still`, 'image', () => api.still(name, { pose, expression }))}
+              disabled={toolBusy !== null || !name}
+              title={`One rendered frame of ${name || 'this character'} — the pose and expression currently selected above the preview.`}
+              className="w-full text-left"
+            >
+              Still frame
+            </Button>
+            <Button
+              onClick={() => runTool(`${name} idle clip`, 'video', () => api.idle(name, { seconds: 6 }))}
+              disabled={toolBusy !== null || !name}
+              title={`Six seconds of ${name || 'this character'} idling, through the real compile-and-capture path.`}
+              className="w-full text-left"
+            >
+              Idle clip · 6 s
+            </Button>
+            {toolBusy && toolBusy !== 'validate' && (
+              <div className="px-1 py-0.5 text-[10px] text-ink-faint inline-flex items-center gap-1.5">
+                <Spinner />
+                {toolEvent?.stage ?? 'starting…'}{toolEvent?.total ? ` ${toolEvent.done}/${toolEvent.total}` : ''}
+              </div>
+            )}
+          </div>
+        </Panel>
+      </div>
 
       <Panel
         className="flex-1 min-w-0"
@@ -278,7 +396,28 @@ export function CastEditor({ health, vocab, open }: {
           title="Appearance"
           className="flex-1 min-h-0"
           bodyClass="p-3"
-          actions={<Button variant="ghost" onClick={() => void reroll()} title="Roll a different look">↻ Reroll</Button>}
+          actions={
+            <>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  if (!name) return;
+                  void api.regenerateRig(name)
+                    .then((r) => {
+                      setRig((current) => (current ? { ...r.rig, voice: current.voice, voiceRate: current.voiceRate, voiceRef: current.voiceRef } : r.rig));
+                      setLook(r.look);
+                      setDirty(false);
+                      return refreshCast();
+                    })
+                    .catch((e: Error) => setError(e.message));
+                }}
+                title="Redraw the artwork from the current look, picking up puppet-generator changes. The look and voice stay."
+              >
+                ⟳ Redraw
+              </Button>
+              <Button variant="ghost" onClick={() => void reroll()} title="Roll a different look">↻ Reroll</Button>
+            </>
+          }
         >
           {!look || !vocab ? (
             <Empty>Loading…</Empty>
@@ -372,6 +511,29 @@ export function CastEditor({ health, vocab, open }: {
           </div>
         </div>
       </div>
+
+      {artifact && (
+        <div onClick={() => setArtifact(null)} className="fixed inset-0 bg-[rgba(12,13,15,.7)] z-[60] grid place-items-center p-8">
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="max-w-[90vw] max-h-[90vh] bg-panel border border-edge rounded-md overflow-hidden flex flex-col"
+          >
+            <div className="flex items-center gap-2 px-3 py-1.5 border-b border-edge shrink-0">
+              <span className="text-[11px] uppercase tracking-wider text-ink-faint">{artifact.title}</span>
+              <div className="flex-1" />
+              <a href={artifact.url} target="_blank" rel="noreferrer" className="text-[11px] text-ink-dim hover:text-ink">
+                open in tab ↗
+              </a>
+              <Button variant="ghost" onClick={() => setArtifact(null)}>×</Button>
+            </div>
+            <div className="min-h-0 overflow-auto grid place-items-center bg-deep">
+              {artifact.kind === 'image'
+                ? <img src={artifact.url} alt={artifact.title} className="max-w-full max-h-[80vh]" />
+                : <video src={artifact.url} controls autoPlay className="max-w-full max-h-[80vh]" />}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

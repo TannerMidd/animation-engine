@@ -7,9 +7,9 @@ import { Rng, deriveSeed } from '../core/rng.ts';
 import { streamSeed, STREAMS } from '../core/streams.ts';
 import { activeIdentity } from '../show/context.ts';
 import { ffmpegPath } from '../render/encode.ts';
-import { getEngine } from './index.ts';
+import { kokoroAvailable, kokoroMint, type KokoroMintItem } from './engines/kokoro.ts';
 import { referencePath } from './reference.ts';
-import { loadRig, saveRig } from '../cast/store.ts';
+import { loadRig, saveRig, listRigs } from '../cast/store.ts';
 
 /**
  * Minting voices.
@@ -17,24 +17,25 @@ import { loadRig, saveRig } from '../cast/store.ts';
  * Chatterbox has exactly one built-in voice. Without a reference clip every
  * character clones nobody and speaks as that same person — a cast of twelve
  * with one voice between them. Minting manufactures a distinct, *stable*
- * reference per character with nothing downloaded and nothing recorded:
+ * reference per character with nothing recorded:
  *
- *   1. synthesize a fixed neutral paragraph with the built-in voice, seeded
- *      from the character's voice stream so the take itself is reproducible;
- *   2. bend it through a deterministic pitch/tempo transform whose parameters
- *      are rolled from the same stream — this is what makes it a different
- *      person rather than a different reading;
- *   3. normalise it into `cast/<name>.ref.wav`, where every later line clones
- *      from it.
+ *   1. a curated bank voice (Kokoro-82M, natural human-sounding speech) reads
+ *      a fixed neutral paragraph, seeded from the character's voice stream so
+ *      the take itself is reproducible;
+ *   2. the clip is loudness-normalised into `cast/<name>.ref.wav`, where every
+ *      later line clones from it.
  *
  * The reference is the identity anchor: once it exists, takes vary but the
- * speaker never drifts. Provenance is recorded as `minted`, so the UI can
- * offer rerolls freely — a recorded clip is someone's explicit choice and is
- * never replaced by this machinery.
+ * speaker never drifts. Provenance is recorded as `minted` with the bank
+ * voice's name, so the UI can offer rerolls freely — a recorded clip is
+ * someone's explicit choice and is never replaced by this machinery.
  *
- * Honestly experimental where it says it is: cloning from pitch-shifted audio
- * is verified by ear through the audition flow, and a real recording always
- * wins if a minted voice sounds off.
+ * History: minting used to synthesize with SAPI or the neural default and
+ * then pitch/tempo-shift the result into a "different person". The robotic
+ * SAPI prosody and the shift's formant artifacts cloned straight into every
+ * performance — the bank replaces all of that. Distinctness now comes from
+ * *actually different human-sounding voices*, and nothing in this chain
+ * pitch-shifts anything.
  */
 
 /**
@@ -48,60 +49,54 @@ const MINT_TEXT =
   'same as always, until somebody tells us otherwise.';
 
 /**
- * Base timbres.
- *
- * Pitch-shifting one voice only stretches so far — six shifts of the same man
- * are still the same man. The mint therefore starts from one of three sources:
- * the neural default, or a SAPI voice (Zira female, David male) reading the
- * paragraph. Cloning launders SAPI's robotic prosody into natural speech while
- * keeping the timbre — measured, a Zira-based mint clones at ~190 Hz against
- * the neural base's ~110 Hz — so the cast gets genuine register variety, not
- * six transpositions.
+ * The curated bank: distinct, natural Kokoro voices, half feminine and half
+ * masculine, American and British registers mixed. Two deliberate exclusions:
+ * the deepest masculine voices sit near the voice converter's 95 Hz
+ * conditioning floor (chatterbox_vc_worker.py lifts references under it, which
+ * is exactly the kind of transform minting exists to avoid), and novelty
+ * voices don't survive cloning with their character intact.
  */
-export type MintBase = 'neural' | 'zira' | 'david';
-
-/**
- * Pitch/tempo spread. Wider than feels right on the reference clip itself,
- * because cloning pulls pitch back toward the model's comfortable register —
- * measured on a six-voice cast, roughly half the shift survives into the
- * cloned speech. SAPI bases take smaller shifts; their timbre is already
- * distinct.
- */
-const SPREAD: Record<MintBase, { min: number; max: number }> = {
-  neural: { min: 2.2, max: 6.5 },
-  zira: { min: 0.8, max: 3.5 },
-  david: { min: 0.8, max: 3.5 },
-};
-const TEMPO_SPREAD = 0.09;
+const VOICE_BANK = [
+  'af_heart', 'af_bella', 'af_nicole', 'af_aoede', 'af_kore', 'af_sarah',
+  'bf_emma', 'bf_isabella',
+  'am_michael', 'am_fenrir', 'am_puck', 'am_eric',
+  'bm_george', 'bm_fable',
+] as const;
+// bm_lewis was in the first cut and is out for cause: loudness-normalised it
+// measures ~87 Hz, under the converter's 95 Hz conditioning floor, and the
+// resulting lift landed conversions ~6 st off register (measured via
+// `voices check`). The floor is exactly the transform minting exists to avoid.
 
 export interface MintParams {
-  base: MintBase;
+  /** Which bank voice read the paragraph. */
+  bankVoice: string;
+  /** Kokoro's clean duration control, held near 1 — never a pitch shift. */
+  speed: number;
   seed: number;
-  semitones: number;
-  tempo: number;
 }
 
 /**
- * The transform a given character + salt resolves to. Pure and stable.
+ * A character's pure voice preference: a seeded shuffle of the whole bank,
+ * plus a slight speed and the synthesis seed. Stable for (charId, salt);
+ * the caller resolves the first *available* preference so two characters
+ * never share a bank voice while there are voices to spare.
  *
- * Draw order is part of the contract: base first, then seed, then shift and
- * tempo. Reordering draws would silently recast every minted character.
+ * Draw order is part of the contract: the shuffle draws first, then speed,
+ * then seed. Reordering draws would silently recast every minted character.
  */
-export function mintParams(charId: string, salt = ''): MintParams {
+export function bankPreference(charId: string, salt = ''): { order: string[]; speed: number; seed: number } {
   const rng = new Rng(deriveSeed(streamSeed(activeIdentity(), STREAMS.voice, charId), `mint:${salt}`));
 
-  const roll = rng.next();
-  const base: MintBase = roll < 0.4 ? 'neural' : roll < 0.75 ? 'zira' : 'david';
-  const spread = SPREAD[base];
-  // Push away from the centre: a small shift just sounds like the same voice
-  // on an off day, which defeats the purpose.
-  const sign = rng.chance(0.5) ? 1 : -1;
+  const order: string[] = [...VOICE_BANK];
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = rng.int(0, i);
+    [order[i], order[j]] = [order[j]!, order[i]!];
+  }
 
   return {
-    base,
+    order,
+    speed: 1 + rng.range(-0.05, 0.05),
     seed: rng.int(1, 2 ** 30),
-    semitones: sign * rng.range(spread.min, spread.max),
-    tempo: 1 + rng.range(-TEMPO_SPREAD, TEMPO_SPREAD),
   };
 }
 
@@ -126,28 +121,80 @@ export function candidatePath(character: string, salt: string): string {
 }
 
 /**
- * Mint one candidate reference clip to a target path.
- *
- * Synthesis goes through the ordinary engine (and its cache — repeated mints
- * of the same params are free), then ffmpeg applies the pitch/tempo identity
- * transform with loudness normalisation in the same pass.
+ * Sidecar recording what a candidate actually is. Bank assignment depends on
+ * what the rest of the cast has taken *at mint time*, so a commit must read
+ * the recorded params rather than recompute them in a possibly-changed cast.
  */
+function candidateParamsPath(character: string, salt: string): string {
+  return path.join(candidateDir(), `${character}.${salt || 'default'}.json`);
+}
+
 interface MintTask {
+  /** Cast name, used to exclude the character's own rig from collision checks. */
+  character: string;
   charId: string;
   salt: string;
   out: string;
 }
 
 /**
+ * Resolve tasks to concrete bank voices given what is already taken. The pure
+ * core of assignment, separated so the contract is testable: each task takes
+ * the first preference not yet claimed, batch order is the tiebreak, and an
+ * exhausted bank (a cast larger than the bank) falls back to the raw first
+ * preference — differing speed and cloning drift keep reused bases apart, and
+ * that is still a stronger guarantee than the three shared bases the old
+ * pitch-shift mint chain had.
+ */
+export function resolveBankAssignments(
+  tasks: Array<{ charId: string; salt: string }>,
+  taken: ReadonlySet<string>,
+): MintParams[] {
+  const claimed = new Set(taken);
+  return tasks.map((t) => {
+    const pref = bankPreference(t.charId, t.salt);
+    const bankVoice = pref.order.find((v) => !claimed.has(v)) ?? pref.order[0]!;
+    if (claimed.has(bankVoice)) {
+      console.warn(`voice bank exhausted: reusing ${bankVoice} for ${t.charId}`);
+    }
+    claimed.add(bankVoice);
+    return { bankVoice, speed: pref.speed, seed: pref.seed };
+  });
+}
+
+/**
+ * Collect the bank voices committed on every *other* character's rig, then
+ * assign. A character re-minting keeps its own current voice out of the taken
+ * set — a reroll is allowed to land back on the same base.
+ */
+async function assignBankVoices(tasks: MintTask[]): Promise<MintParams[]> {
+  const mintingNow = new Set(tasks.map((t) => t.character));
+  const taken = new Set<string>();
+  try {
+    for (const name of await listRigs()) {
+      if (mintingNow.has(name)) continue;
+      try {
+        const { rig } = await loadRig(name);
+        const bankVoice = rig.voiceProvenance?.bankVoice;
+        if (bankVoice) taken.add(bankVoice);
+      } catch {
+        // A broken rig can't hold a voice.
+      }
+    }
+  } catch {
+    // No cast directory yet: nothing is taken.
+  }
+
+  return resolveBankAssignments(tasks, taken);
+}
+
+/**
  * Mint a batch of reference clips.
  *
- * One engine call for every base take — the model load costs tens of seconds
- * and dominates everything else, so a whole cast (or a fistful of candidates)
- * synthesizes on a single load. ffmpeg then applies each character's
- * pitch/tempo identity transform: asetrate shifts pitch and formants together
- * (which is what changes the apparent speaker), atempo undoes the duration
- * change and applies the character's own tempo, and loudnorm levels the lot.
- * 4.2.3-safe filters only.
+ * One worker spawn for the whole batch — the model load dominates everything
+ * else, so a whole cast (or a fistful of candidates) synthesizes on a single
+ * load. ffmpeg then only levels the result onto the reference format: same
+ * loudness contract as an uploaded recording, no other processing.
  */
 async function mintBatch(
   tasks: MintTask[],
@@ -155,74 +202,44 @@ async function mintBatch(
 ): Promise<Map<string, MintParams>> {
   if (!tasks.length) return new Map();
 
+  const params = await assignBankVoices(tasks);
+
+  const availability = await kokoroAvailable([...new Set(params.map((p) => p.bankVoice))]);
+  if (!availability.ok) throw new Error(`cannot mint a voice: ${availability.reason}`);
+
   await fs.mkdir(candidateDir(), { recursive: true });
   const jobDir = await fs.mkdtemp(path.join(candidateDir(), 'mint-'));
   const results = new Map<string, MintParams>();
 
   try {
-    const params = tasks.map((t) => mintParams(t.charId, t.salt));
-
-    // Base takes, batched per engine: every neural base shares one model load,
-    // and the SAPI bases are near-free. A SAPI base falling over (voice not
-    // installed) falls back to the neural default rather than failing the cast.
-    const request = (t: MintTask, i: number, voice: string) => ({
+    const items: KokoroMintItem[] = tasks.map((t, i) => ({
       id: `${t.charId}:${t.salt}`,
       out: path.join(jobDir, `base-${i}.wav`),
       text: MINT_TEXT,
-      voice,
-      rate: 0,
-      exaggeration: 0.45,
-      cfgWeight: 0.5,
-      ref: null,
+      bankVoice: params[i]!.bankVoice,
+      speed: params[i]!.speed,
       seed: params[i]!.seed,
-    });
+    }));
 
-    const sapiIdx = tasks.map((_, i) => i).filter((i) => params[i]!.base !== 'neural');
-    let sapiOk = false;
-    if (sapiIdx.length) {
-      try {
-        const sapi = getEngine('sapi');
-        const takes = await sapi.synth(sapiIdx.map((i) => request(tasks[i]!, i, params[i]!.base === 'zira' ? 'Zira' : 'David')));
-        sapiOk = sapiIdx.every((i) => takes.has(`${tasks[i]!.charId}:${tasks[i]!.salt}`));
-      } catch {
-        sapiOk = false;
-      }
-      if (!sapiOk) for (const i of sapiIdx) params[i]!.base = 'neural';
-    }
-
-    const neuralIdx = tasks.map((_, i) => i).filter((i) => params[i]!.base === 'neural');
-    if (neuralIdx.length) {
-      const engine = getEngine('chatterbox');
-      const availability = await engine.available();
-      if (!availability.ok) throw new Error(`cannot mint a voice: ${availability.reason}`);
-      const takes = await engine.synth(neuralIdx.map((i) => request(tasks[i]!, i, '')), onProgress);
-      for (const i of neuralIdx) {
-        if (!takes.has(`${tasks[i]!.charId}:${tasks[i]!.salt}`)) {
-          throw new Error(`the engine returned no audio for mint ${tasks[i]!.charId}`);
-        }
+    const takes = await kokoroMint(items, onProgress);
+    for (const t of tasks) {
+      if (!takes.has(`${t.charId}:${t.salt}`)) {
+        throw new Error(`the engine returned no audio for mint ${t.charId}`);
       }
     }
 
     for (let i = 0; i < tasks.length; i++) {
       const task = tasks[i]!;
-      const p = params[i]!;
-      const base = path.join(jobDir, `base-${i}.wav`);
-
-      const k = Math.pow(2, p.semitones / 12);
-      const atempo = (1 / k) * p.tempo;
       await runFfmpeg([
-        '-y', '-i', base,
-        '-af',
-        // asetrate against the *source* rate (SAPI writes 22.05k, the neural
-        // engine 24k), resampled onto the reference format after.
-        `aresample=24000,asetrate=24000*${k.toFixed(6)},aresample=24000,atempo=${atempo.toFixed(6)},loudnorm=I=-18:TP=-2:LRA=11`,
+        '-y', '-i', path.join(jobDir, `base-${i}.wav`),
+        '-af', 'aresample=24000,loudnorm=I=-18:TP=-2:LRA=11',
         '-ac', '1', '-ar', '24000', '-c:a', 'pcm_s16le',
         // Explicit container: commit targets are .tmp files that rename into
         // place, and ffmpeg cannot guess a format from that extension.
         '-f', 'wav',
         task.out,
       ]);
-      results.set(`${task.charId}:${task.salt}`, p);
+      results.set(`${task.charId}:${task.salt}`, params[i]!);
     }
   } finally {
     await fs.rm(jobDir, { recursive: true, force: true });
@@ -240,12 +257,22 @@ export interface MintedCandidate {
 /** Mint several distinct candidates for auditioning side by side. One model load. */
 export async function mintCandidates(character: string, charId: string, count = 3): Promise<MintedCandidate[]> {
   const tasks: MintTask[] = Array.from({ length: count }, (_, i) => ({
+    character,
     charId,
     salt: String(i),
     out: candidatePath(character, String(i)),
   }));
   const params = await mintBatch(tasks);
-  return tasks.map((t) => ({ salt: t.salt, file: t.out, params: params.get(`${t.charId}:${t.salt}`)! }));
+
+  const candidates: MintedCandidate[] = [];
+  for (const t of tasks) {
+    const p = params.get(`${t.charId}:${t.salt}`)!;
+    // The sidecar is what commit reads; without it a commit would have to
+    // re-run assignment inside a cast that may have changed since the mint.
+    await fs.writeFile(candidateParamsPath(character, t.salt), JSON.stringify(p, null, 2), 'utf8');
+    candidates.push({ salt: t.salt, file: t.out, params: p });
+  }
+  return candidates;
 }
 
 /**
@@ -253,8 +280,8 @@ export async function mintCandidates(character: string, charId: string, count = 
  *
  * The clip is finished before it appears at the reference path — a crash
  * mid-commit leaves the old voice intact, never half a new one. Provenance
- * records the mint so the choice is distinguishable from a recording and
- * reproducible from its seed.
+ * records the mint (bank voice included) so the choice is distinguishable
+ * from a recording and reproducible from its seed.
  */
 export async function commitCandidate(character: string, salt: string): Promise<void> {
   const from = candidatePath(character, salt);
@@ -266,7 +293,15 @@ export async function commitCandidate(character: string, salt: string): Promise<
   await fs.rename(tmp, to);
 
   const { rig, svg } = await loadRig(character);
-  const params = mintParams(rig.charId ?? character, salt);
+  let params: MintParams;
+  try {
+    params = JSON.parse(await fs.readFile(candidateParamsPath(character, salt), 'utf8')) as MintParams;
+  } catch {
+    // Sidecar lost (pre-upgrade candidate, manual cleanup): fall back to the
+    // character's raw first preference, which is what an empty cast mints.
+    const pref = bankPreference(rig.charId ?? character, salt);
+    params = { bankVoice: pref.order[0]!, speed: pref.speed, seed: pref.seed };
+  }
   await saveRig(
     {
       ...rig,
@@ -275,6 +310,7 @@ export async function commitCandidate(character: string, salt: string): Promise<
         source: 'minted',
         seed: params.seed,
         hash: crypto.createHash('sha1').update(data).digest('hex'),
+        bankVoice: params.bankVoice,
       },
     },
     svg,
@@ -317,6 +353,7 @@ export async function ensureVoiceRefs(
     // The whole cast mints on one model load; commits happen per character so
     // a failure partway leaves everyone before it fully cast, nobody half-cast.
     const tasks: MintTask[] = need.map((c) => ({
+      character: c.name,
       charId: c.charId ?? c.name,
       salt: '',
       out: `${referencePath(c.name)}.tmp`,
@@ -340,6 +377,7 @@ export async function ensureVoiceRefs(
             source: 'minted',
             seed: p.seed,
             hash: crypto.createHash('sha1').update(data).digest('hex'),
+            bankVoice: p.bankVoice,
           },
         },
         svg,

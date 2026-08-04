@@ -37,8 +37,17 @@ def save_wav(path, tensor, sample_rate):
     install. Writing the WAV here avoids that dependency entirely and, more
     usefully, pins the output format — the dialogue mixer places samples
     natively and requires every line to share a sample rate and channel count.
+
+    The model runs hot: roughly a fifth of takes peak past full scale, and the
+    old clamp turned every one of those peaks into a hard-clip tick. A take
+    that exceeds the ceiling is scaled down whole instead — same waveform,
+    no distortion; the mixer levels per speaker afterwards anyway.
     """
-    audio = tensor.detach().cpu().flatten().clamp(-1.0, 1.0)
+    audio = tensor.detach().cpu().flatten()
+    peak = float(audio.abs().max()) if len(audio) else 0.0
+    if peak > 0.985:
+        audio = audio * (0.985 / peak)
+    audio = audio.clamp(-1.0, 1.0)
     pcm = (audio * 32767.0).short()
 
     try:
@@ -79,6 +88,12 @@ def render_items(model, torch, items):
             item["text"],
             exaggeration=float(item.get("exaggeration", 0.5)),
             cfg_weight=float(item.get("cfg_weight", 0.5)),
+            # Sampling knobs arrive pinned from the orchestrator (and sit in its
+            # cache key); the .get defaults only mirror today's library defaults.
+            temperature=float(item.get("temperature", 0.8)),
+            repetition_penalty=float(item.get("repetition_penalty", 1.2)),
+            min_p=float(item.get("min_p", 0.05)),
+            top_p=float(item.get("top_p", 1.0)),
         )
         duration_ms = int(save_wav(item["out"], wav, model.sr) * 1000)
         rendered += 1

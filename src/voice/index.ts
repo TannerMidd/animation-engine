@@ -6,6 +6,7 @@ import { SapiEngine, listSapiVoices } from './engines/sapi.ts';
 import { ChatterboxEngine } from './engines/chatterbox.ts';
 import { rhubarbCues, findRhubarb } from './rhubarb.ts';
 import { readWav, wavDurationMs as wavDuration } from './wav.ts';
+import { asrAvailable, transcribeBatch, scoreTranscript, deriveRetrySeed, type LineQa } from './qa.ts';
 import type { LineTiming, MouthCue } from './visemes.ts';
 import type { TtsEngine, SynthRequest } from './types.ts';
 import type { MouthShape } from '../schema/index.ts';
@@ -13,10 +14,15 @@ import type { MouthShape } from '../schema/index.ts';
 const CACHE_DIR = path.join(ROOT, '.cache', 'voice');
 
 /** Bump when anything that changes synthesis output changes. */
-// v4 fixes persona propagation on cache misses. v3 keys included the resolved
+// v7 damps delivery on very short lines and walks retries down a stability
+// ladder — retried takes under a v6 key would not match a cold rebuild.
+// v6 peak-normalizes hot takes in the worker (was a hard clip at full scale)
+// and gates generated lines through ASR verification with seed retries.
+// v5 added the sampling knobs to the key and retuned the delivery table.
+// v4 fixed persona propagation on cache misses: v3 keys included the resolved
 // persona even though synthesis accidentally used the neutral delivery, so an
 // existing v3 entry may contain audio that does not match its own fingerprint.
-const CACHE_VERSION = 4;
+const CACHE_VERSION = 7;
 
 /**
  * sha1 of a reference clip's bytes, memoized by (path, size, mtime).
@@ -66,20 +72,34 @@ export function getEngine(name: string): TtsEngine {
  * weight, where lower reads as slower and more deliberate. Mapping the
  * director's expressions onto these means a DEADPAN line is actually delivered
  * flat rather than merely drawn that way — which in this genre is most of the
- * joke. SAPI ignores both.
+ * joke. SAPI ignores all of it.
+ *
+ * `temperature` is sampling variance: low keeps calm lines controlled and
+ * repeatable-sounding, high lets hot lines actually move. The exaggeration
+ * ceiling sits lower than it used to (0.8, not 0.9) and hot-line cfg drops
+ * with it — pushed past that, Chatterbox races and destabilises, which reads
+ * as *worse* acting, not bigger acting.
  */
-const DELIVERY: Record<string, { exaggeration: number; cfg: number }> = {
-  DEADPAN: { exaggeration: 0.25, cfg: 0.3 },
-  EXHAUSTED: { exaggeration: 0.3, cfg: 0.28 },
-  SAD: { exaggeration: 0.35, cfg: 0.35 },
-  SUSPICIOUS: { exaggeration: 0.4, cfg: 0.38 },
-  CONFUSED: { exaggeration: 0.45, cfg: 0.45 },
-  NEUTRAL: { exaggeration: 0.5, cfg: 0.5 },
-  SMUG: { exaggeration: 0.6, cfg: 0.45 },
-  JOY: { exaggeration: 0.75, cfg: 0.55 },
-  ANGRY: { exaggeration: 0.85, cfg: 0.6 },
-  SHOCKED: { exaggeration: 0.9, cfg: 0.6 },
+const DELIVERY: Record<string, { exaggeration: number; cfg: number; temperature: number }> = {
+  DEADPAN: { exaggeration: 0.3, cfg: 0.3, temperature: 0.5 },
+  EXHAUSTED: { exaggeration: 0.32, cfg: 0.3, temperature: 0.55 },
+  SAD: { exaggeration: 0.38, cfg: 0.34, temperature: 0.6 },
+  SUSPICIOUS: { exaggeration: 0.42, cfg: 0.38, temperature: 0.65 },
+  CONFUSED: { exaggeration: 0.45, cfg: 0.42, temperature: 0.7 },
+  NEUTRAL: { exaggeration: 0.5, cfg: 0.45, temperature: 0.7 },
+  SMUG: { exaggeration: 0.58, cfg: 0.42, temperature: 0.75 },
+  JOY: { exaggeration: 0.68, cfg: 0.42, temperature: 0.8 },
+  ANGRY: { exaggeration: 0.75, cfg: 0.4, temperature: 0.85 },
+  SHOCKED: { exaggeration: 0.8, cfg: 0.38, temperature: 0.9 },
 };
+
+/**
+ * Token-sampling knobs, pinned to what the installed Chatterbox defaults to
+ * today. Passed explicitly on every request and folded into the cache key, so
+ * a library upgrade that moves its defaults cannot silently change rendered
+ * audio while the cache still claims it is current.
+ */
+export const SAMPLING = { repetitionPenalty: 1.2, minP: 0.05, topP: 1.0 } as const;
 
 export interface VoicePersona {
   energy: number;
@@ -100,12 +120,37 @@ export const NEUTRAL_PERSONA: VoicePersona = { energy: 1, pace: 1 };
 export function deliveryFor(
   expression: string,
   persona: VoicePersona = NEUTRAL_PERSONA,
-): { exaggeration: number; cfg: number } {
+): { exaggeration: number; cfg: number; temperature: number } {
   const base = DELIVERY[expression] ?? DELIVERY['NEUTRAL']!;
   const clamp = (v: number) => Math.round(Math.max(0.1, Math.min(1, v)) * 1000) / 1000;
   return {
     exaggeration: clamp(base.exaggeration * persona.energy),
     cfg: clamp(base.cfg * persona.pace),
+    // Deliberately not bent by persona: energy and pace already differentiate
+    // characters, and temperature below 0.4 collapses into monotone.
+    temperature: Math.max(0.4, Math.min(1, base.temperature)),
+  };
+}
+
+/**
+ * The delivery a specific line is actually synthesized with.
+ *
+ * On top of the expression mapping, very short lines are damped: a one-word
+ * exclamation at full SHOCKED intensity has nowhere to put the energy and
+ * Chatterbox tips into gibberish — measured on a real scene, hot one-worders
+ * garbled on *every* seed while their damped versions read cleanly. A
+ * slightly flatter "Unpaid?" that says "unpaid" is the joke; a perfectly
+ * shocked syllable-salad is not. Both the cache key and the synthesis request
+ * resolve through here, so the two can never disagree.
+ */
+export function deliveryForLine(line: VoiceLine): { exaggeration: number; cfg: number; temperature: number } {
+  const d = deliveryFor(line.expression, line.persona);
+  const words = line.text.trim().split(/\s+/).filter(Boolean).length;
+  if (words > 2) return d;
+  return {
+    exaggeration: Math.min(d.exaggeration, 0.55),
+    cfg: Math.max(d.cfg, 0.4),
+    temperature: Math.min(d.temperature, 0.7),
   };
 }
 
@@ -125,9 +170,11 @@ export interface VoiceLine {
   seed: number;
 }
 
-interface CachedMeta {
+export interface CachedMeta {
   durationMs: number;
   cues: MouthCue[];
+  /** Verification verdict for the accepted take. Absent on ungated engines. */
+  qa?: LineQa;
 }
 
 /**
@@ -143,7 +190,7 @@ export async function lineCacheKey(engine: string, line: VoiceLine): Promise<str
 }
 
 async function cacheKey(engine: string, line: VoiceLine): Promise<string> {
-  const d = deliveryFor(line.expression, line.persona);
+  const d = deliveryForLine(line);
   return crypto
     .createHash('sha1')
     .update(
@@ -155,6 +202,10 @@ async function cacheKey(engine: string, line: VoiceLine): Promise<string> {
         line.rate,
         d.exaggeration,
         d.cfg,
+        d.temperature,
+        SAMPLING.repetitionPenalty,
+        SAMPLING.minP,
+        SAMPLING.topP,
         await refContentHash(line.ref),
         line.seed,
       ].join('\0'),
@@ -176,7 +227,7 @@ export interface SynthesizeOptions {
  * neutral energy/pace that happened before M22.
  */
 export function buildSynthRequest(line: VoiceLine, out: string): SynthRequest {
-  const delivery = deliveryFor(line.expression, line.persona);
+  const delivery = deliveryForLine(line);
   return {
     id: line.id,
     out,
@@ -185,9 +236,59 @@ export function buildSynthRequest(line: VoiceLine, out: string): SynthRequest {
     rate: line.rate,
     exaggeration: delivery.exaggeration,
     cfgWeight: delivery.cfg,
+    temperature: delivery.temperature,
+    repetitionPenalty: SAMPLING.repetitionPenalty,
+    minP: SAMPLING.minP,
+    topP: SAMPLING.topP,
     ref: line.ref,
     seed: line.seed,
   };
+}
+
+/** How many takes a line gets before the best failure is kept and flagged. */
+const MAX_SYNTH_ATTEMPTS = 3;
+
+/**
+ * Walk a retry toward stability.
+ *
+ * A failed take usually failed *because* of expressive intensity — high
+ * exaggeration and temperature are exactly where sampling tips over. Retrying
+ * the same settings on a new seed just rolls the same dice; each retry
+ * instead gives up a slice of intensity for a much better chance of a take
+ * that says its line. Pure in (request, attempt), so retried takes are as
+ * reproducible as first takes. Attempt 0 is the identity.
+ */
+export function stabilizeRequest(request: SynthRequest, attempt: number): SynthRequest {
+  if (attempt <= 0) return request;
+  const round3 = (v: number) => Math.round(v * 1000) / 1000;
+  if (attempt === 1) {
+    return {
+      ...request,
+      exaggeration: round3(request.exaggeration * 0.85),
+      cfgWeight: round3(request.cfgWeight + (0.45 - request.cfgWeight) * 0.3),
+      temperature: round3(Math.max(0.5, request.temperature * 0.85)),
+    };
+  }
+  return {
+    ...request,
+    exaggeration: round3(Math.min(request.exaggeration * 0.7, 0.55)),
+    cfgWeight: 0.45,
+    temperature: 0.6,
+  };
+}
+
+interface TakeCandidate {
+  audio: string;
+  durationMs: number;
+  cues: MouthCue[] | null;
+  qa?: LineQa;
+}
+
+/** Strictly-better ordering for takes: a pass beats a fail, then similarity. */
+function betterTake(a: TakeCandidate, b: TakeCandidate): boolean {
+  if (!a.qa || !b.qa) return false;
+  if (a.qa.passed !== b.qa.passed) return a.qa.passed;
+  return a.qa.similarity > b.qa.similarity + 1e-9;
 }
 
 /**
@@ -197,6 +298,15 @@ export function buildSynthRequest(line: VoiceLine, out: string): SynthRequest {
  * neighbours costs nothing — only genuinely changed text is re-synthesized,
  * which matters a lot when a neural take costs seconds rather than
  * milliseconds.
+ *
+ * Fresh neural takes are *verified* before they enter the cache: the audio is
+ * transcribed locally and scored against the script line, and a take that
+ * does not say its line is retried on a derived seed (deterministic, bounded
+ * by MAX_SYNTH_ATTEMPTS). Sampling occasionally garbles a take, and a
+ * seed-stable pipeline would otherwise re-render that same garble forever.
+ * If every attempt fails, the closest take is kept and the failure recorded
+ * in the cache metadata, where preflight turns it into a release blocker —
+ * an unintelligible line must be a loud decision, never a quiet default.
  */
 export async function synthesizeLines(
   lines: VoiceLine[],
@@ -206,8 +316,8 @@ export async function synthesizeLines(
 
   const engine = getEngine(opts.engine);
   const out = new Map<string, LineTiming>();
-  const misses: SynthRequest[] = [];
   const keyById = new Map<string, string>();
+  const misses: VoiceLine[] = [];
 
   for (const line of lines) {
     const key = await cacheKey(opts.engine, line);
@@ -225,7 +335,7 @@ export async function synthesizeLines(
       // Not cached, or half-written.
     }
 
-    misses.push(buildSynthRequest(line, wav));
+    misses.push(line);
   }
 
   // Nothing to render: return without touching the engine at all. Probing
@@ -239,12 +349,82 @@ export async function synthesizeLines(
     throw new Error(`voice engine "${opts.engine}" is not usable: ${availability.reason}`);
   }
 
-  const rendered = await engine.synth(misses, (done, total) =>
-    opts.onProgress?.('synth', done, total),
-  );
+  // Verification is chatterbox-only: SAPI is deterministic concatenative
+  // speech that cannot garble, and gating it would only cost render time.
+  const gate = opts.engine === 'chatterbox' ? await asrAvailable() : { ok: false as const };
 
-  // Engines that do not report phoneme timing get sent through Rhubarb.
-  const needLipsync = misses.filter((m) => !rendered.get(m.id)?.cues);
+  interface LineState {
+    line: VoiceLine;
+    wav: string;
+    best: TakeCandidate | null;
+    done: boolean;
+  }
+  const states = new Map<string, LineState>(misses.map((line) => [
+    line.id,
+    { line, wav: path.join(CACHE_DIR, `${keyById.get(line.id)!}.wav`), best: null, done: false },
+  ]));
+
+  const attempts = gate.ok ? MAX_SYNTH_ATTEMPTS : 1;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const round = [...states.values()].filter((s) => !s.done);
+    if (!round.length) break;
+
+    // Retries land next to the canonical path so a worse retry can lose to an
+    // earlier take; the winner is copied into place at the end. Each retry
+    // rolls a derived seed *and* steps down the stability ladder.
+    const requests = round.map((s) => stabilizeRequest(
+      buildSynthRequest(
+        { ...s.line, seed: deriveRetrySeed(s.line.seed, attempt) },
+        attempt === 0 ? s.wav : `${s.wav}.retry${attempt}`,
+      ),
+      attempt,
+    ));
+    const rendered = await engine.synth(requests, (done, total) =>
+      opts.onProgress?.('synth', done, total),
+    );
+    for (const s of round) {
+      if (!rendered.get(s.line.id)) {
+        throw new Error(`engine "${opts.engine}" returned no audio for line "${s.line.id}"`);
+      }
+    }
+
+    if (!gate.ok) {
+      for (const s of round) {
+        const r = rendered.get(s.line.id)!;
+        s.best = { audio: r.audio, durationMs: r.durationMs, cues: r.cues };
+        s.done = true;
+      }
+      break;
+    }
+
+    const transcripts = await transcribeBatch(
+      round.map((s) => ({ id: s.line.id, wav: rendered.get(s.line.id)!.audio })),
+      (done, total) => opts.onProgress?.('verify', done, total),
+    );
+    for (const s of round) {
+      const r = rendered.get(s.line.id)!;
+      const qa: LineQa = { ...scoreTranscript(s.line.text, transcripts.get(s.line.id) ?? ''), attempt };
+      const candidate: TakeCandidate = { audio: r.audio, durationMs: r.durationMs, cues: r.cues, qa };
+      if (!s.best || betterTake(candidate, s.best)) s.best = candidate;
+      if (qa.passed) s.done = true;
+    }
+  }
+
+  // Materialize each winner at its canonical cache path, drop retry scratch.
+  for (const s of states.values()) {
+    const best = s.best!;
+    if (best.audio !== s.wav) {
+      await fs.copyFile(best.audio, s.wav);
+      best.audio = s.wav;
+    }
+    for (let attempt = 1; attempt < attempts; attempt++) {
+      await fs.rm(`${s.wav}.retry${attempt}`, { force: true });
+    }
+  }
+
+  // Engines that do not report phoneme timing get sent through Rhubarb —
+  // strictly after take selection, so the mouth is timed to the accepted take.
+  const needLipsync = [...states.values()].filter((s) => !s.best!.cues);
   if (needLipsync.length && !(await findRhubarb())) {
     throw new Error(
       `engine "${opts.engine}" returns audio without mouth timing, so Rhubarb is required.\n` +
@@ -254,30 +434,42 @@ export async function synthesizeLines(
   }
 
   let lipsynced = 0;
-  for (const req of misses) {
-    const result = rendered.get(req.id);
-    if (!result) throw new Error(`engine "${opts.engine}" returned no audio for line "${req.id}"`);
-
-    let cues = result.cues;
-    let durationMs = result.durationMs;
+  for (const s of states.values()) {
+    const best = s.best!;
+    let cues = best.cues;
+    let durationMs = best.durationMs;
 
     if (!cues) {
-      const analysed = await rhubarbCues(result.audio, req.text);
+      const analysed = await rhubarbCues(best.audio, s.line.text);
       cues = analysed.cues;
       if (analysed.durationMs > 0) durationMs = analysed.durationMs;
       opts.onProgress?.('lipsync', ++lipsynced, needLipsync.length);
     }
 
-    const key = keyById.get(req.id)!;
+    const key = keyById.get(s.line.id)!;
     await fs.writeFile(
       path.join(CACHE_DIR, `${key}.json`),
-      JSON.stringify({ durationMs, cues } satisfies CachedMeta),
+      JSON.stringify({ durationMs, cues, qa: best.qa } satisfies CachedMeta),
       'utf8',
     );
-    out.set(req.id, { audio: result.audio, durationMs, cues });
+    out.set(s.line.id, { audio: best.audio, durationMs, cues });
   }
 
   return out;
+}
+
+/**
+ * The cached metadata for a line, if a take has been rendered for exactly
+ * these inputs. How preflight reads verification verdicts without touching
+ * the engine.
+ */
+export async function readCachedLineMeta(engine: string, line: VoiceLine): Promise<CachedMeta | null> {
+  const key = await cacheKey(engine, line);
+  try {
+    return JSON.parse(await fs.readFile(path.join(CACHE_DIR, `${key}.json`), 'utf8')) as CachedMeta;
+  } catch {
+    return null;
+  }
 }
 
 export async function listVoices(): Promise<string[]> {

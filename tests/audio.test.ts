@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  BUS_RATE, assembleMaster, masterToWav, stemToWav, resampleLinear, toBusSamples, fadeEdges, rmsDb, db,
+  BUS_RATE, assembleMaster, masterToWav, stemToWav, resample, toBusSamples, fadeEdges, rmsDb, db,
   integratedLoudnessLufs, measureProgramme, truePeakDbtp,
 } from '../src/audio/bus.ts';
 import { renderAmbience, acousticProfileFor, ACOUSTIC_PROFILES } from '../src/audio/ambience.ts';
@@ -126,11 +126,55 @@ describe('the master bus', () => {
     const input = sine(440, 1000);
     const from = new Float64Array(Math.round(22050));
     from.set(input.subarray(0, 22050));
-    const out = resampleLinear(from, 22050, 24000);
+    const out = resample(from, 22050, 24000);
     expect(out.length).toBe(24000);
     let peak = 0;
     for (const v of out) peak = Math.max(peak, Math.abs(v));
-    expect(peak).toBeLessThanOrEqual(0.51);
+    // Kaiser passband ripple and edge replication get a hair of headroom over
+    // the 0.5 input level; anything past this is invented energy.
+    expect(peak).toBeLessThanOrEqual(0.52);
+  });
+
+  it('returns the input untouched when rates already match', () => {
+    const input = sine(440, 100);
+    expect(resample(input, 48000, 48000)).toBe(input);
+  });
+
+  it('passes DC at exactly unity gain', () => {
+    // Per-phase coefficient normalization: a constant must survive both
+    // directions bit-nearly, or every quiet room tone picks up a tilt.
+    const input = new Float64Array(4800).fill(0.25);
+    for (const [from, to] of [[24000, 48000], [48000, 24000], [22050, 48000]] as const) {
+      const out = resample(input, from, to);
+      for (let i = 0; i < out.length; i++) {
+        expect(Math.abs(out[i]! - 0.25), `${from}->${to} @${i}`).toBeLessThan(1e-9);
+      }
+    }
+  });
+
+  it('reconstructs a passband tone accurately, where linear interpolation cannot', () => {
+    // 1 kHz at 24k upsampled to 48k, compared against the analytic sine on the
+    // output grid. The windowed sinc lands under 1e-3; the old linear
+    // interpolator sat around 4e-3 error and audibly dulled consonants.
+    const freq = 1000;
+    const from = 24000;
+    const to = 48000;
+    const input = new Float64Array(from); // 1 second
+    for (let i = 0; i < input.length; i++) input[i] = Math.sin((2 * Math.PI * freq * i) / from) * 0.5;
+    const out = resample(input, from, to);
+
+    let maxError = 0;
+    // Interior only: the first/last kernel widths see edge replication.
+    for (let j = 100; j < out.length - 100; j++) {
+      const expected = Math.sin((2 * Math.PI * freq * j) / to) * 0.5;
+      maxError = Math.max(maxError, Math.abs(out[j]! - expected));
+    }
+    expect(maxError).toBeLessThan(1e-3);
+  });
+
+  it('resamples deterministically', () => {
+    const input = sine(313, 250, 0.4);
+    expect(resample(input, 22050, 48000)).toEqual(resample(input, 22050, 48000));
   });
 
   it('folds stereo to mono through the WAV path', () => {

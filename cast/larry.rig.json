@@ -540,8 +540,9 @@
   "voiceRef": "larry.ref.wav",
   "voiceProvenance": {
     "source": "minted",
-    "seed": 97741260,
-    "hash": "b361bd6a403f7f4bfe4e8be33cb2f5a15f95c14e"
+    "seed": 456499245,
+    "hash": "b71fd02eb1864903893931a5120ab047f937b642",
+    "bankVoice": "af_nicole"
   },
   "acting": {
     "reactionMs": 471,

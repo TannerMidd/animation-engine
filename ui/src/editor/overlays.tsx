@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ProductionPreflightReport } from '../types.ts';
+import type { ProductionPreflightNote, ProductionPreflightReport } from '../types.ts';
 import { Kbd, Mono, Spinner } from './chrome.tsx';
 import { ReadinessGroupCard, groupPreflight } from './panes.tsx';
 
@@ -96,13 +96,20 @@ export function CommandPalette({
 
 /** The full production-readiness report, anchored under the app-bar chip. */
 export function PreflightPopover({
-  report, busy, onClose, onAcknowledge, onJump, onRender,
+  report, busy, checkedAgoS, onClose, onAcknowledge, onJump, onRender,
 }: {
   report: ProductionPreflightReport | null;
   busy: boolean;
+  /**
+   * Seconds since this verdict was computed, or null before the first run.
+   *
+   * Without it a cached report is indistinguishable from a live one — which is
+   * how a soundtrack rebuilt two runs ago keeps reading as stale.
+   */
+  checkedAgoS: number | null;
   onClose: () => void;
   onAcknowledge: () => void;
-  onJump: (code: string) => void;
+  onJump: (note: ProductionPreflightNote) => void;
   onRender: () => void;
 }) {
   const groups = groupPreflight(report, onJump);
@@ -118,8 +125,18 @@ export function PreflightPopover({
         <span className="w-[7px] h-[7px] rounded-full" style={{ background: dot }} />
         <span className="text-[11px] tracking-[.07em] uppercase text-ink">Production readiness</span>
         <Mono className="text-ink-faint">policy production-v1</Mono>
-        {busy && <Spinner />}
         <div className="flex-1" />
+        <span
+          title="This report is re-run when you open it and whenever Voices or a render finishes."
+          className="inline-flex items-center gap-1.5 text-[10px] text-ink-faint whitespace-nowrap"
+        >
+          {busy ? <Spinner /> : null}
+          {busy
+            ? 'checking…'
+            : checkedAgoS === null
+              ? 'not checked yet'
+              : checkedAgoS < 3 ? 'checked just now' : `checked ${checkedAgoS}s ago`}
+        </span>
         <button type="button" onClick={onClose} className="w-5 h-5 text-ink-faint text-[12px] cursor-pointer hover:text-ink">×</button>
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto px-[11px] py-[9px] pb-3 flex flex-col gap-2">
@@ -173,6 +190,8 @@ export interface ConfirmSpec {
   ok: string;
   okTone: 'accent' | 'bad' | 'good';
   onOk: () => void;
+  /** A second, quieter path — "render a draft anyway" beside "review readiness". */
+  alt?: { label: string; onPick: () => void };
 }
 
 export function ConfirmDialog({ spec, onClose }: { spec: ConfirmSpec; onClose: () => void }) {
@@ -198,7 +217,20 @@ export function ConfirmDialog({ spec, onClose }: { spec: ConfirmSpec; onClose: (
             </div>
           )}
         </div>
-        <div className="flex gap-[7px] justify-end px-4 py-2.5 bg-[#22262c] border-t border-edge">
+        <div className="flex gap-[7px] px-4 py-2.5 bg-[#22262c] border-t border-edge">
+          {spec.alt && (
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                spec.alt!.onPick();
+              }}
+              className="h-[27px] px-3 rounded-[3px] border border-edge bg-panel-2 text-ink-dim text-[11px] cursor-pointer hover:text-ink"
+            >
+              {spec.alt.label}
+            </button>
+          )}
+          <div className="flex-1" />
           <button
             type="button"
             onClick={onClose}

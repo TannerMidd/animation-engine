@@ -540,8 +540,9 @@
   "voiceRef": "brent.ref.wav",
   "voiceProvenance": {
     "source": "minted",
-    "seed": 1067816518,
-    "hash": "15b21e4d4243daa668e1df0cc147754d468b555a"
+    "seed": 961402623,
+    "hash": "ce2ee73b093b662f09974da127087df4619215ef",
+    "bankVoice": "af_kore"
   },
   "acting": {
     "reactionMs": 268,

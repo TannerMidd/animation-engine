@@ -7,6 +7,8 @@ import {
   evaluateProductionPreflight,
   type ProductionPreflightInput,
 } from '../src/pipeline/preflight.ts';
+import { autoDirect } from '../src/direct/index.ts';
+import { parseScript } from '../src/parse/index.ts';
 import { dialogueScriptHash } from '../src/pipeline/dialogue.ts';
 import { AnimationDocument } from '../src/schema/animation.ts';
 import { DialogueDocument } from '../src/schema/dialogue.ts';
@@ -125,6 +127,80 @@ describe('production preflight policy', () => {
     });
     expect(valid.notes.some((item) => item.code === 'prop-action-invalid')).toBe(false);
     expect(valid.productionBlocked).toBe(false);
+  });
+
+  describe('a shot list left behind by its script', () => {
+    const rigs = new Map([
+      ['alice', { rig: buildPlaceholderRig('alice'), svg: '<svg />' }],
+      ['bob', { rig: buildPlaceholderRig('bob'), svg: '<svg />' }],
+    ]);
+    const SOURCE = [
+      '# STALE', '', 'INT. OFFICE - DAY', '',
+      'ALICE', '(deadpan)', 'Morning.', '',
+      'BOB', '(flat)', 'Morning.', '',
+      '[BEAT 1200]', '',
+      'ALICE', 'Did you file it?', '',
+    ].join('\n');
+
+    const direct = (source: string) =>
+      autoDirect(parseScript(source, 'stale'), rigs, { scene: 'stale', seed: 7 });
+
+    const check = (shots: ShotListType, source: string) => evaluateProductionPreflight({
+      ...input(shots, rigs.get('alice')!),
+      rigs,
+      screenplay: parseScript(source, 'stale'),
+    });
+
+    it('stays quiet while the shot list still tells the script’s story', () => {
+      const report = check(direct(SOURCE), SOURCE);
+      expect(report.notes.some((item) => item.code === 'shotlist-script-stale')).toBe(false);
+    });
+
+    it('blocks the render once the script has moved on', () => {
+      const shots = direct(SOURCE);
+      const rewritten = SOURCE.replace('Did you file it?', 'The building has been sold.');
+      const report = check(shots, rewritten);
+
+      const stale = report.notes.find((item) => item.code === 'shotlist-script-stale');
+      expect(stale?.message).toMatch(/1 beat the shot list does not reflect.*run Direct/i);
+      expect(stale?.blocking).toBe(true);
+      expect(report.renderEndpointBlocked).toBe(true);
+    });
+
+    it('counts a line added to the middle of the script', () => {
+      const shots = direct(SOURCE);
+      const extended = SOURCE.replace('[BEAT 1200]', 'BOB\nStill here.\n\n[BEAT 1200]');
+      const report = check(shots, extended);
+      expect(report.notes.some((item) => item.code === 'shotlist-script-stale')).toBe(true);
+    });
+
+    // The whole point of comparing spines rather than beats: staging and
+    // retiming are the creator's, and doing either must not read as the script
+    // having changed underneath them.
+    it('ignores hand-edited framing, camera and pause timing', () => {
+      const shots = direct(SOURCE);
+      const handEdited = ShotList.parse({
+        ...shots,
+        beats: shots.beats.map((beat) => (beat.kind === 'pause'
+          ? { ...beat, ms: beat.ms + 900, shot: 'ECU', camera: 'PUSH_IN' }
+          : { ...beat, shot: 'ECU', camera: 'SHAKE', focus: [], locked: true })),
+      });
+      expect(handEdited).not.toEqual(shots);
+
+      const report = check(handEdited, SOURCE);
+      expect(report.notes.some((item) => item.code === 'shotlist-script-stale')).toBe(false);
+    });
+
+    it('says so, without blocking, when the script cannot be read at all', () => {
+      const report = evaluateProductionPreflight({
+        ...input(direct(SOURCE), rigs.get('alice')!),
+        rigs,
+        scriptError: 'ENOENT: no such file',
+      });
+      const note = report.notes.find((item) => item.code === 'script-unreadable');
+      expect(note?.blocking).toBe(false);
+      expect(report.notes.some((item) => item.code === 'shotlist-script-stale')).toBe(false);
+    });
   });
 
   it('blocks rejected selections, non-ready renders, draft TTS, and a minted voice still in use', () => {
@@ -646,6 +722,40 @@ describe('production preflight policy', () => {
       expect.objectContaining({ code: 'animation-resolve-failed', blocking: true }),
     ]));
     expect(outside.notes.some((item) => item.code === 'animation-timing-deferred')).toBe(false);
+  });
+
+  // Re-directing onto a new cast leaves motion authored for the departed one.
+  // The compiler throws on it, so anything short of a named blocker here shows
+  // up as an opaque 500 from the preview with nothing to act on.
+  it('blocks motion segments left pointing at an actor no longer in the cast', () => {
+    const shots = lineScene();
+    const orphaned = AnimationDocument.parse({
+      schemaVersion: 1,
+      scene: shots.scene,
+      revision: 1,
+      layers: [{ id: 'manual', name: 'Manual', ownership: 'manual' }],
+      tracks: [],
+      segments: [{
+        id: 'manual:bob:root.position:1',
+        layerId: 'manual',
+        actorId: 'bob',
+        channel: 'root.position',
+        blend: 'override',
+        easing: 'linear',
+        path: { shape: 'linear', curvature: 0 },
+        assist: { anticipation: 0, overshoot: 0, hold: 0, recovery: 0.15 },
+        source: 'drag',
+        from: { id: 'from-1', time: { kind: 'absolute', ms: 0 }, value: [0, 0] },
+        to: { id: 'to-1', time: { kind: 'absolute', ms: 500 }, value: [100, 0] },
+        waypoints: [],
+      }],
+      events: [],
+    });
+
+    const result = evaluateProductionPreflight({ ...input(shots), animation: orphaned });
+    const note = result.notes.find((item) => item.code === 'animation-target-invalid');
+    expect(note?.message).toMatch(/motion segment .* references unknown actor "bob"/);
+    expect(note?.blocking).toBe(true);
   });
 
   it('uses selected-asset editorial scheduling for animation anchors without decoding audio', () => {

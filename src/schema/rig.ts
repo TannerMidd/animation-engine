@@ -183,6 +183,8 @@ const RigShape = z.object({
       seed: z.number().int().optional(),
       /** sha1 of the reference bytes at attach time. */
       hash: z.string().optional(),
+      /** Bank voice a minted reference was read by, e.g. "af_heart". */
+      bankVoice: z.string().optional(),
     })
     .nullable()
     .default(null),

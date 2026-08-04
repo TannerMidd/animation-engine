@@ -20,6 +20,7 @@ import {
   syncDialogueDocument,
   writeDialogueDocument,
 } from '../src/pipeline/dialogue.ts';
+import { exists } from '../src/pipeline/scene.ts';
 import { DialogueCue, DialogueDocument } from '../src/schema/dialogue.ts';
 import { ShotList } from '../src/schema/script.ts';
 import { encodeWav } from '../src/voice/wav.ts';
@@ -405,6 +406,12 @@ describe('audio trim and soundtrack identity', () => {
       }],
     }));
     expect(await soundtrackIsCurrent(scene, shots, rigs)).toBe(false);
+
+    // The mix is still on disk, which is why file existence cannot stand in
+    // for currentness. /preview once made exactly that substitution and so
+    // promised "accurate — real audio" for a track /audio refuses to serve,
+    // leaving the picture playing in unexplained silence.
+    expect(await exists(path.join(output, 'dialogue.wav'))).toBe(true);
   }, 20_000);
 });
 
@@ -459,5 +466,42 @@ describe('dialogue persistence locks', () => {
       cues: [{ ...fieldUnlocked.cues[0]!, turnGapMs: 999 }],
     }), outDir);
     expect((await readDialogueDocument(shots.scene, outDir))!.cues[0]!.turnGapMs).toBe(999);
+  });
+
+  it('re-syncs a locked cue onto its new beat when an earlier beat is inserted', async () => {
+    const outDir = await tempDir('dialogue-locks-reindex');
+    dirs.push(outDir);
+    const shots = oneLineShots('dialogue-locks-reindex');
+    const base = await syncDialogueDocument(shots.scene, shots, outDir);
+
+    const locked = DialogueDocument.parse({
+      ...base,
+      revision: 2,
+      cues: [{ ...base.cues[0]!, locked: true, pauseAfterMs: 275 }],
+    });
+    await writeDialogueDocument(shots.scene, locked, outDir);
+    expect(locked.cues[0]!.beatIndex).toBe(0);
+
+    // A pause ahead of the line renumbers it. The lock guards the creator's
+    // approved delivery, not the beat number, so the sync must still land.
+    const shifted = ShotList.parse({
+      ...shots,
+      beats: [{ kind: 'pause', ms: 1600 }, ...shots.beats],
+    });
+    const resynced = await syncDialogueDocument(shots.scene, shifted, outDir);
+
+    const cue = resynced.cues.find((c) => c.id === locked.cues[0]!.id)!;
+    expect(cue.beatIndex).toBe(1);
+    expect(cue.locked).toBe(true);
+    expect(cue.pauseAfterMs).toBe(275);
+    expect(cue.spokenText).toBe(locked.cues[0]!.spokenText);
+    expect(cue.delivery).toEqual(locked.cues[0]!.delivery);
+
+    // Everything except the index stays frozen: the exemption is not a hole.
+    await expect(writeDialogueDocument(shots.scene, DialogueDocument.parse({
+      ...resynced,
+      revision: resynced.revision + 1,
+      cues: [{ ...cue, beatIndex: 4, pauseAfterMs: 300 }],
+    }), outDir)).rejects.toThrow(/only be unlocked in a separate save/);
   });
 });

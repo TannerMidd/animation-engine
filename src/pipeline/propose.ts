@@ -1,4 +1,4 @@
-import type { ShotBeat, ShotList } from '../schema/script.ts';
+import type { Screenplay, ShotBeat, ShotList } from '../schema/script.ts';
 
 /**
  * Non-destructive directing.
@@ -22,6 +22,48 @@ function matchKey(beat: ShotBeat): string {
       // is the only identity they have, which `consumed` handles below.
       return 'pause';
   }
+}
+
+/**
+ * The script-owned spine of a directed scene.
+ *
+ * Everything the screenplay dictates and nothing the director or the creator
+ * owns: no shot, camera or focus, and no pause duration — all of which are
+ * edited by hand in the inspector and must not read as the script having
+ * moved. Two spines being equal means the shot list still tells this script's
+ * story, whatever has been staged on top of it.
+ */
+export function beatSpine(beats: readonly ShotBeat[]): string[] {
+  return beats.map(matchKey);
+}
+
+/** The same spine, derived from the screenplay before anyone directs it. */
+export function screenplaySpine(screenplay: Screenplay): string[] {
+  const out: string[] = [];
+  for (const el of screenplay.elements) {
+    // Headings set the location; the director stages nothing from them, so
+    // they leave no beat to compare against.
+    if (el.kind === 'heading') continue;
+    if (el.kind === 'action') out.push(`action:${el.text}`);
+    else if (el.kind === 'beat') out.push('pause');
+    else out.push(`line:${el.speaker.toLowerCase()}:${el.text}`);
+  }
+  return out;
+}
+
+/**
+ * How far the shot list has fallen behind the script, in beats.
+ *
+ * Positional rather than a diff: a single inserted line reports every beat
+ * after it, which overstates the edit but never understates staleness. Zero
+ * means the two are telling the same story.
+ */
+export function spineDrift(script: readonly string[], shotList: readonly string[]): number {
+  let drift = Math.abs(script.length - shotList.length);
+  for (let i = 0; i < Math.min(script.length, shotList.length); i++) {
+    if (script[i] !== shotList[i]) drift++;
+  }
+  return drift;
 }
 
 export interface MergeResult {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type {
-  AnimationDocument, Beat, CastMember, DialogueCue, DialogueDocument, Mark, SetDescriptor, ShotList, StageAction, Vocab,
+  AnimationDocument, Beat, CastMember, DialogueCue, DialogueDocument, Mark, SetDescriptor, SetSummary,
+  ShotList, StageAction, Vocab,
 } from '../types.ts';
 import { AnimationPanel } from '../components/AnimationPanel.tsx';
 import { PerformancePanel } from '../components/PerformancePanel.tsx';
@@ -35,12 +36,18 @@ export interface InspectorProps {
   dialogue: DialogueDocument | null;
   animation: AnimationDocument | null;
   setDescriptor: SetDescriptor | null;
+  /** Every set the scene could bind, for the Scene tab's picker. */
+  sets: SetSummary[];
   playheadMs: number;
   totalMs: number;
   identityLabel: string;
   expressionsFor: (actorId: string) => string[];
   onEditBeat: (index: number, next: Beat) => void;
   onEditCast: (actorId: string, changes: Partial<CastMember>) => void;
+  /** Top-level shot-list fields — set, seed, frame rates, cards. Same debounced write path as beats. */
+  onEditShots: (changes: Partial<Pick<ShotList, 'set' | 'seed' | 'fps' | 'characterFps' | 'cards' | 'title' | 'subtitle'>>) => void;
+  /** One change applied to every cast member in a single write — the scene-wide resting default. */
+  onEditAllCast: (changes: Partial<CastMember>) => void;
   onAnimationDocument: (doc: AnimationDocument) => void;
   onAnimationTarget: (target: AnimationEditTarget | null) => void;
   onAnimationSeek: (ms: number) => void;
@@ -595,15 +602,24 @@ function RigTab(p: InspectorProps & { castIds: string[] }) {
 
 // --- scene -----------------------------------------------------------------
 
+const FPS_OPTIONS = [12, 24, 30];
+const CHARACTER_FPS_OPTIONS = [6, 8, 12, 24];
+
+/**
+ * The scene's own settings, written through the same shot-list path as every
+ * beat edit. This tab used to be a readout — which meant a script headed
+ * INT. OPEN PLAN OFFICE could stage in whichever set sorted first
+ * alphabetically, with no visible cause and no control to fix it.
+ */
 function SceneTab(p: InspectorProps) {
   const shots = p.shots;
-  const rows: Array<{ label: string; value: string; fg?: string }> = [
+  const selectCls = 'h-[22px] border border-edge bg-panel-2 rounded-[3px] px-1 text-[10.5px] text-[#c9ccd1] outline-none cursor-pointer';
+  const inputCls = 'h-[22px] border border-edge bg-panel-2 rounded-[3px] px-1.5 text-[10.5px] text-[#c9ccd1] outline-none';
+
+  const readOnlyRows: Array<{ label: string; value: string; fg?: string }> = [
     { label: 'Scene', value: p.scene, fg: '#e6e3dc' },
-    { label: 'Set', value: shots?.set ? shots.set.replace(/\.(json|svg)$/, '') : '—' },
     { label: 'Cast', value: shots ? shots.cast.map((c) => `${c.id} ${c.mark}`).join(' · ') : '—' },
     { label: 'Identity', value: p.identityLabel },
-    { label: 'Seed', value: shots ? String(shots.seed) : '—' },
-    { label: 'Frame rate', value: shots ? `${shots.fps} fps camera · ${shots.characterFps} fps characters` : '—' },
     {
       label: 'Duration',
       value: p.totalMs
@@ -612,18 +628,177 @@ function SceneTab(p: InspectorProps) {
     },
     { label: 'Beats', value: shots ? String(shots.beats.length) : '—' },
   ];
+
+  if (!shots) {
+    return (
+      <>
+        {readOnlyRows.map((row) => (
+          <div key={row.label} className="flex items-baseline gap-2 pb-1.5 border-b border-[#262b32]">
+            <span className="w-[92px] shrink-0 text-[9.5px] tracking-[.07em] uppercase text-ink-faint">{row.label}</span>
+            <span className="flex-1 font-mono text-[10.5px] leading-snug" style={{ color: row.fg ?? '#9aa1ab' }}>{row.value}</span>
+          </div>
+        ))}
+        <div className="px-2 py-2 border border-[#2f353d] bg-stage rounded-[3px] text-[10.5px] text-ink-dim leading-[1.5]">
+          Direct the scene to unlock its settings — set, seed, frame rates and cards all live on the shot list.
+        </div>
+      </>
+    );
+  }
+
+  const currentSet = shots.set ? shots.set.replace(/\.(json|svg)$/, '') : '';
+  const setNames = [...new Set([...p.sets.map((s) => s.name), ...(currentSet ? [currentSet] : [])])].sort();
+
   return (
     <>
-      {rows.map((row) => (
+      <label className="block">
+        <FieldLabel label="Set" hint="The room this scene stages in." />
+        <select
+          value={currentSet}
+          onChange={(e) => p.onEditShots({ set: e.target.value || null })}
+          className={`${selectCls} w-full`}
+        >
+          <option value="">(no set — bare stage)</option>
+          {setNames.map((name) => <option key={name} value={name}>{name}</option>)}
+        </select>
+        <span className="block text-[10px] text-[#5d656e] mt-1 leading-[1.4]">
+          The stage, walkable area and prop contacts all come from the set. Changing it redraws the preview immediately.
+        </span>
+      </label>
+
+      <label className="block">
+        <FieldLabel label="Seed" value={String(shots.seed)} />
+        <span className="flex gap-1 items-center">
+          <input
+            type="number"
+            value={shots.seed}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              if (Number.isFinite(n)) p.onEditShots({ seed: Math.round(n) });
+            }}
+            className={`${inputCls} w-24 font-mono`}
+          />
+          <button
+            type="button"
+            title="Roll a different seed — new takes, blinks and idle phases, same direction."
+            onClick={() => p.onEditShots({ seed: 1 + Math.floor(Math.random() * 9998) })}
+            className="h-[22px] px-2 rounded-[3px] border border-edge bg-panel-2 text-ink-dim text-[10.5px] cursor-pointer hover:text-ink"
+          >
+            ↻ Reroll
+          </button>
+        </span>
+        <span className="block text-[10px] text-[#5d656e] mt-1 leading-[1.4]">
+          Same inputs produce byte-identical frames — the seed is the one knob that changes performance without changing direction.
+        </span>
+      </label>
+
+      <div className="flex gap-2">
+        <label className="block flex-1">
+          <FieldLabel label="Camera fps" />
+          <select
+            value={shots.fps}
+            onChange={(e) => p.onEditShots({ fps: Number(e.target.value) })}
+            className={`${selectCls} w-full`}
+          >
+            {[...new Set([...FPS_OPTIONS, shots.fps])].sort((a, b) => a - b).map((v) => (
+              <option key={v} value={v}>{v} fps</option>
+            ))}
+          </select>
+        </label>
+        <label className="block flex-1">
+          <FieldLabel label="Character fps" />
+          <select
+            value={shots.characterFps}
+            onChange={(e) => p.onEditShots({ characterFps: Number(e.target.value) })}
+            className={`${selectCls} w-full`}
+          >
+            {[...new Set([...CHARACTER_FPS_OPTIONS, shots.characterFps])].sort((a, b) => a - b).map((v) => (
+              <option key={v} value={v}>{v} fps</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <span className="block text-[10px] text-[#5d656e] -mt-2 leading-[1.4]">
+        Characters run on twos while the camera stays smooth — lower character fps reads cheaper, not slower.
+      </span>
+
+      <div>
+        <div className="flex items-center gap-[7px]">
+          <FieldLabel label="Title cards" />
+          <button
+            type="button"
+            title="Title and end cards around the scene. Treatment comes from the show identity; this is the per-scene switch and wording."
+            onClick={() => p.onEditShots({ cards: !shots.cards })}
+            className={`h-[22px] px-2 rounded-[3px] border text-[10.5px] cursor-pointer ${
+              shots.cards ? 'border-accent/60 bg-accent/15 text-accent' : 'border-edge bg-panel-2 text-ink-dim hover:text-ink'
+            }`}
+          >
+            {shots.cards ? 'on' : 'off'}
+          </button>
+        </div>
+        {shots.cards && (
+          <div className="flex flex-col gap-1 mt-1.5">
+            <input
+              placeholder={`title — blank uses “${p.scene}”`}
+              defaultValue={shots.title ?? ''}
+              onBlur={(e) => p.onEditShots({ title: e.target.value.trim() || null })}
+              className={`${inputCls} w-full`}
+            />
+            <input
+              placeholder="subtitle — blank for none"
+              defaultValue={shots.subtitle ?? ''}
+              onBlur={(e) => p.onEditShots({ subtitle: e.target.value.trim() || null })}
+              className={`${inputCls} w-full`}
+            />
+          </div>
+        )}
+      </div>
+
+      <SceneRestingField shots={shots} expressionsFor={p.expressionsFor} onEditAllCast={p.onEditAllCast} />
+
+      {readOnlyRows.map((row) => (
         <div key={row.label} className="flex items-baseline gap-2 pb-1.5 border-b border-[#262b32]">
           <span className="w-[92px] shrink-0 text-[9.5px] tracking-[.07em] uppercase text-ink-faint">{row.label}</span>
           <span className="flex-1 font-mono text-[10.5px] leading-snug" style={{ color: row.fg ?? '#9aa1ab' }}>{row.value}</span>
         </div>
       ))}
-      <div className="px-2 py-2 border border-[#2f353d] bg-stage rounded-[3px] text-[10.5px] text-ink-dim leading-[1.5]">
-        Same inputs produce byte-identical frames. That is what lets the renderer skip held frames, resume, and render out of order.
-      </div>
     </>
+  );
+}
+
+/**
+ * The scene-wide resting default. `resting` is a per-cast-member field, so
+ * this writes every member; a single character's override belongs in the
+ * Character tab.
+ */
+function SceneRestingField({
+  shots, expressionsFor, onEditAllCast,
+}: {
+  shots: ShotList;
+  expressionsFor: (actorId: string) => string[];
+  onEditAllCast: (changes: Partial<CastMember>) => void;
+}) {
+  const shared = shots.cast.every((member) => member.resting === shots.cast[0]?.resting)
+    ? shots.cast[0]?.resting ?? null
+    : null;
+  // Only expressions every cast member can actually make are offered scene-wide.
+  const options = shots.cast
+    .map((member) => new Set(expressionsFor(member.id)))
+    .reduce<string[]>((common, set, i) => (
+      i === 0 ? [...set] : common.filter((e) => set.has(e))
+    ), []);
+
+  return (
+    <label className="block">
+      <FieldLabel label="Resting expression" value={shared ?? 'mixed'} />
+      <OptionChips
+        options={options.length ? options : ['NEUTRAL', 'DEADPAN']}
+        value={shared}
+        onPick={(resting) => onEditAllCast({ resting })}
+      />
+      <span className="block text-[10px] text-[#5d656e] mt-1 leading-[1.4]">
+        The face everyone returns to when not otherwise directed. Per-character overrides live in the Character tab.
+      </span>
+    </label>
   );
 }
 
@@ -642,6 +817,14 @@ function CharacterTab(p: InspectorProps & { castIds: string[] }) {
       <label className="block">
         <FieldLabel label="Mark" />
         <OptionChips options={MARKS} value={member.mark} onPick={(mark) => p.onEditCast(member.id, { mark: mark as CastMember['mark'] })} />
+      </label>
+      <label className="block">
+        <FieldLabel label="Resting" hint="The face this character returns to when not otherwise directed." />
+        <OptionChips
+          options={p.expressionsFor(member.id)}
+          value={member.resting}
+          onPick={(resting) => p.onEditCast(member.id, { resting })}
+        />
       </label>
       <div className="flex items-center gap-[7px]">
         <span className="text-[9.5px] tracking-[.09em] uppercase text-ink-faint w-16">Facing</span>

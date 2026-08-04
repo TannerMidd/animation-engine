@@ -405,6 +405,14 @@ export function stageActionsFor(
 
 /** Three beats is enough to feel intentional without turning coverage inert. */
 export const COVERAGE_RUN_MAX_BEATS = 3;
+/**
+ * The longest line that may play off-camera as a reaction inside a focused
+ * run. Four words is the same terseness the CU-rally rule uses: a quip reads
+ * as a beat for the listener's face, while anything longer is content — an
+ * audience that cannot see the speaker of a substantial line experiences a
+ * missing cut, not a stylish hold.
+ */
+export const REACTION_MAX_WORDS = 4;
 /** Ordinary coverage cannot recrop again before the current framing has lived. */
 export const SHOT_CHANGE_COOLDOWN_BEATS = 2;
 /** Different signature moves also need air between them. */
@@ -455,6 +463,12 @@ function framingSignature(beat: ShotBeat): string {
  * Ensemble and focused coverage alternate by run; a focused run deliberately
  * stays on one performer while the other replies, giving reactions somewhere
  * to live instead of mechanically chasing whoever is speaking.
+ *
+ * One visibility rule outranks the rhythm: only a quip may play off-camera.
+ * A focused run holds on the group's *dominant* speaker, and if anyone else
+ * in the group has a line past REACTION_MAX_WORDS the whole group falls back
+ * to ensemble framing — the audience never watches a listener while
+ * substantial dialogue happens somewhere off-screen.
  */
 function planDialogueShotRuns(beats: ShotBeat[], names: string[], pingPongCu: boolean): void {
   let seenDialogue = false;
@@ -519,11 +533,28 @@ function planDialogueShotRuns(beats: ShotBeat[], names: string[], pingPongCu: bo
       let offset = 0;
       for (const size of coverageRunSizes(ordinary.length)) {
         const group = ordinary.slice(offset, offset + size);
-        const ensemble = names.length > 1 && coverageRun % 2 === 0;
+        let ensemble = names.length > 1 && coverageRun % 2 === 0;
+        let focus: string[] = [];
+
+        if (!ensemble) {
+          // The held single belongs to whoever carries the group, not to
+          // whoever happens to speak first in it.
+          const spoken = new Map<string, number>();
+          for (const line of group) {
+            spoken.set(line.speaker, (spoken.get(line.speaker) ?? 0) + wordCount(line.text));
+          }
+          const dominant = [...spoken.entries()].reduce((a, b) => (b[1] > a[1] ? b : a))[0];
+          const substantialOffCamera = group.some(
+            (line) => line.speaker !== dominant && wordCount(line.text) > REACTION_MAX_WORDS,
+          );
+          if (substantialOffCamera && names.length > 1) ensemble = true;
+          else focus = [dominant];
+        }
+
         const shot: Shot = ensemble
           ? (names.length === 2 ? 'TWO_SHOT' : 'WIDE')
           : 'MID';
-        const focus = ensemble ? [] : [group[0]!.speaker];
+        if (ensemble) focus = [];
         for (let i = 0; i < group.length; i++) {
           const line = group[i]!;
           line.purpose = !seenDialogue && i === 0 ? 'establishing' : 'coverage';

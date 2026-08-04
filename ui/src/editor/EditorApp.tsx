@@ -2,13 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, followJob } from '../api.ts';
 import type {
   AnimationDocument, Beat, CastMember, CastSummary, CheckResult, DialogueCue, DialogueDocument, Health,
-  JobEvent, LlmStatus, PreviewInfo, ProductionPreflightReport, SceneDetail, SceneSummary, SetDescriptor,
-  SetSummary, ShotList, ShowInfo, Vocab,
+  JobEvent, LlmStatus, PreviewInfo, ProductionPreflightNote, ProductionPreflightReport, SceneDetail,
+  SceneSoundInfo, SceneSummary, SetDescriptor, SetSummary, ShotList, ShowInfo, Vocab,
 } from '../types.ts';
 import { GenerateDialog } from '../components/GenerateDialog.tsx';
 import type { AnimationEditTarget, StagePropTarget } from '../components/AnimationOverlay.tsx';
 import { propInstanceId } from './stage/interaction.ts';
-import { AppBar, type ContextTool, type SaveState } from './AppBar.tsx';
+import { AppBar, StaleBar, type ContextTool, type EngineOption, type SaveState } from './AppBar.tsx';
 import { Sidebar } from './Sidebar.tsx';
 import { Inspector } from './Inspector.tsx';
 import { Timeline } from './Timeline.tsx';
@@ -16,10 +16,11 @@ import { StageColumn, type OverlayPrefs, type StageHandle } from './stage/StageC
 import { ExportStrip, ShotStrip, TakeStrip } from './stage/strips.tsx';
 import { LinesPane, MixerPane, ReadinessPane, ScriptPane, subPaneWidth } from './panes.tsx';
 import { CommandPalette, ConfirmDialog, PreflightPopover, type Command, type ConfirmSpec } from './overlays.tsx';
+import { AuditionOverlay, CompareOverlay, ConversionCheckOverlay, SystemReport } from './tools.tsx';
 import { Mono, Spinner } from './chrome.tsx';
 import {
-  beatStartsFor, cueForBeat, defaultTabFor, fmtTimecode, motionDeletionBlocker, speakerColour, totalMsFor,
-  withoutMotionSegment, type InspectorTab, type Mode,
+  beatSpine, beatStartsFor, cueForBeat, defaultTabFor, fmtTimecode, motionDeletionBlocker, speakerColour,
+  spineDrift, totalMsFor, withoutMotionSegment, type InspectorTab, type Mode,
 } from './lib.ts';
 
 type Quality = 'Draft' | 'Accurate' | 'Final';
@@ -62,6 +63,8 @@ export function EditorApp({
   const [animation, setAnimation] = useState<AnimationDocument | null>(null);
   const [preflight, setPreflight] = useState<ProductionPreflightReport | null>(null);
   const [preflightBusy, setPreflightBusy] = useState(false);
+  /** Age of the displayed verdict, so a cached one cannot pass for a live one. */
+  const [preflightAgoS, setPreflightAgoS] = useState<number | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [playheadMs, setPlayheadMs] = useState(0);
   const [setDescriptor, setSetDescriptor] = useState<SetDescriptor | null>(null);
@@ -76,6 +79,15 @@ export function EditorApp({
   const [rec, setRec] = useState(false);
   const [cmd, setCmd] = useState(false);
   const [preflightOpen, setPreflightOpen] = useState(false);
+  const [systemOpen, setSystemOpen] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(false);
+  const [auditionOpen, setAuditionOpen] = useState(false);
+  const [scoreTake, setScoreTake] = useState<{ takeId: string; label: string } | null>(null);
+  const [sound, setSound] = useState<SceneSoundInfo | null>(null);
+  const [soundLoading, setSoundLoading] = useState(false);
+  const [engine, setEngineRaw] = useState('chatterbox');
+  /** Set once the creator picks; auto-defaulting must never override a choice. */
+  const engineChosen = useRef(false);
   const [confirm, setConfirm] = useState<ConfirmSpec | null>(null);
   const [writing, setWriting] = useState(false);
   const [genBusy, setGenBusy] = useState(false);
@@ -89,10 +101,20 @@ export function EditorApp({
   const stageRef = useRef<StageHandle>(null);
   const editCount = useRef(0);
   const savedAt = useRef<number | null>(Date.now());
+  const preflightAt = useRef<number | null>(null);
 
   const setPrefs = (patch: Partial<OverlayPrefs>) => setPrefsState((p) => ({ ...p, ...patch }));
 
   const withAudio = quality !== 'Draft' && Boolean(detail?.hasAudio);
+  /**
+   * Whether to attach the mixed audio to the transport.
+   *
+   * `detail.hasAudio` only says a dialogue.wav exists; the server additionally
+   * refuses to serve one that predates the current direction. The preview
+   * applies exactly that test, so deferring to its verdict is what keeps the
+   * editor from promising sound the server will not hand over.
+   */
+  const audioPlayable = withAudio && preview !== null && !preview.estimated;
   const previewLayout = mode === 'publish' && layout === '9:16' ? 'vertical' : 'horizontal';
   const setName = shots?.set ? shots.set.replace(/\.(json|svg)$/, '') : sets[0]?.name ?? 'office';
 
@@ -100,6 +122,36 @@ export function EditorApp({
     setModeRaw(next);
     setTab(defaultTabFor(next));
     if (next !== 'animate') setAnimationTarget(null);
+  }, []);
+
+  // --- voice engine ---
+  // Chatterbox when it works; otherwise the first engine that does. A machine
+  // with no Python stack lands on sapi instead of an error minutes later.
+  const engineNames = useMemo(
+    () => (vocab?.engines?.length ? vocab.engines : ['chatterbox', 'sapi']),
+    [vocab],
+  );
+  const engines: EngineOption[] = useMemo(() => engineNames.map((name) => {
+    const status = health?.engines[name];
+    return {
+      name,
+      ok: status?.ok ?? false,
+      ...(status?.checking || !health ? { checking: true } : {}),
+      ...(status?.reason ? { reason: status.reason } : {}),
+    };
+  }), [engineNames, health]);
+
+  useEffect(() => {
+    if (engineChosen.current || !health) return;
+    const usable = engines.filter((e) => e.ok && !e.checking);
+    if (!usable.length) return;
+    if (!usable.some((e) => e.name === engine)) setEngineRaw(usable[0]!.name);
+  }, [health, engines, engine]);
+
+  const setEngine = useCallback((name: string) => {
+    engineChosen.current = true;
+    setEngineRaw(name);
+    setInfo(`Voices and renders now use the ${name} engine. The mix reads as stale until Voices runs with it.`);
   }, []);
 
   // Tab→mode: the Motion tab implies animate mode, so the stage mounts the
@@ -138,6 +190,12 @@ export function EditorApp({
           dialogueRevision.current = dialogueDocument.revision;
           setDialogue(dialogueDocument);
           setAnimation(animationDocument);
+          // Direct the loaded script without writing anything, purely so the
+          // staleness comparison below has both sides on arrival. Without it a
+          // scene that is *already* out of date looks fine until you type.
+          void api.check(scene, { source: d.source, set: d.shots.set })
+            .then((res) => { if (!cancelled) setCheck(res); })
+            .catch(() => {});
         }
       } catch (err) {
         if (!cancelled) setError((err as Error).message);
@@ -163,10 +221,22 @@ export function EditorApp({
   // Once the accurate (voice-engine) path fails, stop asking it on every edit;
   // a struggling GPU does not get healthier by being hammered. Voices resets it.
   const accurateBroken = useRef(false);
+  /** Say "the mix went stale" once, not on every rebuild the edit triggers. */
+  const staleSoundtrackAnnounced = useRef(false);
   const rebuildPreview = useCallback(async () => {
     const wantAudio = withAudio && !accurateBroken.current;
     try {
-      setPreview(await api.preview(scene, wantAudio, previewLayout));
+      const next = await api.preview(scene, wantAudio, previewLayout);
+      setPreview(next);
+      // The picture will play in silence otherwise, with nothing to explain it.
+      if (wantAudio && next.soundtrack === 'stale') {
+        if (!staleSoundtrackAnnounced.current) {
+          staleSoundtrackAnnounced.current = true;
+          setInfo('The mixed audio predates the current direction, so the preview is playing without sound and timing is estimated. Run Voices to rebuild it.');
+        }
+      } else if (next.soundtrack === 'current') {
+        staleSoundtrackAnnounced.current = false;
+      }
       setError(null);
     } catch (err) {
       // The accurate path needs the voice engine; when it is busy or stale the
@@ -226,17 +296,26 @@ export function EditorApp({
     return () => clearInterval(t);
   }, []);
 
+  /** Record a fresh verdict and reset its age. */
+  const acceptPreflight = useCallback((report: ProductionPreflightReport) => {
+    setPreflight(report);
+    preflightAt.current = Date.now();
+    setPreflightAgoS(0);
+  }, []);
+
   // --- preflight runs automatically; it is milliseconds, renders are minutes ---
   useEffect(() => {
     if (!shots) {
       setPreflight(null);
+      preflightAt.current = null;
+      setPreflightAgoS(null);
       return;
     }
     let cancelled = false;
     setPreflightBusy(true);
     const t = setTimeout(() => {
       void api.preflight(scene)
-        .then((report) => { if (!cancelled) setPreflight(report); })
+        .then((report) => { if (!cancelled) acceptPreflight(report); })
         .catch(() => {})
         .finally(() => { if (!cancelled) setPreflightBusy(false); });
     }, 900);
@@ -244,7 +323,30 @@ export function EditorApp({
       cancelled = true;
       clearTimeout(t);
     };
-  }, [scene, shots, dialogue, animation]);
+  }, [scene, shots, dialogue, animation, acceptPreflight]);
+
+  // Keep the "checked Ns ago" label honest, like the save chip's.
+  useEffect(() => {
+    const t = setInterval(() => {
+      setPreflightAgoS(preflightAt.current === null
+        ? null
+        : Math.round((Date.now() - preflightAt.current) / 1000));
+    }, 5000);
+    return () => clearInterval(t);
+  }, []);
+
+  /**
+   * How far the shot list has fallen behind the script, in beats.
+   *
+   * `check` is the current script fully directed, so comparing its spine to
+   * the applied shot list's is the whole question. A script mid-edit parses to
+   * errors or to nothing; neither is divergence, and claiming it would put an
+   * alarm on the screen every time someone starts a line.
+   */
+  const staleBeats = useMemo(() => {
+    if (!shots || !check || check.errors.length || !check.beats.length) return 0;
+    return spineDrift(beatSpine(check.beats), beatSpine(shots.beats));
+  }, [shots, check]);
 
   const beatStarts = useMemo(() => beatStartsFor(shots, preview?.beatStarts), [shots, preview]);
   const totalMs = useMemo(() => totalMsFor(shots, beatStarts, preview?.durationMs), [shots, beatStarts, preview]);
@@ -310,6 +412,19 @@ export function EditorApp({
     pushShots((current) => ({
       ...current,
       cast: current.cast.map((member) => (member.id === actorId ? { ...member, ...changes } : member)),
+    }), false);
+  }, [pushShots]);
+
+  /** Top-level scene settings — set, seed, frame rates, cards — from the Scene tab. */
+  const editShots = useCallback((changes: Partial<Pick<ShotList, 'set' | 'seed' | 'fps' | 'characterFps' | 'cards' | 'title' | 'subtitle'>>) => {
+    pushShots((current) => ({ ...current, ...changes }), false);
+  }, [pushShots]);
+
+  /** One change to every cast member in a single write — the scene resting default. */
+  const editAllCast = useCallback((changes: Partial<CastMember>) => {
+    pushShots((current) => ({
+      ...current,
+      cast: current.cast.map((member) => ({ ...member, ...changes })),
     }), false);
   }, [pushShots]);
 
@@ -609,6 +724,9 @@ export function EditorApp({
         setDialogue(dialogueDocument);
         setAnimation(animationDocument);
         setError(res.errors.length ? res.errors.join('; ') : null);
+        // Re-establish the comparison against whatever the script says *now* —
+        // it may have moved on while the diff was sitting in the dialog.
+        void api.check(scene, { source, set: setName }).then(setCheck).catch(() => {});
         if (mode === 'write') setMode('direct');
         onSceneChanged();
       };
@@ -620,6 +738,7 @@ export function EditorApp({
           body: 'The proposal is diffed against your shot list before anything is written. Locked beats are excluded from the rerun.',
           list: [
             { tag: 'CHANGES', fg: '#7a8fc0', text: `${changes.length} beat${changes.length === 1 ? '' : 's'} change` },
+            ...(res.newCharacters.length ? [{ tag: 'CAST', fg: '#6f9b5a', text: `creates placeholder rigs for ${res.newCharacters.join(', ')}` }] : []),
             ...(res.keptLocked ? [{ tag: 'KEPT', fg: '#a89050', text: `${res.keptLocked} locked beat${res.keptLocked === 1 ? '' : 's'} survive untouched` }] : []),
             ...(res.droppedLocked ? [{ tag: 'DROPPED', fg: '#c8595a', text: `${res.droppedLocked} locked beat${res.droppedLocked === 1 ? '' : 's'} no longer match the script and would be dropped` }] : []),
             ...changes.slice(0, 3).map((d) => ({ tag: d.change.toUpperCase(), fg: '#9aa1ab', text: `beat ${d.index} · ${d.summary}` })),
@@ -636,30 +755,81 @@ export function EditorApp({
     }
   }, [scene, source, setName, shots, mode, setMode, onSceneChanged]);
 
+  const refreshPreflight = useCallback(async () => {
+    setPreflightBusy(true);
+    try {
+      acceptPreflight(await api.preflight(scene));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setPreflightBusy(false);
+    }
+  }, [scene, acceptPreflight]);
+
+  // --- sound mode reads the stems on disk ---
+  const reloadSound = useCallback(async () => {
+    setSoundLoading(true);
+    try {
+      setSound(await api.sound(scene));
+    } catch {
+      // An undirected scene has no stems to describe; the pane explains itself.
+      setSound(null);
+    } finally {
+      setSoundLoading(false);
+    }
+  }, [scene]);
+
+  useEffect(() => {
+    if (mode !== 'sound') return;
+    void reloadSound();
+  }, [mode, scene, shots, reloadSound]);
+
   // --- long jobs ---
-  const runJob = useCallback(async (kind: 'voices' | 'render') => {
+  const runJob = useCallback(async (kind: 'voices' | 'render' | 'sound', opts: { draft?: boolean } = {}) => {
     setBusy(kind);
     setJob({ kind, event: null });
     setError(null);
     try {
-      const started = kind === 'voices' ? await api.voices(scene) : await api.render(scene);
+      const started = kind === 'voices'
+        ? await api.voices(scene, engine)
+        : kind === 'sound'
+          // No engine passed: a rebuild remixes with whatever engine built the
+          // track, never a silent engine change.
+          ? await api.rebuildStems(scene)
+          : await api.render(scene, { engine, draft: opts.draft });
       const stop = followJob(started.id, (e) => {
         setJob({ kind, event: e });
         if (e.type === 'done' || e.type === 'error') {
           stop();
           setBusy(null);
+          setJob(null);
           if (e.type === 'error') {
             setError(e.message ?? 'job failed');
           } else {
-            setJob(null);
-            setInfo(kind === 'voices' ? 'Voices rendered — the preview now uses real audio.' : 'Master rendered. Files are in the Export strip.');
+            setInfo(kind === 'voices'
+              ? 'Voices rendered — the preview now uses real audio.'
+              : kind === 'sound'
+                ? 'Stems rebuilt — dialogue, Foley, room tone and stings are current again.'
+                : opts.draft
+                  ? 'Draft rendered. The export manifest is labelled non-production.'
+                  : 'Master rendered. Files are in the Export strip.');
             void api.scene(scene).then((d) => {
               setDetail(d);
-              if (kind === 'voices') {
+              if (kind === 'voices' || kind === 'sound') {
                 accurateBroken.current = false;
                 setQuality((q) => (q === 'Draft' ? 'Accurate' : q));
                 void rebuildPreview();
+                // Voices re-syncs the dialogue document as it resolves timings,
+                // so the cue state on screen is a revision behind by the time
+                // the job reports done.
+                void reloadDialogue().catch(() => {});
+                void reloadSound();
               }
+              // The readiness verdict was computed against the state this job
+              // just changed — which is the whole reason it ran. Nothing else
+              // re-runs it: the automatic pass watches shots, dialogue and
+              // animation, and finishing a job touches none of them.
+              void refreshPreflight();
               onSceneChanged();
             });
           }
@@ -670,32 +840,35 @@ export function EditorApp({
       setBusy(null);
       setJob(null);
     }
-  }, [scene, onSceneChanged, rebuildPreview]);
-
-  const refreshPreflight = useCallback(async () => {
-    setPreflightBusy(true);
-    try {
-      setPreflight(await api.preflight(scene));
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setPreflightBusy(false);
-    }
-  }, [scene]);
+  }, [scene, engine, onSceneChanged, rebuildPreview, refreshPreflight, reloadDialogue, reloadSound]);
 
   const acknowledgeWarnings = useCallback(async () => {
     setPreflightBusy(true);
     try {
-      setPreflight(await api.acknowledgePreflightWarnings(scene));
+      acceptPreflight(await api.acknowledgePreflightWarnings(scene));
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setPreflightBusy(false);
     }
-  }, [scene]);
+  }, [scene, acceptPreflight]);
 
   const blockers = preflight?.notes.filter((n) => n.level === 'error') ?? [];
   const reviewPending = Boolean(preflight && !preflight.productionBlocked && preflight.warningReview.required && !preflight.warningReview.current);
+
+  const askRenderDraft = useCallback(() => {
+    setConfirm({
+      title: 'Render a draft with blockers?',
+      body: 'A draft is a diagnostic, not a release: the production gate is explicitly bypassed, and the export manifest is labelled draft so downstream tooling cannot mistake it for an approved bundle. Video pixels are not watermarked.',
+      list: [
+        { tag: 'LABELS', fg: '#c8834a', text: 'productionStatus: draft lands in the export manifest, with the blockers recorded.' },
+        { tag: 'KEEPS', fg: '#7a8fc0', text: 'Locked beats, approved takes and creator-authored motion are untouched.' },
+      ],
+      ok: 'Render draft',
+      okTone: 'accent',
+      onOk: () => void runJob('render', { draft: true }),
+    });
+  }, [runJob]);
 
   const askRenderMaster = useCallback(() => {
     if (!preflight || blockers.length || reviewPending) {
@@ -708,6 +881,7 @@ export function EditorApp({
         ok: 'Review readiness',
         okTone: 'bad',
         onOk: () => setPreflightOpen(true),
+        alt: { label: 'Render a draft instead…', onPick: askRenderDraft },
       });
       return;
     }
@@ -715,6 +889,7 @@ export function EditorApp({
       title: 'Render the production master?',
       body: 'The render consumes one immutable snapshot of the scene. A concurrent edit belongs to the next render, never half of this one.',
       list: [
+        { tag: 'ENGINE', fg: '#9aa1ab', text: `Dialogue synthesizes with ${engine}.` },
         { tag: 'STAMPS', fg: '#7a8fc0', text: 'Identity, seed, hashes and provenance land in the export manifest.' },
         { tag: 'RESUMES', fg: '#6f9b5a', text: 'Held frames are skipped; the job resumes if interrupted.' },
       ],
@@ -722,24 +897,7 @@ export function EditorApp({
       okTone: 'good',
       onOk: () => void runJob('render'),
     });
-  }, [preflight, blockers, reviewPending, runJob]);
-
-  const askRenderDraft = useCallback(() => {
-    setConfirm({
-      title: 'Render a draft with blockers?',
-      body: 'Draft renders are a CLI-only diagnostic today: the export manifest is labelled draft and the bundle is not approved for distribution. The server render endpoint always enforces production gates.',
-      list: [
-        { tag: 'RUN', fg: '#c8834a', text: `npm run anim -- render ${scene} --draft` },
-        { tag: 'KEEPS', fg: '#7a8fc0', text: 'Locked beats, approved takes and creator-authored motion are untouched.' },
-      ],
-      ok: 'Copy command',
-      okTone: 'accent',
-      onOk: () => {
-        void navigator.clipboard?.writeText(`npm run anim -- render ${scene} --draft`).catch(() => {});
-        setInfo(`Command copied: npm run anim -- render ${scene} --draft`);
-      },
-    });
-  }, [scene]);
+  }, [preflight, blockers, reviewPending, runJob, engine, askRenderDraft]);
 
   // --- write from premise ---
   const runWrite = async (premise: string) => {
@@ -772,20 +930,107 @@ export function EditorApp({
   }, [scene, source, setName]);
 
   // --- identity + quality ---
-  const cycleIdentity = useCallback(() => {
-    if (!show || show.profiles.length < 2) return;
-    const i = show.profiles.findIndex((p) => p.id === show.active.id);
-    const next = show.profiles[(i + 1) % show.profiles.length]!;
+  const switchIdentity = useCallback((id: string) => {
+    const next = show?.profiles.find((p) => p.id === id);
+    if (!next) return;
     setConfirm({
       title: `Switch show identity to ${next.name}?`,
       body: 'Identity governs line treatment, register, wardrobe, acting envelope and cutting rhythm. Switching re-derives everything downstream, so the app reloads.',
       ok: `Switch to ${next.name}`,
       okTone: 'accent',
       onOk: () => {
-        void api.setActiveShow(next.id).then(() => window.location.reload());
+        void api.setActiveShow(next.id)
+          .then(() => window.location.reload())
+          .catch((err: Error) => setError(err.message));
       },
     });
   }, [show]);
+
+  /**
+   * The identity reel: this scene's script under two identity profiles,
+   * stacked. A generic job follower — the result opens as a video.
+   */
+  const askRenderReel = useCallback(() => {
+    setConfirm({
+      title: 'Render the identity reel?',
+      body: 'The evaluation script renders twice — once under each fixture identity — and the halves stack into one video. Two full renders; expect minutes. If the halves don’t read as two different shows, the identity system isn’t doing its job.',
+      list: [
+        { tag: 'TOP', fg: '#7a8fc0', text: 'fixtures/dry-institutional' },
+        { tag: 'BOTTOM', fg: '#c8834a', text: 'fixtures/loud-cartoon' },
+        { tag: 'KEEPS', fg: '#6f9b5a', text: 'The active identity is restored when the reel finishes.' },
+      ],
+      ok: 'Render reel',
+      okTone: 'accent',
+      onOk: () => {
+        void (async () => {
+          setBusy('reel');
+          setJob({ kind: 'reel', event: null });
+          setError(null);
+          try {
+            const started = await api.renderReel();
+            const stop = followJob(started.id, (e) => {
+              setJob({ kind: 'reel', event: e });
+              if (e.type !== 'done' && e.type !== 'error') return;
+              stop();
+              setBusy(null);
+              setJob(null);
+              if (e.type === 'error') {
+                setError(e.message ?? 'reel failed');
+                return;
+              }
+              const url = (e.result as { url?: string } | undefined)?.url;
+              setInfo('Identity reel rendered — top: dry-institutional, bottom: loud-cartoon.');
+              if (url) window.open(url, '_blank');
+            });
+          } catch (err) {
+            setBusy(null);
+            setJob(null);
+            setError((err as Error).message);
+          }
+        })();
+      },
+    });
+  }, []);
+
+  /** Whole-cast contact sheet from the palette; the result opens as an image. */
+  const runContactSheet = useCallback(async () => {
+    setBusy('sheet');
+    setJob({ kind: 'sheet', event: null });
+    setError(null);
+    try {
+      const started = await api.castSheet();
+      const stop = followJob(started.id, (e) => {
+        setJob({ kind: 'sheet', event: e });
+        if (e.type !== 'done' && e.type !== 'error') return;
+        stop();
+        setBusy(null);
+        setJob(null);
+        if (e.type === 'error') {
+          setError(e.message ?? 'contact sheet failed');
+          return;
+        }
+        const url = (e.result as { url?: string } | undefined)?.url;
+        if (url) window.open(url, '_blank');
+      });
+    } catch (err) {
+      setBusy(null);
+      setJob(null);
+      setError((err as Error).message);
+    }
+  }, []);
+
+  /** Rig validation from the palette — fast enough to answer as a toast. */
+  const runCastCheck = useCallback(async () => {
+    try {
+      const { ok, results } = await api.checkCast();
+      const bad = results.filter((r) => !r.ok);
+      setInfo(ok
+        ? `Cast check: all ${results.length} rig${results.length === 1 ? '' : 's'} valid.`
+        : `Cast check: ${bad.length} of ${results.length} failed — ${bad.map((r) => r.name).join(', ')}. Details in the cast editor's tools.`);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }, []);
 
   const cycleQuality = useCallback(() => {
     setQuality((q) => (q === 'Draft' ? 'Accurate' : q === 'Accurate' ? 'Final' : 'Draft'));
@@ -809,6 +1054,10 @@ export function EditorApp({
         setCmd(false);
         setPreflightOpen(false);
         setConfirm(null);
+        setSystemOpen(false);
+        setCompareOpen(false);
+        setAuditionOpen(false);
+        setScoreTake(null);
         return;
       }
       if (isTyping(e.target)) return;
@@ -838,11 +1087,19 @@ export function EditorApp({
             disabled: llm ? !llm.ok : false, go: () => setWriting(true),
           },
           { label: 'Check', hint: 'Parse, direct and validate. Sub-second, renders nothing.', busy: busy === 'check', go: () => void runCheck() },
-          { label: 'Direct →', hint: 'Propose a shot list from this draft.', primary: true, busy: busy === 'direct', go: () => void runDirect() },
+          {
+            label: 'Direct the script →',
+            hint: 'Turn this draft into the shot list. The timeline, voices, animation, preview and render all read the shot list — this is what pushes your script into them. You confirm the diff first.',
+            primary: true, busy: busy === 'direct', go: () => void runDirect(),
+          },
         ];
       case 'direct':
         return [
-          { label: 'Re-direct…', hint: 'Propose new direction. You confirm the diff before anything is written.', busy: busy === 'direct', go: () => void runDirect() },
+          {
+            label: 'Re-direct…',
+            hint: 'Propose new direction from the current script and apply it to the timeline, voices, animation and preview. You confirm the diff before anything is written; locked beats survive.',
+            busy: busy === 'direct', go: () => void runDirect(),
+          },
           { label: 'Voices', hint: 'Synthesize dialogue and derive Rhubarb mouth cues.', busy: busy === 'voices', disabled: !shots, go: () => void runJob('voices') },
           { label: 'Preflight', hint: 'Check voices, staging, animation, continuity, soundtrack freshness.', go: () => { setPreflightOpen(true); void refreshPreflight(); } },
         ];
@@ -856,12 +1113,19 @@ export function EditorApp({
         return [
           { label: 'Line Booth', hint: 'Perform one line with context playback and count-in — in the Voice tab.', on: tab === 'voice', go: openBooth },
           { label: 'Scene Run', hint: 'Perform every unlocked line for one character against the full guide track — in the Voice tab.', go: openBooth },
-          { label: 'Voices', hint: 'Synthesize all lines with the local engine.', busy: busy === 'voices', disabled: !shots, go: () => void runJob('voices') },
+          { label: 'Audition…', hint: 'The whole cast through the real synthesis path, side by side, with per-line verification verdicts.', go: () => setAuditionOpen(true) },
+          { label: 'Voices', hint: `Synthesize all lines with the ${engine} engine.`, busy: busy === 'voices', disabled: !shots, go: () => void runJob('voices') },
         ];
       case 'sound':
         return [
-          { label: 'Rebuild stems', hint: 'Planned — dialogue, Foley, music and room tone as separate stems.', disabled: true, go: () => {} },
-          { label: 'Room tone', hint: 'Planned — per-set room tone bed from the identity profile.', disabled: true, go: () => {} },
+          {
+            label: 'Rebuild stems',
+            hint: 'Remix dialogue, Foley, room tone and stings from cached takes — the same assembly path as Voices, without asking for new synthesis.',
+            busy: busy === 'sound',
+            disabled: !shots,
+            go: () => void runJob('sound'),
+          },
+          { label: 'Voices', hint: `Synthesize any missing lines with ${engine} and remix.`, busy: busy === 'voices', disabled: !shots, go: () => void runJob('voices') },
         ];
       case 'publish':
         return [
@@ -877,7 +1141,7 @@ export function EditorApp({
           },
         ];
     }
-  }, [mode, llm, busy, shots, prefs, tab, layout, detail, scene, runCheck, runDirect, runJob, refreshPreflight, openBooth]);
+  }, [mode, llm, busy, shots, prefs, tab, layout, detail, scene, engine, runCheck, runDirect, runJob, refreshPreflight, openBooth]);
 
   // --- command palette ---
   const commands: Command[] = useMemo(() => {
@@ -892,8 +1156,31 @@ export function EditorApp({
     out.push({ icon: '⚙', label: 'Run Check', group: 'Action', run: () => void runCheck() });
     out.push({ icon: '⚙', label: 'Direct the scene', group: 'Action', run: () => void runDirect() });
     out.push({ icon: '⚙', label: 'Render voices', group: 'Action', run: () => void runJob('voices') });
+    out.push({ icon: '⚙', label: 'Rebuild sound stems', group: 'Action', keywords: 'mix foley ambience', run: () => void runJob('sound') });
     out.push({ icon: '⚙', label: 'Open production readiness', group: 'Action', run: () => { setPreflightOpen(true); void refreshPreflight(); } });
     out.push({ icon: '⚙', label: 'Render master…', group: 'Action', run: askRenderMaster });
+    out.push({ icon: '⚙', label: 'Render draft with blockers…', group: 'Action', keywords: 'diagnostic', run: askRenderDraft });
+    out.push({ icon: '▤', label: 'Scene settings — set, seed, frame rate, cards', group: 'Action', keywords: 'scene tab', run: () => selectTab('scene') });
+    for (const option of engines) {
+      if (option.name === engine) continue;
+      out.push({
+        icon: '♪',
+        label: `Use the ${option.name} voice engine${option.ok ? '' : ' (unavailable)'}`,
+        group: 'Engine',
+        keywords: 'voice tts',
+        run: () => setEngine(option.name),
+      });
+    }
+    out.push({ icon: '♪', label: 'Open Audition — cast voice bench', group: 'Voices', keywords: 'bench listen', run: () => setAuditionOpen(true) });
+    out.push({ icon: '⚕', label: 'Open System report', group: 'System', keywords: 'doctor toolchain health migrate', run: () => setSystemOpen(true) });
+    out.push({ icon: '⚕', label: 'Validate cast rigs', group: 'System', keywords: 'cast check', run: () => void runCastCheck() });
+    out.push({ icon: '⚕', label: 'Contact sheet — whole cast', group: 'System', keywords: 'sheet png', run: () => void runContactSheet() });
+    out.push({ icon: '◔', label: 'Compare identity profiles…', group: 'Identity', run: () => setCompareOpen(true) });
+    out.push({ icon: '◔', label: 'Render identity reel…', group: 'Identity', run: askRenderReel });
+    for (const profile of show?.profiles ?? []) {
+      if (profile.id === show?.active.id) continue;
+      out.push({ icon: '◔', label: `Switch identity to ${profile.name}`, group: 'Identity', run: () => switchIdentity(profile.id) });
+    }
     for (const s of scenes) {
       out.push({ icon: '≡', label: `Open scene ${s.name}`, group: 'Scene', keywords: 'switch', run: () => onScene(s.name) });
     }
@@ -912,35 +1199,82 @@ export function EditorApp({
       });
     });
     return out;
-  }, [prefs, scenes, cast, shots, setMode, runCheck, runDirect, runJob, refreshPreflight, askRenderMaster, onScene, onOpenCast, onOpenSets, selectBeat]);
+  }, [
+    prefs, scenes, cast, shots, show, engine, engines, setMode, selectTab, setEngine, runCheck, runDirect, runJob,
+    refreshPreflight, askRenderMaster, askRenderDraft, askRenderReel, runCastCheck, runContactSheet, switchIdentity,
+    onScene, onOpenCast, onOpenSets, selectBeat,
+  ]);
 
   // --- assembled pieces ---
   const identityLabel = show ? `${show.active.id}@${show.active.hash.slice(0, 12)}` : '…';
   const sceneTitle = scene.split('-').map((w) => (w ? w[0]!.toUpperCase() + w.slice(1) : w)).join(' ');
   const beatsCount = shots?.beats.length ?? check?.beats.length ?? 0;
-  const sceneMeta = `${beatsCount ? `${beatsCount} beats` : 'undirected'}${totalMs ? ` · ${(totalMs / 1000).toFixed(1)}s` : ''}`;
+  const sceneMeta = `${beatsCount ? `${beatsCount} beats` : 'undirected'}${totalMs ? ` · ${(totalMs / 1000).toFixed(1)}s` : ''}${staleBeats ? ' · script ahead' : ''}`;
   const hasStaleRender = Boolean(preflight?.notes.some((n) => n.code.includes('stale')));
   const selectedCue = cueForBeat(dialogue, selectedBeat);
   const speakerBound = selectedCue
     ? Boolean(cast.find((c) => c.name === shots?.cast.find((m) => m.id === selectedCue.speaker)?.rig)?.voiceRef)
     : false;
 
-  const performContext = selected !== null && selected > 0 && withAudio && detail?.hasAudio
+  const performContext = selected !== null && selected > 0 && audioPlayable
     ? {
         audioUrl: `/api/scenes/${scene}/audio`,
         startMs: beatStarts[Math.max(0, selected - 1)] ?? 0,
         endMs: beatStarts[selected] ?? playheadMs,
       }
     : null;
-  const sceneRun = withAudio && detail?.hasAudio && totalMs > 0
+  const sceneRun = audioPlayable && totalMs > 0
     ? { audioUrl: `/api/scenes/${scene}/audio`, beatStarts, durationMs: totalMs }
     : null;
 
-  const jumpForCode = (code: string) => {
+  /**
+   * Put the creator in front of what a readiness note is about.
+   *
+   * Switching mode alone was never enough: a note naming `sarah:line-19293i4`
+   * left you in a mode with dozens of lines and no way to tell which. When the
+   * note carries a target, select the thing; otherwise fall back to the mode
+   * the code implies.
+   */
+  const jumpToNote = (note: ProductionPreflightNote) => {
+    const target = note.target;
+    const beats = shots?.beats ?? [];
+
+    if (target?.kind === 'cue' || target?.kind === 'beat') {
+      const index = beats.findIndex((beat) => beat.id === target.id);
+      if (index >= 0) {
+        setMode(target.kind === 'cue' ? 'perform' : 'direct');
+        selectBeat(index);
+        if (target.kind === 'cue') setTab('voice');
+        setPreflightOpen(false);
+        return;
+      }
+    }
+    if (target?.kind === 'motion') {
+      setMode('animate');
+      const segment = animation?.segments.find((item) => item.id === target.id);
+      // An orphaned segment has no beat to seek to, but selecting it is what
+      // lets Delete reach it.
+      if (segment) setSelectedMotionId(segment.id);
+      setPreflightOpen(false);
+      return;
+    }
+    if (target?.kind === 'actor') {
+      const member = shots?.cast.find((item) => item.id === target.id);
+      onOpenCast(member?.rig ?? target.id);
+      setPreflightOpen(false);
+      return;
+    }
+    if (target?.kind === 'set') {
+      onOpenSets(target.id.replace(/\.(json|svg)$/, ''));
+      setPreflightOpen(false);
+      return;
+    }
+
+    const code = note.code;
     if (/dialogue|voice|take/.test(code)) setMode('perform');
     else if (/animation|motion|blocking|walkable|staging/.test(code)) setMode('animate');
-    else if (/action|script/.test(code)) setMode('direct');
-    else if (/caption|render|export/.test(code)) setMode('publish');
+    else if (/action|script|caption/.test(code)) setMode('direct');
+    else if (/render|export/.test(code)) setMode('publish');
     setPreflightOpen(false);
   };
 
@@ -954,9 +1288,17 @@ export function EditorApp({
         <LinesPane dialogue={dialogue} shots={shots} selected={selected} onSelect={(i) => { selectBeat(i); setTab('voice'); }} speakerFilter={null} />
       )}
       {mode === 'publish' && (
-        <ReadinessPane report={preflight} onJump={(code) => jumpForCode(code)} />
+        <ReadinessPane report={preflight} onJump={jumpToNote} />
       )}
-      {mode === 'sound' && <MixerPane />}
+      {mode === 'sound' && (
+        <MixerPane
+          scene={scene}
+          sound={sound}
+          loading={soundLoading}
+          rebuilding={busy === 'sound'}
+          onRebuild={() => void runJob('sound')}
+        />
+      )}
     </div>
   );
 
@@ -980,6 +1322,13 @@ export function EditorApp({
             speakerRig={selectedCue ? shots?.cast.find((m) => m.id === selectedCue.speaker)?.rig ?? null : null}
             converting={busy === 'convert'}
             onConvert={() => convertToCharacter(selectedCue)}
+            onScoreAcrossCast={selectedCue?.selectedTakeId ? () => {
+              const takeId = selectedCue.selectedTakeId!;
+              setScoreTake({
+                takeId,
+                label: `${selectedCue.speaker} — “${selectedCue.displayText.slice(0, 44)}${selectedCue.displayText.length > 44 ? '…' : ''}”`,
+              });
+            } : null}
             onOpenCastEditor={onOpenCast}
             conversionRuntime={health?.voiceConversion?.fingerprint ?? null}
           />
@@ -1007,27 +1356,47 @@ export function EditorApp({
       <AppBar
         sceneTitle={sceneTitle}
         sceneMeta={sceneMeta}
+        sceneMetaStale={staleBeats > 0}
         save={save}
         mode={mode}
         onMode={setMode}
         tools={tools}
         show={show}
-        onCycleIdentity={cycleIdentity}
+        onSwitchIdentity={switchIdentity}
+        onCompareIdentity={() => setCompareOpen(true)}
+        onRenderReel={askRenderReel}
         quality={quality}
         onCycleQuality={cycleQuality}
+        engine={engine}
+        engines={engines}
+        onEngine={setEngine}
         preflight={preflight}
         preflightBusy={preflightBusy}
         onTogglePreflight={() => {
-          setPreflightOpen((v) => !v);
-          if (!preflight) void refreshPreflight();
+          const opening = !preflightOpen;
+          setPreflightOpen(opening);
+          // Opening the report *is* the question "what is true now?". It costs
+          // milliseconds, and refreshing only when empty is what let a verdict
+          // from before the last Voices run keep answering it.
+          if (opening) void refreshPreflight();
         }}
         onRender={() => {
           setMode('publish');
           setPreflightOpen(true);
-          if (!preflight) void refreshPreflight();
+          void refreshPreflight();
         }}
         onCmd={() => setCmd(true)}
       />
+
+      {staleBeats > 0 && shots && check && (
+        <StaleBar
+          beats={staleBeats}
+          scriptBeats={check.beats.length}
+          shotBeats={shots.beats.length}
+          busy={busy === 'direct'}
+          onApply={() => void runDirect()}
+        />
+      )}
 
       <div className="flex-1 min-h-0 flex">
         <Sidebar
@@ -1039,6 +1408,7 @@ export function EditorApp({
           animation={animation}
           dirty={save.state === 'dirty' || save.state === 'saving'}
           hasStaleRender={hasStaleRender}
+          staleBeats={staleBeats}
           cast={cast}
           sets={sets}
           health={health}
@@ -1048,6 +1418,7 @@ export function EditorApp({
           onNewScene={onNewScene}
           onOpenCast={onOpenCast}
           onOpenSets={onOpenSets}
+          onOpenSystem={() => setSystemOpen(true)}
         />
 
         <div className="flex-1 min-w-0 flex flex-col bg-deep">
@@ -1057,7 +1428,8 @@ export function EditorApp({
               ref={stageRef}
               mode={mode}
               preview={preview}
-              audioUrl={withAudio && detail?.hasAudio ? `/api/scenes/${scene}/audio` : null}
+              audioUrl={audioPlayable ? `/api/scenes/${scene}/audio` : null}
+              onAudioError={setInfo}
               shots={shots}
               beatStarts={beatStarts}
               totalMs={totalMs}
@@ -1090,12 +1462,15 @@ export function EditorApp({
           dialogue={dialogue}
           animation={animation}
           setDescriptor={setDescriptor}
+          sets={sets}
           playheadMs={playheadMs}
           totalMs={totalMs}
           identityLabel={identityLabel}
           expressionsFor={expressionsFor}
           onEditBeat={(i, next) => void editBeat(i, next)}
           onEditCast={(actorId, changes) => void editCastMember(actorId, changes)}
+          onEditShots={(changes) => void editShots(changes)}
+          onEditAllCast={(changes) => void editAllCast(changes)}
           onAnimationDocument={changeAnimationDocument}
           onAnimationTarget={setAnimationTarget}
           onAnimationSeek={(ms) => stageRef.current?.seekMs(ms)}
@@ -1201,13 +1576,25 @@ export function EditorApp({
 
       {/* overlays */}
       {cmd && <CommandPalette commands={commands} onClose={() => setCmd(false)} />}
+      {systemOpen && <SystemReport onClose={() => setSystemOpen(false)} />}
+      {compareOpen && show && <CompareOverlay show={show} onClose={() => setCompareOpen(false)} />}
+      {auditionOpen && <AuditionOverlay onClose={() => setAuditionOpen(false)} />}
+      {scoreTake && (
+        <ConversionCheckOverlay
+          scene={scene}
+          takeId={scoreTake.takeId}
+          takeLabel={scoreTake.label}
+          onClose={() => setScoreTake(null)}
+        />
+      )}
       {preflightOpen && (
         <PreflightPopover
           report={preflight}
           busy={preflightBusy}
+          checkedAgoS={preflightAgoS}
           onClose={() => setPreflightOpen(false)}
           onAcknowledge={() => void acknowledgeWarnings()}
-          onJump={jumpForCode}
+          onJump={jumpToNote}
           onRender={askRenderMaster}
         />
       )}

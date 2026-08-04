@@ -64,8 +64,8 @@ function TreeRow({ row }: { row: Row }) {
  * glanced at without being in the way.
  */
 export function Sidebar({
-  scenes, scene, detail, shots, dialogue, animation, dirty, hasStaleRender,
-  cast, sets, health, mode, onScene, onMode, onNewScene, onOpenCast, onOpenSets,
+  scenes, scene, detail, shots, dialogue, animation, dirty, hasStaleRender, staleBeats,
+  cast, sets, health, mode, onScene, onMode, onNewScene, onOpenCast, onOpenSets, onOpenSystem,
 }: {
   scenes: SceneSummary[];
   scene: string | null;
@@ -75,6 +75,8 @@ export function Sidebar({
   animation: AnimationDocument | null;
   dirty: boolean;
   hasStaleRender: boolean;
+  /** Beats by which the script has outrun the shot list; 0 when in sync. */
+  staleBeats: number;
   cast: CastSummary[];
   sets: SetSummary[];
   health: Health | null;
@@ -84,6 +86,8 @@ export function Sidebar({
   onNewScene: () => void;
   onOpenCast: (name: string | null) => void;
   onOpenSets: (name: string | null) => void;
+  /** The health strip opens the full System report — doctor, in the place people already look. */
+  onOpenSystem: () => void;
 }) {
   const [filter, setFilter] = useState('');
   const [open, setOpen] = useState<Record<string, boolean>>({ scripts: true, cast: true, sets: true });
@@ -109,7 +113,9 @@ export function Sidebar({
         key: 'scene', label: scene, glyph: '▸', pad: 8, h: 24, serif: true,
         fg: '#e6e3dc', mark: '#c8834a', bg: 'rgba(200,131,74,.13)',
         badge: { text: 'open', color: '#c8834a', hint: 'Currently open scene' },
-        hint: summary?.directed ? `${summary.beats} beats · directed${summary.hasVideo ? ' · rendered' : ''}` : 'undirected',
+        hint: summary?.directed
+          ? `${summary.beats} beats · directed${summary.hasVideo ? ' · rendered' : ''}${staleBeats ? ' · the script has moved ahead' : ''}`
+          : 'undirected',
       },
       {
         key: 'md', label: `${scene}.md`, glyph: '≡', pad: 22, h: 22,
@@ -118,18 +124,27 @@ export function Sidebar({
       },
     ];
     if (shots) {
+      // Everything in this group is derived from the shot list, so when the
+      // script has outrun it they are all describing the previous scene.
+      const behind = staleBeats
+        ? { color: '#c8834a', hint: `Out of date — the script has moved ${staleBeats} beat${staleBeats === 1 ? '' : 's'} ahead of the last Direct` }
+        : undefined;
       rows.push({
         key: 'shotlist', label: 'shotlist.json', glyph: '▤', pad: 22, h: 22,
-        hint: 'Readable shot list. Edit it here or by hand.', go: () => onMode('direct'),
+        dot: behind,
+        hint: staleBeats
+          ? 'Readable shot list — behind the script. Apply direction to catch it up.'
+          : 'Readable shot list. Edit it here or by hand.',
+        go: () => onMode('direct'),
       });
       rows.push({
         key: 'dialogue', label: 'dialogue.json', glyph: '▤', pad: 22, h: 22,
-        dot: missing ? { color: '#c8595a', hint: `${missing} of ${lineCues.length} lines undecided` } : { color: '#6f9b5a', hint: 'Every line has a decided voice' },
+        dot: behind ?? (missing ? { color: '#c8595a', hint: `${missing} of ${lineCues.length} lines undecided` } : { color: '#6f9b5a', hint: 'Every line has a decided voice' }),
         hint: 'Immutable takes, trims, approvals, timing.', go: () => onMode('perform'),
       });
       rows.push({
         key: 'animation', label: 'animation.json', glyph: '▤', pad: 22, h: 22,
-        dot: lockedSegments ? { color: '#a89050', hint: `${lockedSegments} locked motion segment${lockedSegments === 1 ? '' : 's'}` } : undefined,
+        dot: behind ?? (lockedSegments ? { color: '#a89050', hint: `${lockedSegments} locked motion segment${lockedSegments === 1 ? '' : 's'}` } : undefined),
         hint: 'Generated + creator-owned motion layers.', go: () => onMode('animate'),
       });
     }
@@ -142,7 +157,7 @@ export function Sidebar({
       });
     }
     return rows;
-  }, [scene, scenes, shots, detail, dirty, missing, lineCues.length, lockedSegments, hasStaleRender, onMode]);
+  }, [scene, scenes, shots, detail, dirty, missing, lineCues.length, lockedSegments, hasStaleRender, staleBeats, onMode]);
 
   const projectRows: Row[] = useMemo(() => {
     const rows: Row[] = [];
@@ -248,14 +263,21 @@ export function Sidebar({
         {projectRows.map((row) => <TreeRow key={row.key} row={row} />)}
       </div>
 
-      <div className="h-[26px] shrink-0 flex items-center gap-2 px-2 border-t border-[#2f353d] bg-stage overflow-hidden">
+      <button
+        type="button"
+        onClick={onOpenSystem}
+        title="Open the full System report — toolchain, engines, model storage, identity profiles and migration."
+        className="h-[26px] shrink-0 flex items-center gap-2 px-2 border-0 border-t border-t-[#2f353d] bg-stage overflow-hidden cursor-pointer text-left hover:bg-[#1f2227]"
+      >
         {healthRows.length ? healthRows.map((row) => (
           <span key={row.label} title={row.hint} className="inline-flex items-center gap-1 text-[9px] text-ink-faint whitespace-nowrap">
             <Dot color={'checking' in row && row.checking ? '#6b737d' : row.ok ? '#6f9b5a' : '#c8595a'} pulse={'checking' in row && !!row.checking} />
             {row.label}
           </span>
         )) : <span className="text-[9px] text-ink-faint">checking toolchain…</span>}
-      </div>
+        <span className="flex-1" />
+        <span className="text-[9px] text-ink-ghost">report ▸</span>
+      </button>
     </div>
   );
 }

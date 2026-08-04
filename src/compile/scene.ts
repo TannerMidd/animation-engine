@@ -20,6 +20,7 @@ import {
   type StagePosition,
   type LookDirection,
 } from '../schema/script.ts';
+import { splitCaptionCues } from './captions.ts';
 import { baseFrame, applyMove, type ActorFrameInfo } from '../render/framing.ts';
 import { faceBox } from '../cast/placeholder.ts';
 import { mouthAt, type LineTiming, type WordTiming } from '../voice/visemes.ts';
@@ -2314,7 +2315,12 @@ export function compileShotList(
       timingKey: t.timing!.timingKey,
     }));
 
-  const captions: CompiledCaptionCue[] = timeline.flatMap((timed) => {
+  // Captions come out release-shaped: a line too long for the mobile caption
+  // budget becomes several cues in sequence across its own speech window,
+  // rather than one cue nothing can display. Every consumer of
+  // `CompiledScene.captions` — the sidecars, the export manifest, the safety
+  // check, the editor overlay — therefore sees the same cues.
+  const captions: CompiledCaptionCue[] = splitCaptionCues(timeline.flatMap((timed) => {
     if (timed.beat.kind !== 'line' || !timed.timing) return [];
     const onsetMs = timed.timing.speechOnsetMs ?? timed.timing.speechStartMs ?? 0;
     const speechEndMs = timed.timing.speechEndMs ?? timed.timing.durationMs;
@@ -2328,7 +2334,7 @@ export function compileShotList(
       startMs,
       endMs,
     }];
-  });
+  }));
 
   return {
     ir: {

@@ -81,6 +81,201 @@ export function totalMsFor(shots: ShotList | null, starts: number[], previewDura
   return (starts[starts.length - 1] ?? 0) + (last ? estimateBeatMs(last) : 0);
 }
 
+/**
+ * The script-owned spine of a beat list (mirrors `matchKey` and `beatSpine` in
+ * src/pipeline/propose.ts).
+ *
+ * Shot, camera, focus and pause duration are deliberately absent: those are
+ * edited by hand in the inspector, and a retimed pause must never read as the
+ * script having moved.
+ */
+export function beatSpine(beats: readonly Beat[]): string[] {
+  return beats.map((beat) => {
+    if (beat.kind === 'line') return `line:${beat.speaker}:${beat.text}`;
+    if (beat.kind === 'action') return `action:${beat.text}`;
+    return 'pause';
+  });
+}
+
+/** How far the shot list has fallen behind the script, in beats. 0 is in sync. */
+export function spineDrift(script: readonly string[], shotList: readonly string[]): number {
+  let drift = Math.abs(script.length - shotList.length);
+  for (let i = 0; i < Math.min(script.length, shotList.length); i++) {
+    if (script[i] !== shotList[i]) drift++;
+  }
+  return drift;
+}
+
+// --- readiness repair hints -----------------------------------------------
+
+/**
+ * What to actually do about each preflight code, in creator words.
+ *
+ * Preflight states what is wrong; without this a blocker is a dead end — you
+ * are told the export is refused and left to guess which of six modes owns the
+ * remedy. Every code the engine can raise must have an entry, and a test over
+ * `PREFLIGHT_CODES` holds this file to it.
+ *
+ * Order matters: the first matching pattern wins, so put specific codes above
+ * the prefixes that would also match them.
+ */
+const HUMAN_HINTS: Array<{ test: RegExp; hint: string }> = [
+  // --- script and direction ---
+  { test: /^shotlist-script-stale$/, hint: 'Your script has moved ahead of the shot list. Press “Apply direction” in the bar at the top — the timeline, voices, animation, preview and render all read the shot list, not the script.' },
+  { test: /^script-unreadable$/, hint: 'The scene has a shot list but its Fountain source cannot be read. Nothing is lost — the shot list still renders — but Direct cannot run until the script is back.' },
+  { test: /^scene-undirected$/, hint: 'Nothing has been staged yet. Write the scene, then press “Direct the script”.' },
+  { test: /^shotlist-invalid$/, hint: 'The shot list on disk does not match what the engine expects. Re-direct the scene to rebuild it from the script.' },
+  { test: /^action-unstructured$|^action-unsupported$|^continuity-invalid$/, hint: 'Select the beat in Direct and stage it with structured actions in the inspector. Prose the director cannot lower into a known action has to be replaced or annotated.' },
+  { test: /^director-locks$/, hint: 'Nothing to do — locked beats are reported so you know what a re-direct will leave alone.' },
+  { test: /^identity-drift$/, hint: 'The scene was directed under a different show identity. Re-direct to pick up the current one, or switch the identity back in the app bar.' },
+  { test: /^title-undrawable$/, hint: 'The title card alphabet cannot draw these characters. Change the scene title, or turn cards off in the scene inspector.' },
+
+  // --- cast, sets and props ---
+  { test: /^rig-invalid$/, hint: 'This character’s rig file is corrupt. Open them in the cast editor and regenerate, or restore the file.' },
+  { test: /^rig-missing$/, hint: 'A placeholder puppet will be cast at render time. Open the character in the cast editor to draw a real one first.' },
+  { test: /^set-missing$|^set-unavailable$/, hint: 'The scene names a set that is not on disk. Pick an existing set in the scene inspector, or create one in the set designer.' },
+  { test: /^set-invalid$/, hint: 'The set file cannot be read. Open it in the set designer and fix or regenerate it.' },
+  { test: /^prop-action-set-missing$/, hint: 'A beat handles a prop but the scene has no set to take it from. Assign a set in the scene inspector.' },
+  { test: /^prop-action-invalid$/, hint: 'The beat names a prop the set does not have, or names one ambiguously when several match. Give the instance a stable id in the set designer, or point the action at a specific one.' },
+
+  // --- animation ---
+  { test: /^animation-target-invalid$/, hint: 'This motion was authored for a character who is no longer in the scene — usually because a re-direct changed the cast. In Animate: select the clip on the timeline and press Delete. The preview cannot build until these are gone.' },
+  { test: /^animation-scene-mismatch$/, hint: 'The animation document belongs to a different scene. It has to be removed or replaced before this one can render.' },
+  { test: /^animation-invalid$/, hint: 'The animation document cannot be read. Restore it, or delete it to start from generated motion only.' },
+  { test: /^animation-resolve-failed$/, hint: 'Two motions fight over the same controller at the same moment, or one is anchored outside the scene. Open Animate and move or delete one of them.' },
+  { test: /^animation-outside-walkable$/, hint: 'The motion leaves the floor area the set defines. Drag the endpoint back inside the walkable region, or widen it in the set designer.' },
+  { test: /^animation-long-pose-hold$/, hint: 'A pose is held long enough to read as a frozen frame. Shorten it in Animate, or accept it and acknowledge the warning.' },
+  { test: /^animation-contact-set-missing$|^animation-contact-invalid$/, hint: 'A contact or attach event names a set handle that does not exist. Re-point it at a real prop handle in Animate, or add the handle in the set designer.' },
+  { test: /^animation-timing-deferred$/, hint: 'This motion is anchored to a label the planning clock cannot resolve yet. It will be timed exactly at render; no action needed unless the placement looks wrong.' },
+
+  // --- dialogue selection and approval ---
+  { test: /^dialogue-selection-unresolved$/, hint: 'This line has no audio chosen. In Perform: record a take, pick an existing one, or press “Use character voice” to approve the generated voice.' },
+  { test: /^dialogue-unapproved$/, hint: 'Approve each line once you are happy with its audio — the big button in the Voice tab approves and locks in one step.' },
+  { test: /^dialogue-unlocked$/, hint: 'Locking freezes a line against reruns. “Approve and lock performance” in the Voice tab does both.' },
+  { test: /^dialogue-approval-/, hint: 'This line’s approval no longer stands — the audio or the text changed under it. Re-listen in the Voice tab and approve again.' },
+  { test: /^dialogue-editorial-missing$/, hint: 'The scene has no dialogue document yet. Re-direct the scene; the cues are created from the shot list.' },
+  { test: /^dialogue-invalid$/, hint: 'The dialogue document cannot be read. Restore it from disk, or re-direct to rebuild the cues (recorded takes on disk are not touched).' },
+  { test: /^dialogue-scene-mismatch$/, hint: 'The dialogue document belongs to a different scene and cannot be used here.' },
+  { test: /^dialogue-script-stale$/, hint: 'Your voice selections were made against a different version of the script. Re-direct, then review the affected lines in Perform.' },
+  { test: /^dialogue-take-stale$|^dialogue-cue-stale$/, hint: 'The script line changed after this was recorded. Re-record the line, or revert the script text.' },
+  { test: /^dialogue-asset-missing$/, hint: 'The audio file this line points at is gone. Select a different take, or re-record it.' },
+  { test: /^dialogue-asset-stale$/, hint: 'The audio file changed on disk after it was recorded, so it no longer matches its checksum. Re-record the line or select a different take.' },
+  { test: /^dialogue-trim-unreviewed$/, hint: 'Nobody has set where speech starts and ends in this recording. Open the waveform in the Voice tab and drag the trim handles.' },
+  { test: /^dialogue-identity-drift$/, hint: 'These voice decisions were made under a different show identity. Re-listen before release, or acknowledge the warning.' },
+  { test: /^dialogue-fps-drift$/, hint: 'The dialogue was timed at a different frame rate than the scene now uses. Run Voices to retime it.' },
+
+  // --- capture quality ---
+  { test: /^capture-qc-rejected$|^scene-run-segment-qc-rejected$/, hint: 'The selected recording failed capture checks (usually silence or clipping). Select a different take, re-record, or discard it.' },
+  { test: /^capture-qc-warning$|^scene-run-segment-qc-warning$/, hint: 'The recording passed but something looked off — usually level or background noise. Listen in the Voice tab, then acknowledge the warning.' },
+  { test: /^capture-qc-missing$|^scene-run-segment-qc-missing$/, hint: 'This take predates capture quality checks. Re-record it, or select a newer take.' },
+
+  // --- rights ---
+  { test: /^performance-consent-missing$/, hint: 'Your recordings need a rights record. In the Voice tab: tick the confirmation under Voice and performance rights and press Register permission — one self-owned record covers your recordings, including ones already made.' },
+  { test: /^performance-consent-revoked$|^voice-consent-revoked$/, hint: 'The permission covering this audio was withdrawn. Select different audio, or register a new record if the rights are yours to give.' },
+  { test: /^performance-consent-expired$|^voice-consent-expired$/, hint: 'The permission covering this audio has run out. Register a current record in the Voice tab.' },
+  { test: /^performance-consent-scope$|^voice-consent-scope$/, hint: 'The rights record on file does not cover this use. Register one that permits distribution — and voice conversion, if a character voice is involved.' },
+  { test: /^performance-consent-fallback$/, hint: 'Nothing to do — an older recording is covered by your document-level rights record rather than its own.' },
+  { test: /^voice-consent-missing$/, hint: 'This converted line names a rights record that no longer exists. Re-convert it in the Voice tab, or select your original recording instead.' },
+  { test: /^voice-consent-reference-stale$|^voice-target-reference-stale$/, hint: 'The character’s voice reference changed after this line was converted. Re-convert it in the Voice tab.' },
+  { test: /^voice-conversion-source-/, hint: 'This converted line is no longer tied to the recording it came from. Re-convert it from the take you want in the Voice tab.' },
+
+  // --- voices ---
+  { test: /^voice-line-unintelligible$/, hint: 'Every seeded attempt at this generated line failed speech verification — the audio does not say the script line. Reroll the line’s seed in the Perform strip, reword the line, or record it yourself.' },
+  { test: /^voice-reference-draft-only$/, hint: 'This character speaks with a machine-invented voice and some lines have no decision yet. Approve the generated voice per line, approve a conversion of your own take into it, or give the character a recorded reference in the cast editor.' },
+  { test: /^voice-reference-minted-in-use$/, hint: 'This character speaks with a machine-invented voice you approved — as generated lines, or as your performance converted into it. Audition it, then acknowledge this warning in the readiness report.' },
+  { test: /^voice-reference-missing$/, hint: 'Nothing to do — a voice is minted automatically the next time Voices runs.' },
+  { test: /^voice-render-qc-warning$/, hint: 'A converted line passed the automatic checks but nothing verified the words. Use A / B in the Perform strip to hear your recording against the character voice, then acknowledge this warning in the readiness report.' },
+  { test: /^voice-render-not-ready$/, hint: 'This conversion has not finished, or it failed. Re-run it from the Voice tab.' },
+  { test: /^voice-render-rejected$/, hint: 'This converted line failed quality review. Re-convert it, or select your original recording instead.' },
+  { test: /^voice-render-draft-only$/, hint: 'This line is still draft synthesis, not production dialogue. Approve the character voice for it, or record and select a take.' },
+
+  // --- sound ---
+  { test: /^soundtrack-stale$/, hint: 'The mixed audio predates your latest edits. Run Voices to rebuild it.' },
+  { test: /^soundtrack-missing$/, hint: 'No audio has been mixed yet. Run Voices.' },
+  { test: /^soundtrack-unverifiable$/, hint: 'The mix on disk cannot be checked against the scene. Run Voices to rebuild it.' },
+  { test: /^soundtrack-loudness-failed$|^soundtrack-true-peak-failed$/, hint: 'The programme is outside the delivery loudness target. Run Voices to re-normalise; if it persists, a take is clipping — check the loudest lines in Perform.' },
+  { test: /^soundtrack-qc-missing$/, hint: 'This mix predates loudness and peak measurement. Run Voices before release.' },
+  { test: /^soundtrack-qc-passed$|^soundtrack-intentional-silence$/, hint: 'Nothing to do — reported so the measurement is on the record.' },
+
+  // --- publish ---
+  { test: /^caption-safe-area-failed$/, hint: 'A caption is too long for the mobile safe area and was not split into sequential cues — which normally happens automatically, so something upstream failed to compile. Check the other blockers first; this usually clears with them.' },
+  { test: /^caption-reading-rate$/, hint: 'This caption goes by faster than it can comfortably be read. Shorten the line, or accept it and acknowledge the warning.' },
+  { test: /^portrait-safe-area-failed$/, hint: 'In the 9:16 recompose a character drifts outside the safe area. Move them toward centre in Animate, or adjust their mark in Direct.' },
+  { test: /^render-stale$/, hint: 'The last video predates your latest edits. Re-render once the blockers clear.' },
+];
+
+export function humanHint(code: string): string | null {
+  return HUMAN_HINTS.find((h) => h.test.test(code))?.hint ?? null;
+}
+
+// --- captions (mirrors src/compile/captions.ts) ---------------------------
+
+export const CAPTION_LINE_CHARACTERS = 32;
+export const CAPTION_MAX_LINES = 2;
+
+/** Wrap to the mobile caption width, breaking a word only if it cannot fit. */
+export function wrapCaptionLines(text: string, maxCharacters = CAPTION_LINE_CHARACTERS): string[] {
+  const words = text.replace(/[\r\n\0]+/g, ' ').trim().split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let current = '';
+  for (const word of words) {
+    if (word.length > maxCharacters) {
+      if (current) lines.push(current);
+      let rest = word;
+      while (rest.length > maxCharacters) {
+        lines.push(rest.slice(0, maxCharacters));
+        rest = rest.slice(maxCharacters);
+      }
+      current = rest;
+      continue;
+    }
+    const next = current ? `${current} ${word}` : word;
+    if (next.length <= maxCharacters) current = next;
+    else {
+      lines.push(current);
+      current = word;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+/**
+ * The cues a line of dialogue actually displays as, with the fraction of the
+ * line's own duration each one occupies.
+ *
+ * The compiler splits an over-long caption across its speech window; this is
+ * the same division expressed against the beat, so the preview overlay shows
+ * what the sidecar will show rather than one caption nothing can display.
+ */
+export function captionChunks(
+  text: string,
+  maxCharacters = CAPTION_LINE_CHARACTERS,
+  maxLines = CAPTION_MAX_LINES,
+): Array<{ text: string; from: number; to: number }> {
+  const lines = wrapCaptionLines(text, maxCharacters);
+  if (lines.length <= maxLines) return [{ text: text.trim(), from: 0, to: 1 }];
+
+  const chunks: string[] = [];
+  for (let i = 0; i < lines.length; i += maxLines) {
+    chunks.push(lines.slice(i, i + maxLines).join('\n'));
+  }
+  const total = chunks.reduce((sum, chunk) => sum + Math.max(1, chunk.length), 0);
+  let consumed = 0;
+  return chunks.map((chunk, i) => {
+    const from = consumed / total;
+    consumed += Math.max(1, chunk.length);
+    return { text: chunk, from, to: i === chunks.length - 1 ? 1 : consumed / total };
+  });
+}
+
+/** The chunk on screen at `progress` (0–1) through the line. */
+export function captionAt(text: string, progress: number): string {
+  const chunks = captionChunks(text);
+  const clamped = Math.max(0, Math.min(0.999999, progress));
+  return (chunks.find((chunk) => clamped >= chunk.from && clamped < chunk.to) ?? chunks[chunks.length - 1]!).text;
+}
+
 /** Resolve an animation time anchor to ms, given beat ids and starts. */
 export function resolveAnchor(
   anchor: TimeAnchor,
@@ -151,7 +346,7 @@ export const MODE_DEFS: Array<{ id: Mode; label: string; hint: string; planned?:
   { id: 'direct', label: 'Direct', hint: 'Shot proposal, beat direction, staging. Locked beats survive reruns.' },
   { id: 'animate', label: 'Animate', hint: 'Blocking, rig controls, Point A → Point B motion paths.' },
   { id: 'perform', label: 'Perform', hint: 'Line Booth and Scene Run capture, takes, trims, voice conversion.' },
-  { id: 'sound', label: 'Sound', hint: 'Not in the engine yet — mix, stems and Foley are CLI-only today.', planned: true },
+  { id: 'sound', label: 'Sound', hint: 'Production stems, Foley events, room tone and the loudness gate.' },
   { id: 'publish', label: 'Publish', hint: 'Production readiness, 16:9 / 9:16 masters, captions, export manifest.' },
 ];
 
@@ -160,7 +355,7 @@ export const MODE_BLURBS: Record<Mode, string> = {
   direct: 'Direction is propose-then-apply. Locked beats survive every rerun.',
   animate: 'Pause on a frame, drag a handle. Generated motion stays underneath.',
   perform: 'Follow Performance keeps your timing, pauses and cadence. Only identity converts.',
-  sound: 'Designed ahead of the engine — 48 kHz stereo mix, stems and deterministic Foley.',
+  sound: 'One mix path: dialogue, Foley, room tone and stings — the stems are what the master is made of.',
   publish: 'Production render is stricter than preview. Blockers are listed, not guessed at.',
 };
 

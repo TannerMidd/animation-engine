@@ -4,6 +4,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { SceneIR } from '../schema/ir.ts';
 import type { CompiledCaptionCue, CompiledScene } from '../compile/scene.ts';
+import {
+  CAPTION_LINE_CHARACTERS,
+  CAPTION_MAX_CHARACTERS_PER_SECOND,
+  CAPTION_MAX_LINES,
+  wrapCaptionLines,
+} from '../compile/captions.ts';
 import { stampOf, type ShowIdentity } from '../schema/identity.ts';
 import type { DialogueDocument } from '../schema/dialogue.ts';
 import type { AnimationDocument } from '../schema/animation.ts';
@@ -77,9 +83,20 @@ export interface ThumbnailCandidate {
 export interface CaptionSafeAreaViolation {
   cueId: string;
   speaker: string;
+  /**
+   * `too-many-lines` is a hard layout failure and blocks. After the compiler's
+   * split it can only be reached by a single word longer than a whole caption
+   * line, which no amount of re-cueing can fix.
+   *
+   * `too-fast` is a readability judgement — the cue fits, but demands more
+   * reading than its window allows — so it advises rather than blocks.
+   */
+  reason: 'too-many-lines' | 'too-fast';
   estimatedLines: number;
   /** Longest rendered line under the deterministic mobile wrapping policy. */
   longestLineCharacters: number;
+  /** Reading rate the cue demands, characters per second, to 1dp. */
+  charactersPerSecond: number;
 }
 
 export interface PortraitSafeAreaViolation {
@@ -92,9 +109,11 @@ export interface PortraitSafeAreaViolation {
 export interface PublishingSafetyReport {
   ok: boolean;
   captions: {
+    /** False only for blocking violations; a `too-fast` cue still reads ok. */
     ok: boolean;
     maxCharactersPerLine: number;
     maxLines: number;
+    maxCharactersPerSecond: number;
     violations: CaptionSafeAreaViolation[];
   };
   portrait: {
@@ -105,48 +124,45 @@ export interface PublishingSafetyReport {
   };
 }
 
-const CAPTION_LINE_CHARACTERS = 32;
-const CAPTION_MAX_LINES = 2;
 const PORTRAIT_ACTION_SAFE_INSET = 0.08;
 
-function wrappedCaptionLengths(text: string, maxCharacters: number): number[] {
-  const words = text.replace(/[\r\n\0]+/g, ' ').trim().split(/\s+/).filter(Boolean);
-  const lines: number[] = [];
-  let current = 0;
-  for (const word of words) {
-    if (word.length > maxCharacters) {
-      if (current) lines.push(current);
-      const full = Math.floor(word.length / maxCharacters);
-      for (let i = 0; i < full; i++) lines.push(maxCharacters);
-      current = word.length % maxCharacters;
-      continue;
-    }
-    const next = current ? current + 1 + word.length : word.length;
-    if (next <= maxCharacters) current = next;
-    else {
-      lines.push(current);
-      current = word.length;
-    }
-  }
-  if (current) lines.push(current);
-  return lines;
+export interface PublishingSafetyOptions {
+  /**
+   * Whether the cue windows are real programme timing.
+   *
+   * Preflight falls back to cues stamped with their beat index when the scene
+   * will not compile — an ordering, not a clock. Reading rate is meaningless
+   * against those, and measuring it anyway reports every line as impossibly
+   * fast, so the check is skipped rather than run on made-up numbers.
+   */
+  timings?: 'real' | 'placeholder';
 }
 
 /** Deterministic release check for mobile caption wrapping and portrait action-safe composition. */
 export function evaluatePublishingSafety(
   cues: readonly CompiledCaptionCue[],
   portraitIr?: SceneIR | null,
+  options: PublishingSafetyOptions = {},
 ): PublishingSafetyReport {
-  const captionViolations = orderedCaptions(cues).flatMap((cue) => {
-    const lines = wrappedCaptionLengths(cue.text, CAPTION_LINE_CHARACTERS);
-    if (lines.length <= CAPTION_MAX_LINES) return [];
-    return [{
+  const timed = (options.timings ?? 'real') === 'real';
+  const captionViolations = orderedCaptions(cues).flatMap((cue): CaptionSafeAreaViolation[] => {
+    const lines = wrapCaptionLines(cue.text, CAPTION_LINE_CHARACTERS);
+    const seconds = Math.max(0.001, (cue.endMs - cue.startMs) / 1_000);
+    const rate = Math.round((cue.text.trim().length / seconds) * 10) / 10;
+    const base = {
       cueId: cue.id,
       speaker: cue.speaker,
       estimatedLines: lines.length,
-      longestLineCharacters: Math.max(0, ...lines),
-    }];
+      longestLineCharacters: Math.max(0, ...lines.map((line) => line.length)),
+      charactersPerSecond: rate,
+    };
+    // Over the line budget is a layout failure; the compiler's split has
+    // already had its chance, so what is left cannot be re-cued away.
+    if (lines.length > CAPTION_MAX_LINES) return [{ ...base, reason: 'too-many-lines' }];
+    if (timed && rate > CAPTION_MAX_CHARACTERS_PER_SECOND) return [{ ...base, reason: 'too-fast' }];
+    return [];
   });
+  const blockingCaptions = captionViolations.filter((item) => item.reason === 'too-many-lines');
 
   const portraitViolations: PortraitSafeAreaViolation[] = [];
   let checkedFrames = 0;
@@ -185,11 +201,12 @@ export function evaluatePublishingSafety(
     ? 'not-evaluated' as const
     : portraitViolations.length ? 'fail' as const : 'pass' as const;
   return {
-    ok: captionViolations.length === 0 && portraitStatus !== 'fail',
+    ok: blockingCaptions.length === 0 && portraitStatus !== 'fail',
     captions: {
-      ok: captionViolations.length === 0,
+      ok: blockingCaptions.length === 0,
       maxCharactersPerLine: CAPTION_LINE_CHARACTERS,
       maxLines: CAPTION_MAX_LINES,
+      maxCharactersPerSecond: CAPTION_MAX_CHARACTERS_PER_SECOND,
       violations: captionViolations,
     },
     portrait: {

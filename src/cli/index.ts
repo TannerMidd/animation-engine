@@ -2,19 +2,17 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { ROOT, OUT_DIR, CAST_DIR, SCRIPTS_DIR, SETS_DIR, sceneDir } from '../core/paths.ts';
-import { MODELS_ROOT, HF_CACHE, OLLAMA_MODELS, strayCacheLocations } from '../core/models.ts';
-import { loadSet, saveSet, listSets, validateSet, setPath, renderSet } from '../sets/index.ts';
+import { ROOT, OUT_DIR, CAST_DIR, SCRIPTS_DIR, sceneDir } from '../core/paths.ts';
+import { loadSet, saveSet, listSets, validateSet, setPath } from '../sets/index.ts';
 import { BUILTIN_SETS, BUILTIN_SET_NAMES } from '../sets/builtins.ts';
 import { propManifest, propTags } from '../sets/props/index.ts';
 import { PALETTE_NAMES } from '../sets/palettes.ts';
 import { buildPlaceholderRig, buildPlaceholderSvg } from '../cast/placeholder.ts';
-import { facePlates, bodyPlate, sheetHtml, type Plate } from '../cast/sheet.ts';
 import { createRig, regenerateRig } from '../cast/authoring.ts';
 import { assignEnsemble } from '../cast/ensemble.ts';
 import { activeIdentity } from '../show/context.ts';
-import { saveRig, loadRig, listRigs, validateRig, type LoadedRig } from '../cast/store.ts';
-import { compileScene, DEFAULT_PLAN, type ActorPlan, type ScenePlan } from '../compile/index.ts';
+import { loadRig, listRigs, type LoadedRig } from '../cast/store.ts';
+import { compileScene, DEFAULT_PLAN, type ScenePlan } from '../compile/index.ts';
 import { estimateLineMs } from '../compile/scene.ts';
 import { checkScript, loadRigsForShotList, validateCompiledStaging } from '../pipeline/check.ts';
 import {
@@ -34,6 +32,14 @@ import {
   type ProductionReviewSnapshot,
 } from '../pipeline/preflight-review.ts';
 import { readShotList, writeShotList, shotlistPath, writeScript } from '../pipeline/scene.ts';
+import { blockingPreflightNotes, markExportManifestDraft, productionRenderBlocked } from '../pipeline/draft.ts';
+import { runDoctor } from '../pipeline/doctor.ts';
+import { checkRigs, renderCastSheet } from '../pipeline/cast-tools.ts';
+import { STAGE, autoStage, renderIdle, renderStill } from '../pipeline/stills.ts';
+import {
+  EngineUnavailableError, runVoicesBench, runVoicesCheck,
+} from '../pipeline/bench.ts';
+import { renderIdentityReel, validateProfiles } from '../pipeline/identity-tools.ts';
 import { Ollama, pickModel } from '../llm/ollama.ts';
 import { initShow, loadProfile, listProfiles, activeProfileId, setActiveProfileId, compareProfiles } from '../show/store.ts';
 import { setActiveIdentity } from '../show/context.ts';
@@ -42,16 +48,14 @@ import { planMigration, applyMigration } from '../show/migrate.ts';
 import { generateScript } from '../llm/script.ts';
 import { generateSet } from '../llm/set.ts';
 import { renderFrames } from '../render/capture.ts';
-import { encodeMp4, ffmpegVersion, ffmpegPath, runFfmpeg, stackArgs } from '../render/encode.ts';
 import { parseScript } from '../parse/index.ts';
 import { autoDirect, buildCapabilityManifest, validateShotList } from '../direct/index.ts';
-import { synthesizeLines, loadRecordedVo, listVoices, getEngine, ENGINE_NAMES, type LineTiming, type VoiceLine } from '../voice/index.ts';
-import { findRhubarb } from '../voice/rhubarb.ts';
-import {
-  chatterboxVcAvailable, checkConversionIdentity, convertPerformances,
-} from '../voice/conversion.ts';
+import { listVoices } from '../voice/index.ts';
 import { ShotList } from '../schema/script.ts';
-import { atomicWriteFile } from '../audio/files.ts';
+
+// The draft policy moved into the pipeline so the server can share it; the CLI
+// remains the historical import path for tests and tooling.
+export { markExportManifestDraft, productionRenderBlocked };
 
 interface Args {
   _: string[];
@@ -96,33 +100,9 @@ function num(flags: Args['flags'], key: string, fallback: number): number {
   return n;
 }
 
-/** Default set coordinate space: 1:1 with a 720p frame, ground near the bottom. */
-const STAGE = { w: 1280, h: 720, ground: 700 };
-
-async function loadRigsFor(names: string[]): Promise<Map<string, LoadedRig>> {
-  const map = new Map<string, LoadedRig>();
-  for (const n of new Set(names)) {
-    if (!map.has(n)) map.set(n, await loadRig(n));
-  }
-  return map;
-}
-
-/** Spread actors evenly across the frame, all facing centre. */
-function autoStage(names: string[], scale: number): ActorPlan[] {
-  return names.map((name, i) => {
-    const slot = (i + 1) / (names.length + 1);
-    const x = STAGE.w * slot;
-    return {
-      id: name,
-      rig: name,
-      x,
-      y: STAGE.ground,
-      scale,
-      flip: x > STAGE.w / 2,
-      pose: 'IDLE',
-      expression: 'NEUTRAL',
-    };
-  });
+/** A flag as a number, or undefined so the pipeline default applies. */
+function optNum(flags: Args['flags'], key: string): number | undefined {
+  return flags[key] === undefined ? undefined : num(flags, key, 0);
 }
 
 // --- commands -------------------------------------------------------------
@@ -158,19 +138,16 @@ async function cmdCastCheck(args: Args) {
     console.log('No characters to check.');
     return;
   }
-  let bad = 0;
-  for (const name of names) {
-    const loaded = await loadRig(name);
-    const errors = validateRig(loaded);
-    if (errors.length) {
-      bad++;
-      console.log(`FAIL ${name}`);
-      for (const e of errors) console.log(`     - ${e}`);
+  const { ok, results } = await checkRigs(names);
+  for (const result of results) {
+    if (result.ok) {
+      console.log(`ok   ${result.name}`);
     } else {
-      console.log(`ok   ${name}`);
+      console.log(`FAIL ${result.name}`);
+      for (const e of result.errors) console.log(`     - ${e}`);
     }
   }
-  if (bad) process.exitCode = 1;
+  if (!ok) process.exitCode = 1;
 }
 
 /**
@@ -219,112 +196,33 @@ async function cmdCastRegen(args: Args) {
  * look like a different person from that one".
  */
 async function cmdCastSheet(args: Args) {
-  const names = args._.length ? args._ : await listRigs();
-  if (!names.length) throw new Error('no characters — run: anim cast new steve');
-
-  let plates: Plate[];
-  let label: string;
-
-  if (args._.length === 1) {
-    const loaded = await loadRig(names[0]!);
-    plates = facePlates(loaded);
-    label = `faces-${names[0]}`;
-  } else {
-    plates = [];
-    const expression = typeof args.flags['expression'] === 'string' ? args.flags['expression'] : undefined;
-    for (const n of names) {
-      plates.push(bodyPlate(await loadRig(n), expression));
-    }
-    label = 'cast';
-  }
-
-  const { chromium } = await import('playwright');
-  const browser = await chromium.launch();
-  try {
-    const page = await browser.newPage({ viewport: { width: 1760, height: 900 } });
-    await page.setContent(sheetHtml(plates, { columns: Math.min(plates.length, 8) }));
-    const grid = await page.$('.grid');
-    const out = path.join(OUT_DIR, `sheet-${label}.png`);
-    await grid!.screenshot({ path: out });
-    console.log(`Wrote ${path.relative(process.cwd(), out)}  (${plates.length} plates)`);
-  } finally {
-    await browser.close();
-  }
+  const result = await renderCastSheet({
+    names: args._.length ? args._ : undefined,
+    expression: typeof args.flags['expression'] === 'string' ? args.flags['expression'] : undefined,
+  });
+  console.log(`Wrote ${path.relative(process.cwd(), result.file)}  (${result.plates} plates)`);
 }
 
 async function cmdStill(args: Args) {
-  const names = args._.length ? args._ : await listRigs();
-  if (!names.length) throw new Error('no characters — run: anim cast new steve');
-
-  const rigs = await loadRigsFor(names);
-  const scale = num(args.flags, 'scale', 1.3);
-  const actors = autoStage(names, scale);
-
-  const pose = typeof args.flags['pose'] === 'string' ? args.flags['pose'] : 'IDLE';
-  const expression = typeof args.flags['expression'] === 'string' ? args.flags['expression'] : 'NEUTRAL';
-  for (const a of actors) {
-    a.pose = pose;
-    a.expression = expression;
-  }
-
-  const plan: ScenePlan = {
-    scene: `still-${names.join('-')}`,
-    fps: DEFAULT_PLAN.fps,
-    characterFps: DEFAULT_PLAN.characterFps,
-    width: STAGE.w,
-    height: STAGE.h,
-    seed: num(args.flags, 'seed', DEFAULT_PLAN.seed),
-    durationSec: 1 / DEFAULT_PLAN.fps,
-    camera: { x: 0, y: 0, w: STAGE.w, h: STAGE.h },
-    set: null,
-    audio: null,
-    actors,
-  };
-
-  const ir = compileScene(plan, rigs);
-  const dir = sceneDir(plan.scene);
-  await fs.mkdir(dir, { recursive: true });
-
-  const result = await renderFrames({ ir, rigs, dir, background: '#2b2f36' });
-  const out = path.join(OUT_DIR, `${plan.scene}.png`);
-  await fs.copyFile(path.join(result.framesDir, '000000.png'), out);
-  console.log(`Wrote ${path.relative(process.cwd(), out)}`);
+  const result = await renderStill({
+    names: args._.length ? args._ : undefined,
+    pose: typeof args.flags['pose'] === 'string' ? args.flags['pose'] : undefined,
+    expression: typeof args.flags['expression'] === 'string' ? args.flags['expression'] : undefined,
+    scale: optNum(args.flags, 'scale'),
+    seed: optNum(args.flags, 'seed'),
+  });
+  console.log(`Wrote ${path.relative(process.cwd(), result.file)}`);
 }
 
 async function cmdIdle(args: Args) {
-  const names = args._.length ? args._ : await listRigs();
-  if (!names.length) throw new Error('no characters — run: anim cast new steve');
-
-  const rigs = await loadRigsFor(names);
-  const seconds = num(args.flags, 'seconds', 6);
-  const fps = num(args.flags, 'fps', DEFAULT_PLAN.fps);
-  const characterFps = num(args.flags, 'char-fps', DEFAULT_PLAN.characterFps);
-
-  const plan: ScenePlan = {
-    scene: `idle-${names.join('-')}`,
-    fps,
-    characterFps,
-    width: STAGE.w,
-    height: STAGE.h,
-    seed: num(args.flags, 'seed', DEFAULT_PLAN.seed),
-    durationSec: seconds,
-    camera: { x: 0, y: 0, w: STAGE.w, h: STAGE.h },
-    set: null,
-    audio: null,
-    actors: autoStage(names, num(args.flags, 'scale', 1.3)),
-  };
-
-  const ir = compileScene(plan, rigs);
-  const dir = sceneDir(plan.scene);
-  await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(path.join(dir, 'scene.ir.json'), JSON.stringify(ir, null, 2), 'utf8');
-
   let lastLogged = 0;
-  const result = await renderFrames({
-    ir,
-    rigs,
-    dir,
-    background: '#2b2f36',
+  const result = await renderIdle({
+    names: args._.length ? args._ : undefined,
+    seconds: optNum(args.flags, 'seconds'),
+    fps: optNum(args.flags, 'fps'),
+    characterFps: optNum(args.flags, 'char-fps'),
+    scale: optNum(args.flags, 'scale'),
+    seed: optNum(args.flags, 'seed'),
     onProgress: (done, total) => {
       if (done === total || done - lastLogged >= 24) {
         lastLogged = done;
@@ -336,10 +234,7 @@ async function cmdIdle(args: Args) {
 
   const saved = Math.round((1 - result.captured / result.total) * 100);
   console.log(`  captured ${result.captured} unique of ${result.total} frames (${saved}% held)`);
-
-  const out = path.join(dir, `${plan.scene}.mp4`);
-  await encodeMp4({ framesDir: result.framesDir, fps, out });
-  console.log(`Wrote ${path.relative(process.cwd(), out)}`);
+  console.log(`Wrote ${path.relative(process.cwd(), result.file)}`);
 }
 
 async function fileExists(p: string): Promise<boolean> {
@@ -648,46 +543,6 @@ async function resolveScript(arg: string | undefined): Promise<string> {
   return p;
 }
 
-function blockingPreflightNotes(report: ProductionPreflightReport): ProductionPreflightNote[] {
-  return report.notes.filter((note) => note.blocking);
-}
-
-/** The CLI follows the same production policy as POST /render. */
-export function productionRenderBlocked(report: ProductionPreflightReport, draft: boolean): boolean {
-  return report.renderEndpointBlocked && !draft;
-}
-
-/**
- * `--draft` is an explicit distribution-status choice, not merely a console flag.
- * Preserve the canonical publishing manifest and add a conspicuous machine-readable
- * label so downstream tooling cannot mistake this bundle for an approved production render.
- */
-export async function markExportManifestDraft(
-  manifestFile: string,
-  report: ProductionPreflightReport,
-): Promise<void> {
-  const parsed = JSON.parse(await fs.readFile(manifestFile, 'utf8')) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`cannot label non-object export manifest ${manifestFile} as draft`);
-  }
-  const blockers = blockingPreflightNotes(report);
-  const warnings = report.notes.filter((note) => note.level === 'warn');
-  const manifest = {
-    ...parsed,
-    productionStatus: {
-      state: 'draft',
-      productionReady: false,
-      draftOverride: true,
-      preflightPolicy: report.policy.id,
-      preflightPassed: !report.renderEndpointBlocked,
-      blockers: blockers.map(({ code, message }) => ({ code, message })),
-      warnings: warnings.map(({ code, message }) => ({ code, message })),
-      note: 'Created by anim render --draft. This bundle is not approved for production distribution.',
-    },
-  };
-  await atomicWriteFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
-}
-
 function printPreflightNotes(notes: ProductionPreflightNote[]): void {
   for (const item of notes) console.error(`  - [${item.code}] ${item.message}`);
 }
@@ -845,7 +700,9 @@ async function cmdRender(args: Args) {
 }
 
 async function cmdUi(args: Args) {
-  const port = num(args.flags, 'port', 5178);
+  // Explicit flag first, then the harness-assigned PORT, then the default —
+  // so `anim ui` behaves identically outside any launcher.
+  const port = num(args.flags, 'port', Number(process.env['PORT']) || 5178);
   const { startServer } = await import('../server/index.ts');
   const { port: actual } = await startServer(port);
   const url = `http://127.0.0.1:${actual}`;
@@ -917,13 +774,6 @@ async function cmdVoices() {
  * came back, so the answer is measured rather than assumed.
  */
 async function cmdVoicesCheck(args: Args) {
-  const available = await chatterboxVcAvailable();
-  if (!available.ok) {
-    console.log(`voice conversion unavailable — ${available.reason.split('\n')[0]}`);
-    process.exitCode = 1;
-    return;
-  }
-
   const source = typeof args.flags['source'] === 'string' ? args.flags['source'] : null;
   if (!source) {
     console.log('Usage: anim voices check --source <performance.wav> [--only alice,bob]');
@@ -931,135 +781,138 @@ async function cmdVoicesCheck(args: Args) {
     process.exitCode = 1;
     return;
   }
-  await fs.access(source);
 
   const only = typeof args.flags['only'] === 'string'
-    ? new Set(args.flags['only'].split(',').map((n) => n.trim()).filter(Boolean))
-    : null;
-  const names = (await listRigs()).filter((name) => !only || only.has(name));
-  const targets: Array<{ name: string; ref: string }> = [];
-  for (const name of names) {
-    const { rig } = await loadRig(name);
-    if (rig.voiceRef && path.basename(rig.voiceRef) === rig.voiceRef) {
-      targets.push({ name, ref: path.join(CAST_DIR, rig.voiceRef) });
-    }
-  }
-  if (!targets.length) {
-    console.log('No cast member has a voice reference yet.');
-    return;
-  }
+    ? args.flags['only'].split(',').map((n) => n.trim()).filter(Boolean)
+    : undefined;
 
-  console.log(`Converting ${path.basename(source)} into ${targets.length} character voices…\n`);
-  const results = await convertPerformances(
-    targets.map((t) => ({ id: t.name, source, targetRef: t.ref, seed: 0, registerPolicy: 'adapt-to-character' as const })),
-    (done, total) => process.stdout.write(`\r  ${done}/${total}`),
-  );
+  let result;
+  try {
+    result = await runVoicesCheck({
+      source,
+      only,
+      onStart: (targets) => console.log(`Converting ${path.basename(source)} into ${targets} character voices…\n`),
+      onProgress: (done, total) => process.stdout.write(`\r  ${done}/${total}`),
+    });
+  } catch (err) {
+    if (err instanceof EngineUnavailableError) {
+      console.log(`voice conversion unavailable — ${err.reason}`);
+      process.exitCode = 1;
+      return;
+    }
+    if ((err as Error).message.startsWith('No cast member has a voice reference')) {
+      console.log((err as Error).message);
+      return;
+    }
+    throw err;
+  }
   process.stdout.write('\r');
 
   console.log('character    ref Hz   lift   out Hz   voicing   register   verdict');
-  let failures = 0;
-  for (const { name } of targets) {
-    const result = results.get(name);
-    if (!result) {
-      failures++;
-      console.log(`${name.padEnd(12)} ${'—'.padStart(6)} ${'—'.padStart(6)} ${'—'.padStart(8)} ${'—'.padStart(9)} ${'—'.padStart(10)}   NO RESULT`);
+  const cell = (value: number | null, digits = 0, width = 6) =>
+    (value === null ? '—' : value.toFixed(digits)).padStart(width);
+  for (const row of result.rows) {
+    if (row.missing) {
+      console.log(`${row.name.padEnd(12)} ${'—'.padStart(6)} ${'—'.padStart(6)} ${'—'.padStart(8)} ${'—'.padStart(9)} ${'—'.padStart(10)}   NO RESULT`);
       continue;
     }
-    const check = checkConversionIdentity(result);
-    if (check.failures.length) failures++;
-    const cell = (value: number | null, digits = 0, width = 6) =>
-      (value === null ? '—' : value.toFixed(digits)).padStart(width);
     console.log(
-      `${name.padEnd(12)}${cell(result.targetMedianPitchHz)}${cell(result.conditioningLiftSemitones, 1)}` +
-      `${cell(result.outputMedianPitchHz, 0, 8)}${cell(check.voicedRetention, 2, 9)}` +
-      `${cell(check.pitchErrorSemitones, 1, 10)}   ${check.failures.length ? 'FAIL' : 'ok'}`,
+      `${row.name.padEnd(12)}${cell(row.targetMedianPitchHz)}${cell(row.conditioningLiftSemitones, 1)}` +
+      `${cell(row.outputMedianPitchHz, 0, 8)}${cell(row.voicedRetention, 2, 9)}` +
+      `${cell(row.pitchErrorSemitones, 1, 10)}   ${row.ok ? 'ok' : 'FAIL'}`,
     );
-    for (const failure of check.failures) console.log(`  ${name}: ${failure}`);
+    for (const failure of row.failures) console.log(`  ${row.name}: ${failure}`);
   }
 
   console.log(
-    `\n${targets.length - failures}/${targets.length} character voices convert cleanly. ` +
+    `\n${result.rows.length - result.failures}/${result.rows.length} character voices convert cleanly. ` +
     'Voicing is the share of the performance\'s voiced speech that survived (want ≥ 0.65); ' +
     'register is the distance from the character\'s own pitch in semitones (want within 4).',
   );
-  if (failures) process.exitCode = 1;
+  if (result.failures) process.exitCode = 1;
+}
+
+/**
+ * Render the whole cast into one listening sheet.
+ *
+ * Reference quality is only auditable by ear, and per-character auditioning
+ * hides cast-wide problems — two voices drifting into the same register, one
+ * that races when it gets an ANGRY line. This renders every referenced
+ * character through the real synthesis path across the expression spread and
+ * writes a single HTML page with all of it side by side.
+ */
+async function cmdVoicesBench(args: Args) {
+  const only = typeof args.flags['only'] === 'string'
+    ? args.flags['only'].split(',').map((n) => n.trim()).filter(Boolean)
+    : undefined;
+
+  let result;
+  try {
+    result = await runVoicesBench({
+      only,
+      onStart: (lines, characters) => console.log(`Rendering ${lines} lines across ${characters} characters…`),
+      onProgress: (stage, done, total) => process.stdout.write(`\r  ${stage} ${done}/${total}    `),
+    });
+  } catch (err) {
+    if (err instanceof EngineUnavailableError) {
+      console.log(`voice bench unavailable — ${err.reason}`);
+      process.exitCode = 1;
+      return;
+    }
+    if ((err as Error).message.startsWith('No cast member has a voice reference')) {
+      console.log((err as Error).message);
+      return;
+    }
+    throw err;
+  }
+  process.stdout.write('\r');
+
+  console.log(`Listening sheet: ${path.relative(process.cwd(), result.htmlFile)}`);
+  console.log('The conversion path has its own gate: anim voices check --source <performance.wav>');
 }
 
 async function cmdDoctor() {
-  const ff = await ffmpegVersion();
-  console.log(`ffmpeg     ${ff ? `${ff}  (${ffmpegPath()})` : 'NOT FOUND'}`);
-  if (ff && /^[0-4]\./.test(ff)) {
-    console.log(`           note: that build is old. It will work, but a recent static build is free and better.`);
+  const report = await runDoctor();
+
+  const { ffmpeg } = report;
+  console.log(`ffmpeg     ${ffmpeg.version ? `${ffmpeg.version}  (${ffmpeg.path})` : 'NOT FOUND'}`);
+  if (ffmpeg.old) {
+    console.log(`           note: that build is old. It will work, but every reference clip and master`);
+    console.log(`           transcodes through it — drop a recent static build under tools\\ffmpeg-*\\ instead.`);
   }
 
-  let browser = 'NOT INSTALLED';
-  try {
-    const { chromium } = await import('playwright');
-    const b = await chromium.launch({ headless: true });
-    browser = `ok (${b.version()})`;
-    await b.close();
-  } catch (err) {
-    browser = `FAILED — run: npx playwright install chromium\n           ${(err as Error).message.split('\n')[0]}`;
-  }
-  console.log(`chromium   ${browser}`);
+  console.log(`chromium   ${report.chromium.ok
+    ? `ok (${report.chromium.version})`
+    : `FAILED — run: npx playwright install chromium\n           ${report.chromium.error}`}`);
 
-  const rh = await findRhubarb();
-  console.log(`rhubarb    ${rh ? `ok (${path.relative(ROOT, rh)})` : 'NOT FOUND — needed by every engine except sapi'}`);
+  console.log(`rhubarb    ${report.rhubarb.ok ? `ok (${report.rhubarb.path})` : 'NOT FOUND — needed by every engine except sapi'}`);
 
-  // Model weights are gigabytes. Anything landing on the system drive is a
-  // problem worth seeing before that drive fills.
-  console.log(`models     ${MODELS_ROOT}`);
-  const systemDrive = path.parse(process.env['SystemRoot'] ?? 'C:\\').root.toLowerCase();
-  if (MODELS_ROOT.toLowerCase().startsWith(systemDrive)) {
+  console.log(`models     ${report.models.root}`);
+  if (report.models.onSystemDrive) {
     console.log(`           WARNING: that is the system drive. Set ANIM_MODELS_ROOT elsewhere.`);
   }
-  const dirSize = async (dir: string): Promise<number> => {
-    let size = 0;
-    const walk = async (d: string): Promise<void> => {
-      for (const entry of await fs.readdir(d, { withFileTypes: true })) {
-        const full = path.join(d, entry.name);
-        if (entry.isDirectory()) await walk(full);
-        else if (entry.isFile()) size += (await fs.stat(full)).size;
-      }
-    };
-    try {
-      await walk(dir);
-    } catch {
-      return 0;
-    }
-    return size;
-  };
+  for (const cache of report.models.caches) {
+    console.log(`  ${cache.name.padEnd(12)} ${(cache.bytes / 1024 ** 3).toFixed(1)} GB`);
+  }
+  for (const stray of report.models.strays) {
+    console.log(`  STRAY  ${stray.label} has ${(stray.bytes / 1024 ** 3).toFixed(1)} GB at ${stray.dir}`);
+    console.log(`         fix: ${stray.fix}`);
+  }
+  if (!report.models.strays.length) console.log(`  (nothing on the system drive)`);
 
-  for (const [name, dir] of [['huggingface', HF_CACHE], ['ollama', OLLAMA_MODELS]] as const) {
-    const size = await dirSize(dir);
-    console.log(`  ${name.padEnd(12)} ${(size / 1024 ** 3).toFixed(1)} GB`);
+  console.log(`llm        ${report.llm.ok
+    ? `ok (${report.llm.models.join(', ')})`
+    : report.llm.reason?.split('\n')[0]}`);
+
+  for (const engine of report.engines) {
+    console.log(`voice:${engine.name.padEnd(11)}${engine.ok ? 'ok' : `unavailable — ${engine.reason?.split('\n')[0]}`}`);
   }
 
-  // Anything that slipped onto the system drive. Ollama is the one that can do
-  // this behind our back: it is a separate daemon, so we cannot set its
-  // environment — if it was launched without OLLAMA_MODELS it writes here, and
-  // the first symptom is a full disk.
-  let strays = 0;
-  for (const stray of strayCacheLocations()) {
-    const size = await dirSize(stray.dir);
-    if (size > 64 * 1024 * 1024) {
-      strays++;
-      console.log(`  STRAY  ${stray.label} has ${(size / 1024 ** 3).toFixed(1)} GB at ${stray.dir}`);
-      console.log(`         fix: ${stray.fix}`);
-    }
-  }
-  if (!strays) console.log(`  (nothing on the system drive)`);
+  console.log(`asr        ${report.asr.ok
+    ? 'ok (whisper small.en — generated lines are verified against the script)'
+    : `unavailable — generated lines ship unverified. ${report.asr.reason?.split('\n')[0]}`}`);
 
-  const llm = await new Ollama().available();
-  console.log(`llm        ${llm.ok ? `ok (${llm.models.map((m) => m.name).join(', ')})` : llm.reason.split('\n')[0]}`);
-
-  for (const name of ENGINE_NAMES) {
-    const status = await getEngine(name).available();
-    console.log(`voice:${name.padEnd(11)}${status.ok ? 'ok' : `unavailable — ${status.reason.split('\n')[0]}`}`);
-  }
-
-  const names = await listRigs();
-  console.log(`cast       ${names.length ? names.join(', ') : '(none yet)'}`);
+  console.log(`cast       ${report.cast.length ? report.cast.join(', ') : '(none yet)'}`);
 }
 
 // --- show identity --------------------------------------------------------
@@ -1089,24 +942,16 @@ async function cmdShowUse(args: Args) {
 }
 
 async function cmdShowValidate() {
-  const profiles = await listProfiles();
-  if (!profiles.length) {
+  const { ok, results } = await validateProfiles();
+  if (!results.length) {
     console.log('No profiles to validate.');
     return;
   }
-  // listProfiles already drops anything that fails to parse; loading each one
-  // again surfaces the errors it swallowed.
-  let bad = 0;
-  for (const p of profiles) {
-    try {
-      await loadProfile(p.id);
-      console.log(`ok   ${p.id}  v${p.version}  ${p.hash}`);
-    } catch (err) {
-      bad++;
-      console.log(`FAIL ${p.id}: ${(err as Error).message}`);
-    }
+  for (const result of results) {
+    if (result.ok) console.log(`ok   ${result.id}  v${result.version}  ${result.hash}`);
+    else console.log(`FAIL ${result.id}: ${result.error}`);
   }
-  if (bad) process.exitCode = 1;
+  if (!ok) process.exitCode = 1;
 }
 
 async function cmdShowCompare(args: Args) {
@@ -1161,38 +1006,17 @@ async function cmdMigrate(args: Args) {
  * the two halves don't read as two different shows, the system isn't done.
  */
 async function cmdReel(args: Args) {
-  const script = args._[0] ?? path.join(SCRIPTS_DIR, 'eval-identity.md');
-  const a = typeof args.flags['a'] === 'string' ? args.flags['a'] : 'fixtures/dry-institutional';
-  const b = typeof args.flags['b'] === 'string' ? args.flags['b'] : 'fixtures/loud-cartoon';
+  const result = await renderIdentityReel({
+    script: args._[0],
+    a: typeof args.flags['a'] === 'string' ? args.flags['a'] : undefined,
+    b: typeof args.flags['b'] === 'string' ? args.flags['b'] : undefined,
+    onProfileStart: (profileId) => console.log(`\n== rendering under ${profileId} ==`),
+    onStage: (_profileId, p) => process.stdout.write(`\r  ${p.stage} ${p.done}/${p.total}    `),
+    onProfileDone: (_profileId, mp4, durationMs) =>
+      console.log(`\n  ${path.relative(process.cwd(), mp4)} (${(durationMs / 1000).toFixed(1)}s)`),
+  });
 
-  const outputs: string[] = [];
-  for (const profileId of [a, b]) {
-    setActiveIdentity(await loadProfile(profileId));
-    const slug = profileId.replace(/[^\w-]/g, '-');
-    const sceneName = `reel-${slug}`;
-
-    console.log(`\n== rendering under ${profileId} ==`);
-    const source = await fs.readFile(path.resolve(script), 'utf8');
-    await writeScript(sceneName, source);
-
-    const result = await checkScript(source, { scene: sceneName, createMissingCast: true });
-    if (!result.shots) throw new Error(`direct failed under ${profileId}: ${result.errors.join('; ')}`);
-    await writeShotList(sceneName, result.shots);
-
-    const rigs = await loadRigsForShotList(result.shots);
-    const rendered = await renderScene(result.shots, rigs, {
-      scene: sceneName,
-      engine: 'chatterbox',
-      onStage: (p) => process.stdout.write(`\r  ${p.stage} ${p.done}/${p.total}    `),
-    });
-    console.log(`\n  ${path.relative(process.cwd(), rendered.mp4)} (${(rendered.durationMs / 1000).toFixed(1)}s)`);
-    outputs.push(rendered.mp4);
-  }
-
-  const out = path.join(OUT_DIR, 'identity-reel.mp4');
-  await runFfmpeg(stackArgs(outputs[0]!, outputs[1]!, out));
-
-  console.log(`\nWrote ${path.relative(process.cwd(), out)} — top: ${a}, bottom: ${b}.`);
+  console.log(`\nWrote ${path.relative(process.cwd(), result.file)} — top: ${result.a}, bottom: ${result.b}.`);
 }
 
 const HELP = `anim — script to limited-animation scene
@@ -1228,6 +1052,8 @@ const HELP = `anim — script to limited-animation scene
   voices                 list installed SAPI voices.
                          "voices check --source <wav>" converts one performance
                          into every character voice and scores each result
+                         "voices bench [--only a,b]" renders the whole cast into
+                         a side-by-side listening sheet at out/bench/index.html
   doctor                 check the toolchain
   show                   list identity profiles; "show use <id>" switches,
                          "show compare <a> <b>" diffs two, "show validate" checks all.
@@ -1299,7 +1125,11 @@ async function main() {
     case 'sets':
       return cmdSets(rest);
     case 'voices':
-      return rest._[0] === 'check' ? cmdVoicesCheck({ ...rest, _: rest._.slice(1) }) : cmdVoices();
+      return rest._[0] === 'check'
+        ? cmdVoicesCheck({ ...rest, _: rest._.slice(1) })
+        : rest._[0] === 'bench'
+          ? cmdVoicesBench({ ...rest, _: rest._.slice(1) })
+          : cmdVoices();
     case 'doctor':
       return cmdDoctor();
     case undefined:

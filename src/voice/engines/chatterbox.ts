@@ -95,6 +95,10 @@ export class ChatterboxEngine implements TtsEngine {
       text: r.text,
       exaggeration: r.exaggeration,
       cfg_weight: r.cfgWeight,
+      temperature: r.temperature,
+      repetition_penalty: r.repetitionPenalty,
+      min_p: r.minP,
+      top_p: r.topP,
       ref: r.ref,
       seed: r.seed,
     }));

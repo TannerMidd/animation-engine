@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
+import { existsSync, readdirSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { ROOT } from '../core/paths.ts';
 
 /**
  * PNG sequence -> MP4.
@@ -12,8 +14,38 @@ import path from 'node:path';
  * wrong.
  */
 
+let cachedFfmpeg: string | undefined;
+
+/**
+ * Locate ffmpeg: the FFMPEG env var, then a static build under tools/, then
+ * PATH. The tools/ scan matters because the PATH ffmpeg on a workstation is
+ * often an ancient build that shipped inside some other product — every
+ * reference clip and master runs through this binary, so dropping a current
+ * static build into tools\ffmpeg-* upgrades the whole audio chain without
+ * touching system state. Synchronous (spawn sites are sync), memoized like
+ * the rhubarb scan.
+ */
 export function ffmpegPath(): string {
-  return process.env['FFMPEG'] ?? 'ffmpeg';
+  const fromEnv = process.env['FFMPEG'];
+  if (fromEnv) return fromEnv;
+  if (cachedFfmpeg !== undefined) return cachedFfmpeg;
+
+  try {
+    for (const entry of readdirSync(path.join(ROOT, 'tools'))) {
+      const dir = path.join(ROOT, 'tools', entry);
+      for (const candidate of [path.join(dir, 'bin', 'ffmpeg.exe'), path.join(dir, 'ffmpeg.exe')]) {
+        if (existsSync(candidate)) {
+          cachedFfmpeg = candidate;
+          return cachedFfmpeg;
+        }
+      }
+    }
+  } catch {
+    // No tools directory at all.
+  }
+
+  cachedFfmpeg = 'ffmpeg';
+  return cachedFfmpeg;
 }
 
 export interface EncodeOptions {

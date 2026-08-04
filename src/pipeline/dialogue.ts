@@ -306,6 +306,10 @@ function lockedFieldValue(cue: DialogueCue, field: DialogueCue['lockedFields'][n
  * A full lock can only transition to the exact same cue with `locked: false`.
  * A selectively locked field also cannot change in the same save that removes
  * its lock; remove the field lock first, then edit in a subsequent revision.
+ *
+ * `beatIndex` is exempt: it is derived from the shot list rather than authored,
+ * so inserting or removing an earlier beat shifts it on every later cue. See
+ * the note in the locked branch for why freezing it is not an option.
  */
 export function assertDialogueCueLocks(
   before: readonly DialogueCue[],
@@ -322,8 +326,15 @@ export function assertDialogueCueLocks(
     }
 
     if (cue.locked) {
-      const onlyUnlocked = { ...cue, locked: false };
-      if (!isDeepStrictEqual(candidate, cue) && !isDeepStrictEqual(candidate, onlyUnlocked)) {
+      // A lock protects what the creator authored, not where the beat happens
+      // to sit. `beatIndex` tracks the shot list, and deleting or inserting an
+      // earlier beat renumbers every cue after it — so treating it as locked
+      // content made the scene reject its own re-sync forever: the index that
+      // drives audition seeds, overlap ordering and VO paths could never be
+      // corrected without first unlocking approved work.
+      const rebased = { ...cue, beatIndex: candidate.beatIndex };
+      const onlyUnlocked = { ...rebased, locked: false };
+      if (!isDeepStrictEqual(candidate, rebased) && !isDeepStrictEqual(candidate, onlyUnlocked)) {
         throw new Error(`locked dialogue cue "${cue.id}" may only be unlocked in a separate save`);
       }
       continue;

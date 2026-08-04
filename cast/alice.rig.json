@@ -1,5 +1,12 @@
 {
   "name": "alice",
+  "charId": "0f1bd48b19",
+  "locks": [],
+  "identity": {
+    "id": "house",
+    "version": "1.0.0",
+    "hash": "845ceeea2d52"
+  },
   "canvas": {
     "width": 200,
     "height": 400
@@ -44,7 +51,6 @@
     "shoes": "round",
     "accent": "#3f6b6b"
   },
-  "locks": [],
   "parts": [
     {
       "id": "torso",
@@ -523,34 +529,29 @@
       "suppressBlink": false
     }
   ],
-  "voice": "David",
-  "voiceRate": -2,
-  "voiceRef": "alice.ref.wav",
-  "voiceProvenance": {
-    "source": "minted",
-    "seed": 1053719217,
-    "hash": "22c27c912dfb51979671509de83e12d5c32e7b0a"
-  },
-  "voicePersona": {
-    "energy": 1.08,
-    "pace": 0.9
-  },
   "idle": {
     "breathAmplitude": 2.7,
     "breathPeriod": 3.4,
     "blinkRateHz": 0.41,
     "blinkDuration": 0.12
   },
+  "voice": "David",
+  "voiceRate": -2,
+  "voiceRef": "alice.ref.wav",
+  "voiceProvenance": {
+    "source": "minted",
+    "seed": 297712018,
+    "hash": "e31837e85da6cac117deff5c9d268d78ec96a020",
+    "bankVoice": "af_bella"
+  },
   "acting": {
     "reactionMs": 221,
     "gestureBias": 0.83,
     "fidgetAmp": 2.7
   },
-  "svg": "alice.svg",
-  "charId": "0f1bd48b19",
-  "identity": {
-    "id": "house",
-    "version": "1.0.0",
-    "hash": "845ceeea2d52"
-  }
+  "voicePersona": {
+    "energy": 1.08,
+    "pace": 0.9
+  },
+  "svg": "alice.svg"
 }

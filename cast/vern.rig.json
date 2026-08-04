@@ -540,8 +540,9 @@
   "voiceRef": "vern.ref.wav",
   "voiceProvenance": {
     "source": "minted",
-    "seed": 902926192,
-    "hash": "5dfa1fdb435e4463787984eeafb67add84728663"
+    "seed": 987743457,
+    "hash": "287a2c80460dc6ea124851b81e96d588b4f50a55",
+    "bankVoice": "bm_george"
   },
   "acting": {
     "reactionMs": 267,

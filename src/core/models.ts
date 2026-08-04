@@ -18,6 +18,8 @@ export const MODELS_ROOT =
 export const HF_CACHE = path.join(MODELS_ROOT, 'huggingface');
 export const TORCH_CACHE = path.join(MODELS_ROOT, 'torch');
 export const OLLAMA_MODELS = path.join(MODELS_ROOT, 'ollama');
+/** OpenAI Whisper checkpoints (ASR line verification), e.g. small.en.pt. */
+export const WHISPER_CACHE = path.join(MODELS_ROOT, 'whisper');
 
 /**
  * Environment for any Python worker we spawn.

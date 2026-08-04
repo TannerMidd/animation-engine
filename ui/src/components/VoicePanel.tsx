@@ -203,7 +203,11 @@ export function VoicePanel({
       <div className="flex items-center gap-2 mb-2">
         <span className="text-[11px] uppercase tracking-wide text-ink-faint">Voice</span>
         {rig.voiceRef ? (
-          <Badge tone="good">{rig.voiceProvenance?.source === 'minted' ? 'minted' : 'cloned'}</Badge>
+          <Badge tone="good">
+            {rig.voiceProvenance?.source === 'minted'
+              ? `minted${rig.voiceProvenance.bankVoice ? ` · ${rig.voiceProvenance.bankVoice}` : ''}`
+              : 'cloned'}
+          </Badge>
         ) : (
           <Badge tone="warn">uncast</Badge>
         )}

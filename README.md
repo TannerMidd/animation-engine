@@ -205,7 +205,42 @@ $env:HUGGINGFACE_HUB_CACHE = 'F:\ai-models\huggingface\hub'
 ```
 
 After that, workers use only the local cache. Chatterbox runs fine on torch 2.11 despite the
-package pin. Then put `rhubarb.exe` under `tools/`
+package pin.
+
+Auto-minted character references read through **Kokoro-82M** (natural voices, CPU, Apache-2.0),
+so an uncast character gets a human-sounding voice instead of a robotic one. Same pattern —
+install, then prefetch while network access is intentional:
+
+```bash
+.venv\Scripts\python -m pip install kokoro
+```
+
+```powershell
+$env:HF_HOME = 'F:\ai-models\huggingface'
+.venv\Scripts\python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='hexgrad/Kokoro-82M', allow_patterns=['*.pth','config.json','voices/*.pt'])"
+```
+
+(The first mint also fetches spaCy's small English model for G2P, one time; run one mint —
+or `.venv\Scripts\python -m spacy download en_core_web_sm` — while online.)
+
+Generated lines are **verified**: each fresh take is transcribed locally (Whisper) and scored
+against the script line; a take that doesn't say its line retries on a derived seed before it
+can enter the cache. Install once, same pattern:
+
+```bash
+.venv\Scripts\python -m pip install openai-whisper
+```
+
+```powershell
+.venv\Scripts\python -c "import whisper; whisper.load_model('small.en', download_root='F:/ai-models/whisper')"
+```
+
+Without it, synthesis still works — takes just ship unverified (`doctor` says which).
+
+Every reference clip and master transcodes through ffmpeg. The PATH one is often an ancient
+build that shipped inside another product — drop a current
+[static build](https://www.gyan.dev/ffmpeg/builds/) under `tools\ffmpeg-*\` (next to rhubarb)
+and it wins automatically; `FFMPEG` still overrides. Then put `rhubarb.exe` under `tools/`
 ([releases](https://github.com/DanielSWolf/rhubarb-lip-sync/releases)) and:
 
 ```bash
@@ -232,7 +267,7 @@ speaks every line, lipsyncs it, renders, and muxes — from an empty `cast/` fol
 | `still [name...]` | one frame to a PNG — `--pose`, `--expression` |
 | `idle [name...]` | an idling MP4 — `--seconds`, `--char-fps` |
 | `sets` | list sets; `sets props`, `sets palettes`, `sets preview <name>` |
-| `voices` | list installed SAPI voices |
+| `voices` | list SAPI voices; `voices bench` renders a cast listening sheet, `voices check --source <wav>` scores conversion |
 | `doctor` | check the toolchain |
 
 ## Writing a script
@@ -294,17 +329,38 @@ Two engines, chosen with `--voice-engine`:
 **Expression drives delivery.** The director already decides each line's expression, so the
 compiler feeds it straight into Chatterbox's emotion controls — a `DEADPAN` line is
 performed flat and slow, not merely drawn that way. In this genre that's most of the joke.
+Temperature scales sampling variance the same way: calm lines stay controlled, hot lines
+get room to move. (Exaggeration tops out at 0.8 on purpose — past that the model races and
+destabilises, which reads as worse acting, not bigger acting.)
 
-| expression | exaggeration | guidance |
-|---|---|---|
-| `DEADPAN` | 0.25 | 0.30 |
-| `NEUTRAL` | 0.50 | 0.50 |
-| `SMUG` | 0.60 | 0.45 |
-| `ANGRY` | 0.85 | 0.60 |
-| `SHOCKED` | 0.90 | 0.60 |
+| expression | exaggeration | guidance | temperature |
+|---|---|---|---|
+| `DEADPAN` | 0.30 | 0.30 | 0.50 |
+| `NEUTRAL` | 0.50 | 0.45 | 0.70 |
+| `SMUG` | 0.58 | 0.42 | 0.75 |
+| `ANGRY` | 0.75 | 0.40 | 0.85 |
+| `SHOCKED` | 0.80 | 0.38 | 0.90 |
 
 **Voice cloning.** Point a character's `voiceRef` at ~5–10s of clean speech under `cast/`
 and they'll sound like that person instead of like a TTS preset.
+
+**Minted voices.** A character with no reference gets one minted automatically: a curated
+Kokoro bank voice reads a fixed paragraph, the clip is loudness-normalised into
+`cast/<name>.ref.wav`, and Chatterbox clones it from then on. Assignment is seeded per
+character and collision-avoiding, so a cast gets genuinely distinct human-sounding voices —
+no SAPI bases, no pitch-shifting, none of the robotic prosody those used to clone into every
+line. Provenance records the bank voice (`minted · af_heart` in the cast editor), rerolls are
+free, and a recorded clip always wins. Audition the whole cast side by side with
+`anim voices bench` (writes `out/bench/index.html`).
+
+**Verified takes.** Sampling occasionally garbles a take, and deterministic seeds would
+re-render the same garble forever. So every fresh generated line is transcribed (local
+Whisper) and scored against the script; a failing take retries on a derived seed — up to
+three attempts, all reproducible — and only a take that demonstrably says its line enters
+the cache. Hot takes are peak-normalised instead of hard-clipped. If every attempt fails,
+the closest take is kept and preflight blocks release with `voice-line-unintelligible` —
+an unintelligible line is a loud decision, never a quiet default. The bench sheet prints
+each line's verdict and word error rate.
 
 ### Lipsync
 
@@ -394,8 +450,8 @@ fails, frame dedup, resumability and out-of-order rendering are all unsafe.
 
 ## Notes
 
-- `ffmpeg` here is 4.2.3 (2020, bundled with ImageMagick). It works. A current static build
-  is free and worth grabbing; override the path with the `FFMPEG` env var.
+- A static ffmpeg under `tools\ffmpeg-*\` beats the PATH one automatically (the PATH build
+  here was 4.2.3, bundled with a 2020 ImageMagick); the `FFMPEG` env var overrides both.
 - The dialogue track is mixed natively rather than with ffmpeg's `amix` — lines never
   overlap, so it's sample placement, and it avoids both `amix`'s renormalisation as inputs
   drop out and its `normalize` option not existing before ffmpeg 4.4.
