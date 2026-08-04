@@ -256,20 +256,6 @@ export const GENERIC_PROPS: Record<string, PropDef> = {
     },
   },
 
-  crate: {
-    label: 'Crate',
-    tags: ['generic', 'exterior', 'interior'],
-    params: [{ key: 'size', label: 'Size', type: 'number', default: 90, min: 30, max: 250, step: 5 }],
-    render(ctx) {
-      const { palette: p } = ctx;
-      const s = num(ctx, 'size', 90);
-      let out = rect(p, -s / 2, -s, s, s, p.wood);
-      out += line(p, -s / 2, -s, s / 2, 0, p.woodDark, 4);
-      out += line(p, s / 2, -s, -s / 2, 0, p.woodDark, 4);
-      return out;
-    },
-  },
-
   poster: {
     label: 'Poster',
     tags: ['generic', 'interior'],

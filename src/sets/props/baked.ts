@@ -18,7 +18,7 @@ import type { PropDef } from './types.ts';
  * and no network, and the determinism guarantee is untouched.
  */
 
-export { PALETTE_SLOTS, BAKE_BUDGET, DOC_FORMAT, countView } from './document.ts';
+export { PALETTE_SLOTS, BAKE_BUDGET, DOC_FORMAT, countView, PropDocument } from './document.ts';
 
 /**
  * The foundry's names for the document type.

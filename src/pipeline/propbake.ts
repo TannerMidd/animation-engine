@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { PROPS_DIR, ROOT } from '../core/paths.ts';
 import { findBlender, blenderAvailable, blenderProcessEnv } from '../render/blender.ts';
-import { loadBakedProps, PALETTE_SLOTS, BAKE_BUDGET } from '../sets/props/baked.ts';
+import { loadBakedProps, PALETTE_SLOTS, BAKE_BUDGET, PropDocument, countView } from '../sets/props/baked.ts';
 
 /**
  * The prop foundry.
@@ -118,17 +118,19 @@ export async function listBakedProps(dir: string = PROPS_DIR): Promise<BakedProp
     }
 
     try {
-      const parsed = JSON.parse(raw) as {
-        label: string;
-        provenance: { source: string };
-        views: Record<string, { shapes: Array<{ p: number[] }> }>;
-      };
-      const views = Object.keys(parsed.views).sort();
+      // Through the real schema rather than a hand-rolled shape: a document may
+      // be format 1 shapes or format 2 primitives, and counting them is the
+      // loader's job in both cases.
+      const parsed = PropDocument.parse(JSON.parse(raw));
+      // Declaration order, not sorted — the first view is the prop's normal
+      // appearance, and sorting would make that an accident of naming.
+      const views = Object.keys(parsed.views);
       let shapes = 0;
       let points = 0;
       for (const view of Object.values(parsed.views)) {
-        shapes += view.shapes.length;
-        for (const shape of view.shapes) points += shape.p.length / 2;
+        const counted = countView(view);
+        shapes += counted.shapes;
+        points += counted.points;
       }
       const source = sources.get(key);
       const stale = source ? (await sourceHash(source)) !== parsed.provenance.source : null;
