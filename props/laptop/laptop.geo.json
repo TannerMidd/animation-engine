@@ -1,0 +1,156 @@
+{
+  "format": 2,
+  "key": "laptop",
+  "label": "Open laptop",
+  "tags": [
+    "handheld",
+    "contact",
+    "office",
+    "home",
+    "interior"
+  ],
+  "spanning": false,
+  "params": [
+    {
+      "key": "on",
+      "label": "Screen lit",
+      "type": "boolean",
+      "default": true
+    }
+  ],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "interaction": {
+    "portable": true,
+    "bounds": {
+      "x": -64,
+      "y": -84,
+      "width": 128,
+      "height": 84
+    },
+    "handles": [
+      {
+        "id": "left-grip",
+        "label": "Left edge grip",
+        "kind": "grip",
+        "x": -50,
+        "y": -5,
+        "radius": 12
+      },
+      {
+        "id": "right-grip",
+        "label": "Right edge grip",
+        "kind": "grip",
+        "x": 50,
+        "y": -5,
+        "radius": 12
+      },
+      {
+        "id": "base",
+        "label": "Base contact",
+        "kind": "placement",
+        "x": 0,
+        "y": 0,
+        "radius": 42,
+        "normal": {
+          "x": 0,
+          "y": 1
+        }
+      },
+      {
+        "id": "keyboard",
+        "label": "Keyboard contact",
+        "kind": "contact",
+        "x": 0,
+        "y": -8,
+        "radius": 38,
+        "normal": {
+          "x": 0,
+          "y": -1
+        }
+      },
+      {
+        "id": "screen",
+        "label": "Screen control",
+        "kind": "control",
+        "x": 0,
+        "y": -47,
+        "radius": 34,
+        "normal": {
+          "x": 0,
+          "y": -1
+        }
+      }
+    ]
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "rect",
+          "f": "metal",
+          "rx": 5,
+          "x": -55,
+          "y": -82,
+          "w": 110,
+          "h": 72
+        },
+        {
+          "k": "rect",
+          "l": 0,
+          "f": "screen",
+          "x": -48,
+          "y": -75,
+          "w": 96,
+          "h": 58,
+          "show": "on"
+        },
+        {
+          "k": "rect",
+          "l": 0,
+          "f": "metalDark",
+          "x": -48,
+          "y": -75,
+          "w": 96,
+          "h": 58,
+          "show": "!on"
+        },
+        {
+          "k": "poly",
+          "f": "metal",
+          "p": [
+            -55,
+            -10,
+            55,
+            -10,
+            64,
+            0,
+            -64,
+            0
+          ]
+        },
+        {
+          "k": "line",
+          "f": "metalDark",
+          "sw": 2,
+          "x1": -41,
+          "y1": -7,
+          "x2": 41,
+          "y2": -7
+        },
+        {
+          "k": "line",
+          "f": "metalDark",
+          "sw": 2,
+          "x1": -34,
+          "y1": -3,
+          "x2": 34,
+          "y2": -3
+        }
+      ]
+    }
+  }
+}

@@ -152,7 +152,7 @@ describe('baked rooms', () => {
     // Perspective is baked in, so a room without its stage geometry recorded is
     // a prop nothing can check for drift.
     const orphan = manifest({ key: 'test-room', spanning: true });
-    expect(() => BakedProp.parse(orphan)).toThrow(/must record the frame/);
+    expect(() => BakedProp.parse(orphan)).toThrow(/draw from the set geometry|record the frame/);
     expect(() => BakedProp.parse(room())).not.toThrow();
   });
 
@@ -212,7 +212,7 @@ describe('baked prop loading', () => {
     expect(loaded.props).toEqual({});
     expect(loaded.errors).toHaveLength(1);
     expect(loaded.errors[0]!.file).toBe('test-block/test-block.geo.json');
-    expect(loaded.errors[0]!.error).toMatch(/mahogany|invalid_enum|expected/i);
+    expect(loaded.errors[0]!.error).toMatch(/mahogany/);
   });
 
   it('rejects a bake that would swamp the house style', async () => {

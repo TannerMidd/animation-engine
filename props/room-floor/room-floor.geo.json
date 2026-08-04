@@ -1,0 +1,62 @@
+{
+  "format": 2,
+  "key": "room-floor",
+  "label": "Floor",
+  "tags": [
+    "structure",
+    "interior",
+    "exterior",
+    "ground"
+  ],
+  "spanning": true,
+  "params": [
+    {
+      "key": "bandOffset",
+      "label": "Near-band offset",
+      "type": "number",
+      "default": 96,
+      "min": 0,
+      "max": 400,
+      "step": 8
+    }
+  ],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "rect",
+          "f": "floor",
+          "l": 0,
+          "x": "setX0",
+          "y": "setHorizonY",
+          "w": "setWidth",
+          "h": "setY0 + setHeight - setHorizonY"
+        },
+        {
+          "k": "line",
+          "f": "line",
+          "x1": "setX0",
+          "y1": "setHorizonY",
+          "x2": "setX0 + setWidth",
+          "y2": "setHorizonY",
+          "sw": 4
+        },
+        {
+          "k": "rect",
+          "f": "floorDark",
+          "l": 0,
+          "x": "setX0",
+          "y": "setHorizonY + bandOffset",
+          "w": "setWidth",
+          "h": "setY0 + setHeight - setHorizonY - bandOffset",
+          "show": "bandOffset > 0"
+        }
+      ]
+    }
+  }
+}

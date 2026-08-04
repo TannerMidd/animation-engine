@@ -1,0 +1,56 @@
+{
+  "format": 2,
+  "key": "rock",
+  "label": "Rock",
+  "tags": [
+    "exterior"
+  ],
+  "spanning": false,
+  "params": [
+    {
+      "key": "width",
+      "label": "Width",
+      "type": "number",
+      "default": 120,
+      "min": 30,
+      "max": 400,
+      "step": 5
+    },
+    {
+      "key": "height",
+      "label": "Height",
+      "type": "number",
+      "default": 70,
+      "min": 20,
+      "max": 250,
+      "step": 5
+    }
+  ],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "poly",
+          "f": "surface",
+          "p": [
+            "-width/2",
+            0,
+            "-width*0.34",
+            "-height*0.82",
+            "width*0.08",
+            "-height",
+            "width*0.42",
+            "-height*0.6",
+            "width/2",
+            0
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "format": 2,
+  "key": "bar-counter",
+  "label": "Bar counter",
+  "tags": [
+    "bar",
+    "interior"
+  ],
+  "spanning": false,
+  "params": [
+    {
+      "key": "width",
+      "label": "Width",
+      "type": "number",
+      "default": 520,
+      "min": 150,
+      "max": 900,
+      "step": 10
+    },
+    {
+      "key": "height",
+      "label": "Height",
+      "type": "number",
+      "default": 150,
+      "min": 80,
+      "max": 240,
+      "step": 5
+    }
+  ],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "rect",
+          "f": "wood",
+          "x": "-width/2",
+          "y": "-height",
+          "w": "width",
+          "h": "height"
+        },
+        {
+          "k": "rect",
+          "f": "woodDark",
+          "x": "-width/2 - 10",
+          "y": "-height",
+          "w": "width + 20",
+          "h": 18
+        },
+        {
+          "k": "line",
+          "f": "woodDark",
+          "sw": 4,
+          "x1": "-width/2",
+          "y1": "-height*0.42",
+          "x2": "width/2",
+          "y2": "-height*0.42"
+        }
+      ]
+    }
+  }
+}

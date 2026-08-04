@@ -1,0 +1,100 @@
+{
+  "format": 2,
+  "key": "cup",
+  "label": "Drinking cup",
+  "tags": [
+    "handheld",
+    "contact",
+    "office",
+    "home",
+    "bar",
+    "interior"
+  ],
+  "spanning": false,
+  "params": [],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "interaction": {
+    "portable": true,
+    "bounds": {
+      "x": -21,
+      "y": -42,
+      "width": 42,
+      "height": 42
+    },
+    "handles": [
+      {
+        "id": "grip",
+        "label": "Body grip",
+        "kind": "grip",
+        "x": 0,
+        "y": -21,
+        "radius": 17
+      },
+      {
+        "id": "base",
+        "label": "Base contact",
+        "kind": "placement",
+        "x": 0,
+        "y": 0,
+        "radius": 13,
+        "normal": {
+          "x": 0,
+          "y": 1
+        }
+      },
+      {
+        "id": "rim",
+        "label": "Rim contact",
+        "kind": "contact",
+        "x": 0,
+        "y": -38,
+        "radius": 17,
+        "normal": {
+          "x": 0,
+          "y": -1
+        }
+      }
+    ]
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "poly",
+          "f": "surface",
+          "p": [
+            -20,
+            -38,
+            20,
+            -38,
+            15,
+            0,
+            -15,
+            0
+          ]
+        },
+        {
+          "k": "ellipse",
+          "f": "surfaceDark",
+          "cx": 0,
+          "cy": -38,
+          "rx": 20,
+          "ry": 5
+        },
+        {
+          "k": "ellipse",
+          "l": 0,
+          "f": "glass",
+          "cx": 0,
+          "cy": -38,
+          "rx": 15,
+          "ry": 2.5
+        }
+      ]
+    }
+  }
+}

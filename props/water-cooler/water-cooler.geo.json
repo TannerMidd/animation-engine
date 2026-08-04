@@ -1,0 +1,48 @@
+{
+  "format": 2,
+  "key": "water-cooler",
+  "label": "Water cooler",
+  "tags": [
+    "office",
+    "interior"
+  ],
+  "spanning": false,
+  "params": [],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "rect",
+          "f": "surface",
+          "x": -32,
+          "y": -120,
+          "w": 64,
+          "h": 120
+        },
+        {
+          "k": "rect",
+          "f": "glass",
+          "rx": 8,
+          "x": -26,
+          "y": -190,
+          "w": 52,
+          "h": 72
+        },
+        {
+          "k": "rect",
+          "f": "metalDark",
+          "sw": 2,
+          "x": -10,
+          "y": -108,
+          "w": 20,
+          "h": 14
+        }
+      ]
+    }
+  }
+}

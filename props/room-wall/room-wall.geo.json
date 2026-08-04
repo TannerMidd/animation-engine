@@ -1,0 +1,79 @@
+{
+  "format": 2,
+  "key": "room-wall",
+  "label": "Wall",
+  "tags": [
+    "structure",
+    "interior"
+  ],
+  "spanning": true,
+  "params": [
+    {
+      "key": "bandHeight",
+      "label": "Lower band height",
+      "type": "number",
+      "default": 150,
+      "min": 0,
+      "max": 400,
+      "step": 10
+    },
+    {
+      "key": "railWidth",
+      "label": "Rail thickness",
+      "type": "number",
+      "default": 6,
+      "min": 0,
+      "max": 20,
+      "step": 1
+    }
+  ],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "rect",
+          "f": "wall",
+          "l": 0,
+          "x": "setX0",
+          "y": "setY0",
+          "w": "setWidth",
+          "h": "setHeight"
+        },
+        {
+          "k": "rect",
+          "f": "wall",
+          "l": 0,
+          "x": "setX0",
+          "y": "setCeilingY",
+          "w": "setWidth",
+          "h": "setHorizonY - setCeilingY"
+        },
+        {
+          "k": "rect",
+          "f": "wallLower",
+          "l": 0,
+          "x": "setX0",
+          "y": "setHorizonY - bandHeight",
+          "w": "setWidth",
+          "h": "bandHeight",
+          "show": "bandHeight > 0"
+        },
+        {
+          "k": "line",
+          "f": "wallTrim",
+          "x1": "setX0",
+          "y1": "setHorizonY - bandHeight",
+          "x2": "setX0 + setWidth",
+          "y2": "setHorizonY - bandHeight",
+          "sw": "railWidth",
+          "show": "bandHeight > 0"
+        }
+      ]
+    }
+  }
+}

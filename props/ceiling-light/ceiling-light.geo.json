@@ -1,0 +1,60 @@
+{
+  "format": 2,
+  "key": "ceiling-light",
+  "label": "Ceiling light",
+  "tags": [
+    "structure",
+    "interior",
+    "office"
+  ],
+  "spanning": false,
+  "params": [
+    {
+      "key": "width",
+      "label": "Width",
+      "type": "number",
+      "default": 240,
+      "min": 40,
+      "max": 600,
+      "step": 10
+    },
+    {
+      "key": "height",
+      "label": "Height",
+      "type": "number",
+      "default": 30,
+      "min": 8,
+      "max": 80,
+      "step": 2
+    }
+  ],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "rect",
+          "f": "light",
+          "x": "-width/2",
+          "y": "ceilingLocalY - height - 6",
+          "w": "width",
+          "h": "height"
+        },
+        {
+          "k": "rect",
+          "f": "lightGlow",
+          "l": 0,
+          "o": 0.55,
+          "x": "-width/2 + 8",
+          "y": "ceilingLocalY - 6",
+          "w": "width - 16",
+          "h": 10
+        }
+      ]
+    }
+  }
+}

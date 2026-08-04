@@ -1,0 +1,84 @@
+{
+  "format": 2,
+  "key": "doorway",
+  "label": "Doorway",
+  "tags": [
+    "structure",
+    "interior"
+  ],
+  "spanning": false,
+  "params": [
+    {
+      "key": "width",
+      "label": "Width",
+      "type": "number",
+      "default": 150,
+      "min": 60,
+      "max": 400,
+      "step": 5
+    },
+    {
+      "key": "height",
+      "label": "Height",
+      "type": "number",
+      "default": 300,
+      "min": 120,
+      "max": 600,
+      "step": 5
+    },
+    {
+      "key": "open",
+      "label": "Open",
+      "type": "boolean",
+      "default": true
+    }
+  ],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "rect",
+          "f": "surfaceTrim",
+          "x": "-width/2 - 12",
+          "y": "-height - 12",
+          "w": "width + 24",
+          "h": "height + 12"
+        },
+        {
+          "k": "rect",
+          "f": "floorDark",
+          "x": "-width/2",
+          "y": "-height",
+          "w": "width",
+          "h": "height",
+          "show": "open"
+        },
+        {
+          "k": "rect",
+          "f": "wood",
+          "x": "-width/2",
+          "y": "-height",
+          "w": "width",
+          "h": "height",
+          "show": "!open"
+        },
+        {
+          "k": "ellipse",
+          "f": "metal",
+          "sm": 1,
+          "sw": 2,
+          "cx": "width/2 - 22",
+          "cy": "-height/2",
+          "rx": 6,
+          "ry": 6,
+          "show": "!open"
+        }
+      ]
+    }
+  }
+}

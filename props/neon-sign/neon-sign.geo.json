@@ -1,0 +1,76 @@
+{
+  "format": 2,
+  "key": "neon-sign",
+  "label": "Neon sign",
+  "tags": [
+    "bar",
+    "interior",
+    "exterior"
+  ],
+  "spanning": false,
+  "params": [
+    {
+      "key": "text",
+      "label": "Text",
+      "type": "text",
+      "default": "OPEN"
+    },
+    {
+      "key": "y",
+      "label": "Height off floor",
+      "type": "number",
+      "default": 340,
+      "min": 0,
+      "max": 700,
+      "step": 10
+    },
+    {
+      "key": "size",
+      "label": "Text size",
+      "type": "number",
+      "default": 44,
+      "min": 16,
+      "max": 140,
+      "step": 2
+    }
+  ],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "rect",
+          "f": "metalDark",
+          "rx": 10,
+          "x": "-(max(80, textLength*size*0.72 + 40))/2",
+          "y": "-y - size",
+          "w": "max(80, textLength*size*0.72 + 40)",
+          "h": "size*1.5"
+        },
+        {
+          "k": "text",
+          "f": null,
+          "st": "accentGlow",
+          "sw": 9,
+          "o": 0.45,
+          "x": 0,
+          "y": "-y + size*0.16",
+          "size": "size",
+          "value": "$text"
+        },
+        {
+          "k": "text",
+          "f": "accent",
+          "x": 0,
+          "y": "-y + size*0.16",
+          "size": "size",
+          "value": "$text"
+        }
+      ]
+    }
+  }
+}

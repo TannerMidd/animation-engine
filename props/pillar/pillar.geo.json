@@ -1,0 +1,66 @@
+{
+  "format": 2,
+  "key": "pillar",
+  "label": "Pillar",
+  "tags": [
+    "structure",
+    "interior",
+    "exterior"
+  ],
+  "spanning": false,
+  "params": [
+    {
+      "key": "width",
+      "label": "Width",
+      "type": "number",
+      "default": 60,
+      "min": 20,
+      "max": 200,
+      "step": 5
+    },
+    {
+      "key": "height",
+      "label": "Height",
+      "type": "number",
+      "default": 480,
+      "min": 100,
+      "max": 900,
+      "step": 10
+    }
+  ],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "rect",
+          "f": "surface",
+          "x": "-width/2",
+          "y": "-height",
+          "w": "width",
+          "h": "height"
+        },
+        {
+          "k": "rect",
+          "f": "surfaceDark",
+          "x": "-width/2 - 8",
+          "y": "-height",
+          "w": "width + 16",
+          "h": 16
+        },
+        {
+          "k": "rect",
+          "f": "surfaceDark",
+          "x": "-width/2 - 8",
+          "y": -18,
+          "w": "width + 16",
+          "h": 18
+        }
+      ]
+    }
+  }
+}

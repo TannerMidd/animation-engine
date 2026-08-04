@@ -401,7 +401,7 @@ describe('format 1', () => {
 
 describe('validation', () => {
   it('requires a spanning prop to record its frame', () => {
-    expect(() => PropDocument.parse(doc({ spanning: true }))).toThrow(/must record the frame/);
+    expect(() => PropDocument.parse(doc({ spanning: true }))).toThrow(/draw from the set geometry|record the frame/);
     expect(() => PropDocument.parse(doc({
       spanning: true,
       frame: { x0: -420, y0: -220, width: 2120, height: 1160, horizonY: 566, ceilingY: 92 },

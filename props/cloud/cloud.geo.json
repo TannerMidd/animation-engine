@@ -1,0 +1,67 @@
+{
+  "format": 2,
+  "key": "cloud",
+  "label": "Cloud",
+  "tags": [
+    "exterior"
+  ],
+  "spanning": false,
+  "params": [
+    {
+      "key": "width",
+      "label": "Width",
+      "type": "number",
+      "default": 220,
+      "min": 60,
+      "max": 600,
+      "step": 10
+    },
+    {
+      "key": "y",
+      "label": "Height off floor",
+      "type": "number",
+      "default": 460,
+      "min": 0,
+      "max": 900,
+      "step": 10
+    }
+  ],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "ellipse",
+          "l": 0,
+          "f": "light",
+          "cx": "-width*0.22",
+          "cy": "-y",
+          "rx": "width*0.3",
+          "ry": "width*0.34*0.7"
+        },
+        {
+          "k": "ellipse",
+          "l": 0,
+          "f": "light",
+          "cx": "width*0.2",
+          "cy": "-y + width*0.34*0.1",
+          "rx": "width*0.26",
+          "ry": "width*0.34*0.58"
+        },
+        {
+          "k": "ellipse",
+          "l": 0,
+          "f": "light",
+          "cx": 0,
+          "cy": "-y - width*0.34*0.24",
+          "rx": "width*0.28",
+          "ry": "width*0.34*0.8"
+        }
+      ]
+    }
+  }
+}

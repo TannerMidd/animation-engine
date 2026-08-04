@@ -1,0 +1,81 @@
+{
+  "format": 2,
+  "key": "tree",
+  "label": "Tree",
+  "tags": [
+    "exterior"
+  ],
+  "spanning": false,
+  "params": [
+    {
+      "key": "height",
+      "label": "Height",
+      "type": "number",
+      "default": 420,
+      "min": 120,
+      "max": 900,
+      "step": 10
+    },
+    {
+      "key": "spread",
+      "label": "Canopy spread",
+      "type": "number",
+      "default": 170,
+      "min": 60,
+      "max": 400,
+      "step": 10
+    },
+    {
+      "key": "trunk",
+      "label": "Trunk width",
+      "type": "number",
+      "default": 34,
+      "min": 10,
+      "max": 100,
+      "step": 2
+    }
+  ],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "rect",
+          "f": "wood",
+          "x": "-trunk/2",
+          "y": "-height*0.55",
+          "w": "trunk",
+          "h": "height*0.55"
+        },
+        {
+          "k": "ellipse",
+          "f": "foliage",
+          "cx": 0,
+          "cy": "-height + spread*0.55",
+          "rx": "spread",
+          "ry": "spread*0.78"
+        },
+        {
+          "k": "ellipse",
+          "f": "foliageDark",
+          "cx": "-spread*0.55",
+          "cy": "-height + spread*0.55 + spread*0.3",
+          "rx": "spread*0.6",
+          "ry": "spread*0.5"
+        },
+        {
+          "k": "ellipse",
+          "f": "foliageDark",
+          "cx": "spread*0.55",
+          "cy": "-height + spread*0.55 + spread*0.26",
+          "rx": "spread*0.58",
+          "ry": "spread*0.48"
+        }
+      ]
+    }
+  }
+}

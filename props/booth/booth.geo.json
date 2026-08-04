@@ -1,0 +1,74 @@
+{
+  "format": 2,
+  "key": "booth",
+  "label": "Booth seat",
+  "tags": [
+    "bar",
+    "interior"
+  ],
+  "spanning": false,
+  "params": [
+    {
+      "key": "width",
+      "label": "Width",
+      "type": "number",
+      "default": 260,
+      "min": 100,
+      "max": 600,
+      "step": 10
+    },
+    {
+      "key": "height",
+      "label": "Back height",
+      "type": "number",
+      "default": 200,
+      "min": 80,
+      "max": 400,
+      "step": 10
+    }
+  ],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "rect",
+          "f": "fabricDark",
+          "rx": 10,
+          "x": "-width/2",
+          "y": "-height",
+          "w": "width",
+          "h": "height"
+        },
+        {
+          "k": "repeat",
+          "n": "max(2, round(width/70))",
+          "of": [
+            {
+              "k": "line",
+              "f": "fabric",
+              "sw": 3,
+              "x1": "-width/2 + (width/max(2, round(width/70)))*(i + 0.5)",
+              "y1": "-height + 16",
+              "x2": "-width/2 + (width/max(2, round(width/70)))*(i + 0.5)",
+              "y2": "-height*0.45"
+            }
+          ]
+        },
+        {
+          "k": "rect",
+          "f": "fabric",
+          "rx": 8,
+          "x": "-width/2",
+          "y": "-height*0.42",
+          "w": "width",
+          "h": "height*0.42"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,121 @@
+{
+  "format": 2,
+  "key": "monitor",
+  "label": "Monitor",
+  "tags": [
+    "office",
+    "interior",
+    "contact",
+    "control"
+  ],
+  "spanning": false,
+  "params": [
+    {
+      "key": "width",
+      "label": "Width",
+      "type": "number",
+      "default": 108,
+      "min": 40,
+      "max": 300,
+      "step": 4
+    },
+    {
+      "key": "height",
+      "label": "Height",
+      "type": "number",
+      "default": 76,
+      "min": 30,
+      "max": 200,
+      "step": 4
+    },
+    {
+      "key": "on",
+      "label": "Screen lit",
+      "type": "boolean",
+      "default": true
+    }
+  ],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "interaction": {
+    "portable": false,
+    "bounds": {
+      "x": -54,
+      "y": -92,
+      "width": 108,
+      "height": 92
+    },
+    "handles": [
+      {
+        "id": "screen",
+        "label": "Screen surface",
+        "kind": "contact",
+        "x": 0,
+        "y": -54,
+        "radius": 42,
+        "normal": {
+          "x": 0,
+          "y": -1
+        }
+      },
+      {
+        "id": "power",
+        "label": "Power control",
+        "kind": "control",
+        "x": 38,
+        "y": -19,
+        "radius": 9,
+        "normal": {
+          "x": 0,
+          "y": -1
+        }
+      }
+    ]
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "rect",
+          "f": "metal",
+          "x": -9,
+          "y": -16,
+          "w": 18,
+          "h": 16
+        },
+        {
+          "k": "rect",
+          "f": "metal",
+          "rx": 6,
+          "x": "-width/2",
+          "y": "-16 - height",
+          "w": "width",
+          "h": "height"
+        },
+        {
+          "k": "rect",
+          "l": 0,
+          "f": "screen",
+          "x": "-width/2 + 10",
+          "y": "-16 - height + 10",
+          "w": "width - 20",
+          "h": "height - 22",
+          "show": "on"
+        },
+        {
+          "k": "rect",
+          "l": 0,
+          "f": "metalDark",
+          "x": "-width/2 + 10",
+          "y": "-16 - height + 10",
+          "w": "width - 20",
+          "h": "height - 22",
+          "show": "!on"
+        }
+      ]
+    }
+  }
+}

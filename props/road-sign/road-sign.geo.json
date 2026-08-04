@@ -1,0 +1,71 @@
+{
+  "format": 2,
+  "key": "road-sign",
+  "label": "Road sign",
+  "tags": [
+    "exterior"
+  ],
+  "spanning": false,
+  "params": [
+    {
+      "key": "text",
+      "label": "Text",
+      "type": "text",
+      "default": "NO"
+    },
+    {
+      "key": "height",
+      "label": "Post height",
+      "type": "number",
+      "default": 220,
+      "min": 80,
+      "max": 500,
+      "step": 10
+    },
+    {
+      "key": "width",
+      "label": "Sign width",
+      "type": "number",
+      "default": 130,
+      "min": 50,
+      "max": 400,
+      "step": 5
+    }
+  ],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "rect",
+          "f": "metalDark",
+          "x": -5,
+          "y": "-height",
+          "w": 10,
+          "h": "height"
+        },
+        {
+          "k": "rect",
+          "f": "surface",
+          "rx": 4,
+          "x": "-width/2",
+          "y": "-height - width*0.55",
+          "w": "width",
+          "h": "width*0.55"
+        },
+        {
+          "k": "text",
+          "f": "line",
+          "x": 0,
+          "y": "-height - width*0.55*0.32",
+          "size": "width*0.55*0.42",
+          "value": "$text"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,112 @@
+{
+  "format": 2,
+  "key": "mug",
+  "label": "Coffee mug",
+  "tags": [
+    "handheld",
+    "contact",
+    "office",
+    "home",
+    "bar",
+    "interior"
+  ],
+  "spanning": false,
+  "params": [],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "interaction": {
+    "portable": true,
+    "bounds": {
+      "x": -24,
+      "y": -50,
+      "width": 64,
+      "height": 50
+    },
+    "handles": [
+      {
+        "id": "grip",
+        "label": "Handle grip",
+        "kind": "grip",
+        "x": 30,
+        "y": -25,
+        "radius": 13
+      },
+      {
+        "id": "base",
+        "label": "Base contact",
+        "kind": "placement",
+        "x": 0,
+        "y": 0,
+        "radius": 18,
+        "normal": {
+          "x": 0,
+          "y": 1
+        }
+      },
+      {
+        "id": "rim",
+        "label": "Rim contact",
+        "kind": "contact",
+        "x": 0,
+        "y": -44,
+        "radius": 18,
+        "normal": {
+          "x": 0,
+          "y": -1
+        }
+      }
+    ]
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "ellipse",
+          "f": "clay",
+          "cx": 27,
+          "cy": -25,
+          "rx": 14,
+          "ry": 17
+        },
+        {
+          "k": "ellipse",
+          "l": 0,
+          "f": "surface",
+          "cx": 27,
+          "cy": -25,
+          "rx": 7,
+          "ry": 10
+        },
+        {
+          "k": "rect",
+          "f": "clay",
+          "rx": 8,
+          "x": -22,
+          "y": -44,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "k": "ellipse",
+          "f": "clay",
+          "cx": 0,
+          "cy": -43,
+          "rx": 22,
+          "ry": 6
+        },
+        {
+          "k": "ellipse",
+          "l": 0,
+          "f": "woodDark",
+          "cx": 0,
+          "cy": -43,
+          "rx": 16,
+          "ry": 3
+        }
+      ]
+    }
+  }
+}

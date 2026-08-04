@@ -4,6 +4,7 @@ import path from 'node:path';
 import { describe, it, expect, afterAll, afterEach } from 'vitest';
 import {
   reloadProps, propKeys, allProps, propManifest, propTags, getProp, bakedErrors, bakedTotals,
+  mergeProps, type PropDef,
 } from '../src/sets/props/index.ts';
 import { setJsonSchema } from '../src/llm/set.ts';
 import { tempDir } from './helpers.ts';
@@ -75,11 +76,15 @@ describe('a prop written to disk becomes a prop', () => {
     expect(schema.properties.layers.properties.back.items.properties.prop.enum).toContain('waste-bin');
   });
 
-  it('marks which props can be edited and which are built in', async () => {
-    reloadProps(await withDocuments([document('waste-bin')]));
+  it('marks every prop as an editable document, because they all are now', async () => {
+    // The catalogue used to be forty-four render functions and three files. It
+    // is files all the way down, which is the whole point: there is no longer a
+    // class of prop you have to open an editor to change.
+    reloadProps();
     const manifest = propManifest();
-    expect(manifest.find((p) => p.key === 'waste-bin')?.source).toBe('document');
-    expect(manifest.find((p) => p.key === 'desk')?.source).toBe('builtin');
+    expect(manifest.length).toBeGreaterThan(40);
+    expect(manifest.filter((p) => p.source !== 'document')).toEqual([]);
+    expect(manifest.find((p) => p.key === 'desk')?.source).toBe('document');
   });
 
   it('disappears again when the document is removed', async () => {
@@ -99,14 +104,24 @@ describe('a prop written to disk becomes a prop', () => {
 });
 
 describe('a collision changes nothing', () => {
-  it('refuses to let a document shadow a coded prop, and says where both are', async () => {
+  it('refuses to let one source shadow another, and says where both are', () => {
+    // Nothing on disk can collide any more — a key is a directory name, so the
+    // filesystem enforces uniqueness. The guard stays because the registry is
+    // assembled from a list of sources and gaining a second one is a rename
+    // away; a set quietly rendering a different prop than it names is very hard
+    // to work backwards from.
+    const one: Record<string, PropDef> = { dupe: getProp('desk') };
+    const two: Record<string, PropDef> = { dupe: getProp('chair') };
+    expect(() => mergeProps([['first', one], ['second', two]]))
+      .toThrow(/duplicate prop key "dupe".*first.*second/s);
+  });
+
+  it('keeps the catalogue intact when a reload throws', async () => {
     const before = propKeys();
-    const dir = await withDocuments([document('desk')]);
+    reloadProps(await withDocuments([document('waste-bin')]));
+    expect(propKeys()).not.toEqual(before);
 
-    expect(() => reloadProps(dir)).toThrow(/duplicate prop key "desk"/);
-
-    // The important half: the throw must not leave the process without a
-    // catalogue. Every set that rendered a moment ago still can.
+    reloadProps();
     expect(propKeys()).toEqual(before);
     expect(getProp('desk').label).toBe('Desk');
   });

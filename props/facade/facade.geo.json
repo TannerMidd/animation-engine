@@ -1,0 +1,106 @@
+{
+  "format": 2,
+  "key": "facade",
+  "label": "Building facade",
+  "tags": [
+    "exterior"
+  ],
+  "spanning": false,
+  "params": [
+    {
+      "key": "width",
+      "label": "Width",
+      "type": "number",
+      "default": 320,
+      "min": 100,
+      "max": 900,
+      "step": 10
+    },
+    {
+      "key": "height",
+      "label": "Height",
+      "type": "number",
+      "default": 480,
+      "min": 150,
+      "max": 1000,
+      "step": 10
+    },
+    {
+      "key": "floors",
+      "label": "Floors",
+      "type": "number",
+      "default": 3,
+      "min": 1,
+      "max": 8,
+      "step": 1
+    },
+    {
+      "key": "windowsPerFloor",
+      "label": "Windows per floor",
+      "type": "number",
+      "default": 3,
+      "min": 1,
+      "max": 8,
+      "step": 1
+    },
+    {
+      "key": "lit",
+      "label": "Windows lit",
+      "type": "boolean",
+      "default": false
+    }
+  ],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "rect",
+          "f": "surfaceDark",
+          "x": "-width/2",
+          "y": "-height",
+          "w": "width",
+          "h": "height"
+        },
+        {
+          "k": "repeat",
+          "n": "floors",
+          "dy": "height/floors",
+          "of": [
+            {
+              "k": "repeat",
+              "n": "windowsPerFloor",
+              "dx": "width/windowsPerFloor",
+              "of": [
+                {
+                  "k": "rect",
+                  "f": "light",
+                  "sw": 2,
+                  "show": "lit && (i*windowsPerFloor + j) % 3 != 1",
+                  "x": "-width/2 + (width/windowsPerFloor)*0.5 - (min(46, (width/windowsPerFloor)*0.5))/2",
+                  "y": "-height + ((height/floors) - (min((height/floors)*0.44, 56)))/2",
+                  "w": "min(46, (width/windowsPerFloor)*0.5)",
+                  "h": "min((height/floors)*0.44, 56)"
+                },
+                {
+                  "k": "rect",
+                  "f": "glass",
+                  "sw": 2,
+                  "show": "!(lit && (i*windowsPerFloor + j) % 3 != 1)",
+                  "x": "-width/2 + (width/windowsPerFloor)*0.5 - (min(46, (width/windowsPerFloor)*0.5))/2",
+                  "y": "-height + ((height/floors) - (min((height/floors)*0.44, 56)))/2",
+                  "w": "min(46, (width/windowsPerFloor)*0.5)",
+                  "h": "min((height/floors)*0.44, 56)"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

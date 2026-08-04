@@ -1,0 +1,113 @@
+{
+  "format": 2,
+  "key": "bottle-shelf",
+  "label": "Bottle shelf",
+  "tags": [
+    "bar",
+    "interior"
+  ],
+  "spanning": false,
+  "params": [
+    {
+      "key": "width",
+      "label": "Width",
+      "type": "number",
+      "default": 300,
+      "min": 100,
+      "max": 600,
+      "step": 10
+    },
+    {
+      "key": "y",
+      "label": "Height off floor",
+      "type": "number",
+      "default": 220,
+      "min": 0,
+      "max": 500,
+      "step": 10
+    },
+    {
+      "key": "rows",
+      "label": "Rows",
+      "type": "number",
+      "default": 2,
+      "min": 1,
+      "max": 4,
+      "step": 1
+    }
+  ],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "repeat",
+          "n": "rows",
+          "dy": -70,
+          "of": [
+            {
+              "k": "rect",
+              "l": 0,
+              "f": "woodDark",
+              "x": "-width/2",
+              "y": "-y",
+              "w": "width",
+              "h": 8
+            },
+            {
+              "k": "repeat",
+              "n": "ceil((width - 30)/17)",
+              "dx": 17,
+              "of": [
+                {
+                  "k": "rect",
+                  "sw": 2,
+                  "f": "foliage",
+                  "show": "(i + j) % 4 == 0",
+                  "x": "-width/2 + 14",
+                  "y": "-y - (34 + ((i + j) % 3)*10)",
+                  "w": 11,
+                  "h": "34 + ((i + j) % 3)*10"
+                },
+                {
+                  "k": "rect",
+                  "sw": 2,
+                  "f": "clay",
+                  "show": "(i + j) % 4 == 1",
+                  "x": "-width/2 + 14",
+                  "y": "-y - (34 + ((i + j) % 3)*10)",
+                  "w": 11,
+                  "h": "34 + ((i + j) % 3)*10"
+                },
+                {
+                  "k": "rect",
+                  "sw": 2,
+                  "f": "glass",
+                  "show": "(i + j) % 4 == 2",
+                  "x": "-width/2 + 14",
+                  "y": "-y - (34 + ((i + j) % 3)*10)",
+                  "w": 11,
+                  "h": "34 + ((i + j) % 3)*10"
+                },
+                {
+                  "k": "rect",
+                  "sw": 2,
+                  "f": "accent",
+                  "show": "(i + j) % 4 == 3",
+                  "x": "-width/2 + 14",
+                  "y": "-y - (34 + ((i + j) % 3)*10)",
+                  "w": 11,
+                  "h": "34 + ((i + j) % 3)*10"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

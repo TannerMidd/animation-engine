@@ -1,0 +1,136 @@
+{
+  "format": 2,
+  "key": "chair",
+  "label": "Office chair",
+  "tags": [
+    "office",
+    "interior",
+    "seat"
+  ],
+  "spanning": false,
+  "params": [
+    {
+      "key": "height",
+      "label": "Seat height",
+      "type": "number",
+      "default": 90,
+      "min": 40,
+      "max": 180,
+      "step": 5
+    },
+    {
+      "key": "width",
+      "label": "Seat width",
+      "type": "number",
+      "default": 112,
+      "min": 70,
+      "max": 180,
+      "step": 4
+    }
+  ],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "interaction": {
+    "portable": false,
+    "bounds": {
+      "x": "-width/2",
+      "y": "-height - 90",
+      "width": "width",
+      "height": "height + 90"
+    },
+    "handles": [
+      {
+        "id": "seat",
+        "label": "Seat cushion",
+        "kind": "seat",
+        "x": 0,
+        "y": "-height - 6",
+        "radius": "width*0.42",
+        "normal": {
+          "x": 0,
+          "y": -1
+        }
+      }
+    ]
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "line",
+          "f": "metalDark",
+          "sw": 5,
+          "x1": -34,
+          "y1": 0,
+          "x2": 34,
+          "y2": 0
+        },
+        {
+          "k": "rect",
+          "f": "metalDark",
+          "x": -5,
+          "y": "-height",
+          "w": 10,
+          "h": "height"
+        },
+        {
+          "k": "rect",
+          "f": "fabric",
+          "rx": 6,
+          "x": "-width/2",
+          "y": "-height - 14",
+          "w": "width",
+          "h": 16
+        },
+        {
+          "k": "rect",
+          "f": "fabric",
+          "rx": 8,
+          "x": "-width/2 + 10",
+          "y": "-height - 90",
+          "w": "width - 20",
+          "h": 78
+        },
+        {
+          "k": "line",
+          "f": "metalDark",
+          "sw": 6,
+          "x1": "-width/2 + 8",
+          "y1": "-height - 48",
+          "x2": "-width/2 + 8",
+          "y2": "-height - 16"
+        },
+        {
+          "k": "line",
+          "f": "metalDark",
+          "sw": 6,
+          "x1": "-width/2 + 8",
+          "y1": "-height - 48",
+          "x2": "-width/2 + 31",
+          "y2": "-height - 48"
+        },
+        {
+          "k": "line",
+          "f": "metalDark",
+          "sw": 6,
+          "x1": "width/2 - 8",
+          "y1": "-height - 48",
+          "x2": "width/2 - 8",
+          "y2": "-height - 16"
+        },
+        {
+          "k": "line",
+          "f": "metalDark",
+          "sw": 6,
+          "x1": "width/2 - 31",
+          "y1": "-height - 48",
+          "x2": "width/2 - 8",
+          "y2": "-height - 48"
+        }
+      ]
+    }
+  }
+}

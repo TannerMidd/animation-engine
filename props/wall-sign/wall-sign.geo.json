@@ -1,0 +1,73 @@
+{
+  "format": 2,
+  "key": "wall-sign",
+  "label": "Wall sign",
+  "tags": [
+    "structure",
+    "interior",
+    "generic"
+  ],
+  "spanning": false,
+  "params": [
+    {
+      "key": "text",
+      "label": "Text",
+      "type": "text",
+      "default": "EXIT"
+    },
+    {
+      "key": "width",
+      "label": "Width",
+      "type": "number",
+      "default": 120,
+      "min": 40,
+      "max": 400,
+      "step": 10
+    },
+    {
+      "key": "height",
+      "label": "Height",
+      "type": "number",
+      "default": 46,
+      "min": 20,
+      "max": 160,
+      "step": 2
+    },
+    {
+      "key": "y",
+      "label": "Height off floor",
+      "type": "number",
+      "default": 330,
+      "min": 0,
+      "max": 600,
+      "step": 10
+    }
+  ],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "rect",
+          "f": "accent",
+          "x": "-width/2",
+          "y": "-y - height",
+          "w": "width",
+          "h": "height"
+        },
+        {
+          "k": "text",
+          "f": "line",
+          "x": 0,
+          "y": "-y - height + height*0.68",
+          "size": "height*0.5",
+          "value": "$text"
+        }
+      ]
+    }
+  }
+}

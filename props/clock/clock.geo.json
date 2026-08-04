@@ -1,0 +1,69 @@
+{
+  "format": 2,
+  "key": "clock",
+  "label": "Wall clock",
+  "tags": [
+    "generic",
+    "interior",
+    "office"
+  ],
+  "spanning": false,
+  "params": [
+    {
+      "key": "radius",
+      "label": "Radius",
+      "type": "number",
+      "default": 34,
+      "min": 12,
+      "max": 120,
+      "step": 2
+    },
+    {
+      "key": "y",
+      "label": "Height off floor",
+      "type": "number",
+      "default": 380,
+      "min": 0,
+      "max": 600,
+      "step": 10
+    }
+  ],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "ellipse",
+          "sm": 1,
+          "f": "surface",
+          "cx": 0,
+          "cy": "-y",
+          "rx": "radius",
+          "ry": "radius"
+        },
+        {
+          "k": "line",
+          "f": "line",
+          "sw": 4,
+          "x1": 0,
+          "y1": "-y",
+          "x2": 0,
+          "y2": "-y - radius*0.6"
+        },
+        {
+          "k": "line",
+          "f": "line",
+          "sw": 4,
+          "x1": 0,
+          "y1": "-y",
+          "x2": "radius*0.42",
+          "y2": "-y + radius*0.24"
+        }
+      ]
+    }
+  }
+}

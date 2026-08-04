@@ -1,7 +1,4 @@
 import type { PropDef } from './types.ts';
-import { STRUCTURE_PROPS } from './structure.ts';
-import { INTERIOR_PROPS } from './interior.ts';
-import { EXTERIOR_PROPS, GENERIC_PROPS } from './exterior.ts';
 import { loadBakedProps, type BakedPropError, type LoadedBakedProps } from './baked.ts';
 
 /**
@@ -53,13 +50,10 @@ let registry: Record<string, PropDef> = assemble();
 let keys: string[] = Object.keys(registry).sort();
 
 function assemble(): Record<string, PropDef> {
-  return mergeProps([
-    ['structure', STRUCTURE_PROPS],
-    ['interior', INTERIOR_PROPS],
-    ['exterior', EXTERIOR_PROPS],
-    ['generic', GENERIC_PROPS],
-    ['props/ (on disk)', disk.props],
-  ]);
+  // One source now. The catalogue used to be four objects of TypeScript render
+  // functions plus whatever was on disk; it is all on disk, which is what makes
+  // every prop something a person can open and change.
+  return mergeProps([['props/ (on disk)', disk.props]]);
 }
 
 /**

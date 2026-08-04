@@ -1,0 +1,61 @@
+{
+  "format": 2,
+  "key": "moon",
+  "label": "Moon",
+  "tags": [
+    "exterior"
+  ],
+  "spanning": false,
+  "params": [
+    {
+      "key": "radius",
+      "label": "Radius",
+      "type": "number",
+      "default": 54,
+      "min": 15,
+      "max": 200,
+      "step": 2
+    },
+    {
+      "key": "y",
+      "label": "Height off floor",
+      "type": "number",
+      "default": 540,
+      "min": 0,
+      "max": 900,
+      "step": 10
+    }
+  ],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "ellipse",
+          "l": 0,
+          "sm": 1,
+          "f": "lightGlow",
+          "o": 0.14,
+          "cx": 0,
+          "cy": "-y",
+          "rx": "radius*1.5",
+          "ry": "radius*1.5"
+        },
+        {
+          "k": "ellipse",
+          "l": 0,
+          "sm": 1,
+          "f": "light",
+          "cx": 0,
+          "cy": "-y",
+          "rx": "radius",
+          "ry": "radius"
+        }
+      ]
+    }
+  }
+}

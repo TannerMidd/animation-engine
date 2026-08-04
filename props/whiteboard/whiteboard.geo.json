@@ -1,0 +1,85 @@
+{
+  "format": 2,
+  "key": "whiteboard",
+  "label": "Whiteboard",
+  "tags": [
+    "office",
+    "interior"
+  ],
+  "spanning": false,
+  "params": [
+    {
+      "key": "width",
+      "label": "Width",
+      "type": "number",
+      "default": 300,
+      "min": 100,
+      "max": 700,
+      "step": 10
+    },
+    {
+      "key": "height",
+      "label": "Height",
+      "type": "number",
+      "default": 180,
+      "min": 60,
+      "max": 400,
+      "step": 10
+    },
+    {
+      "key": "y",
+      "label": "Height off floor",
+      "type": "number",
+      "default": 240,
+      "min": 0,
+      "max": 500,
+      "step": 10
+    }
+  ],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "rect",
+          "f": "#e8e6df",
+          "x": "-width/2",
+          "y": "-y - height",
+          "w": "width",
+          "h": "height"
+        },
+        {
+          "k": "line",
+          "f": "metalDark",
+          "sw": 4,
+          "x1": "-width/2 + 30",
+          "y1": "-y - height + 40",
+          "x2": "-width/2 + width*0.55",
+          "y2": "-y - height + 40"
+        },
+        {
+          "k": "line",
+          "f": "metalDark",
+          "sw": 4,
+          "x1": "-width/2 + 30",
+          "y1": "-y - height + 70",
+          "x2": "-width/2 + width*0.4",
+          "y2": "-y - height + 70"
+        },
+        {
+          "k": "line",
+          "f": "accent",
+          "sw": 4,
+          "x1": "-width/2 + 30",
+          "y1": "-y - height + 100",
+          "x2": "-width/2 + width*0.62",
+          "y2": "-y - height + 100"
+        }
+      ]
+    }
+  }
+}

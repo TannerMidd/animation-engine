@@ -1,0 +1,95 @@
+{
+  "format": 2,
+  "key": "tv",
+  "label": "Television",
+  "tags": [
+    "home",
+    "interior",
+    "bar"
+  ],
+  "spanning": false,
+  "params": [
+    {
+      "key": "width",
+      "label": "Width",
+      "type": "number",
+      "default": 220,
+      "min": 80,
+      "max": 500,
+      "step": 10
+    },
+    {
+      "key": "height",
+      "label": "Height",
+      "type": "number",
+      "default": 130,
+      "min": 50,
+      "max": 300,
+      "step": 5
+    },
+    {
+      "key": "y",
+      "label": "Height off floor",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 500,
+      "step": 10
+    },
+    {
+      "key": "on",
+      "label": "Screen lit",
+      "type": "boolean",
+      "default": true
+    }
+  ],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "rect",
+          "f": "metalDark",
+          "x": -30,
+          "y": -18,
+          "w": 60,
+          "h": 18,
+          "show": "y <= 0"
+        },
+        {
+          "k": "rect",
+          "f": "metal",
+          "rx": 4,
+          "x": "-width/2",
+          "y": "-y - height",
+          "w": "width",
+          "h": "height"
+        },
+        {
+          "k": "rect",
+          "l": 0,
+          "f": "screen",
+          "x": "-width/2 + 8",
+          "y": "-y - height + 8",
+          "w": "width - 16",
+          "h": "height - 16",
+          "show": "on"
+        },
+        {
+          "k": "rect",
+          "l": 0,
+          "f": "metalDark",
+          "x": "-width/2 + 8",
+          "y": "-y - height + 8",
+          "w": "width - 16",
+          "h": "height - 16",
+          "show": "!on"
+        }
+      ]
+    }
+  }
+}

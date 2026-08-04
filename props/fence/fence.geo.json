@@ -1,0 +1,83 @@
+{
+  "format": 2,
+  "key": "fence",
+  "label": "Fence",
+  "tags": [
+    "exterior"
+  ],
+  "spanning": false,
+  "params": [
+    {
+      "key": "width",
+      "label": "Width",
+      "type": "number",
+      "default": 300,
+      "min": 80,
+      "max": 900,
+      "step": 10
+    },
+    {
+      "key": "height",
+      "label": "Height",
+      "type": "number",
+      "default": 110,
+      "min": 40,
+      "max": 300,
+      "step": 5
+    },
+    {
+      "key": "gap",
+      "label": "Post spacing",
+      "type": "number",
+      "default": 34,
+      "min": 14,
+      "max": 100,
+      "step": 2
+    }
+  ],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "repeat",
+          "n": "floor((width - 10)/max(14, gap)) + 1",
+          "dx": "max(14, gap)",
+          "of": [
+            {
+              "k": "rect",
+              "f": "wood",
+              "sw": 2,
+              "x": "-width/2",
+              "y": "-height",
+              "w": 12,
+              "h": "height"
+            }
+          ]
+        },
+        {
+          "k": "rect",
+          "f": "woodDark",
+          "sw": 2,
+          "x": "-width/2",
+          "y": "-height*0.72",
+          "w": "width",
+          "h": 10
+        },
+        {
+          "k": "rect",
+          "f": "woodDark",
+          "sw": 2,
+          "x": "-width/2",
+          "y": "-height*0.3",
+          "w": "width",
+          "h": 10
+        }
+      ]
+    }
+  }
+}

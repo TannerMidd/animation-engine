@@ -1,0 +1,103 @@
+{
+  "format": 2,
+  "key": "desk",
+  "label": "Desk",
+  "tags": [
+    "office",
+    "home",
+    "interior",
+    "contact",
+    "surface"
+  ],
+  "spanning": false,
+  "params": [
+    {
+      "key": "width",
+      "label": "Width",
+      "type": "number",
+      "default": 250,
+      "min": 80,
+      "max": 700,
+      "step": 10
+    },
+    {
+      "key": "height",
+      "label": "Height",
+      "type": "number",
+      "default": 96,
+      "min": 40,
+      "max": 200,
+      "step": 5
+    }
+  ],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "interaction": {
+    "portable": false,
+    "bounds": {
+      "x": -125,
+      "y": -96,
+      "width": 250,
+      "height": 96
+    },
+    "handles": [
+      {
+        "id": "work-surface",
+        "label": "Desktop work surface",
+        "kind": "contact",
+        "x": 0,
+        "y": -96,
+        "radius": 112,
+        "normal": {
+          "x": 0,
+          "y": -1
+        }
+      },
+      {
+        "id": "place-center",
+        "label": "Desktop placement",
+        "kind": "placement",
+        "x": 0,
+        "y": -96,
+        "radius": 80,
+        "normal": {
+          "x": 0,
+          "y": -1
+        }
+      }
+    ]
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "rect",
+          "f": "woodDark",
+          "x": "-width/2 + 14",
+          "y": "-height + 16",
+          "w": 12,
+          "h": "height - 16"
+        },
+        {
+          "k": "rect",
+          "f": "woodDark",
+          "x": "width/2 - 26",
+          "y": "-height + 16",
+          "w": 12,
+          "h": "height - 16"
+        },
+        {
+          "k": "rect",
+          "f": "wood",
+          "x": "-width/2",
+          "y": "-height",
+          "w": "width",
+          "h": 16
+        }
+      ]
+    }
+  }
+}

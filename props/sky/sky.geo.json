@@ -1,0 +1,51 @@
+{
+  "format": 2,
+  "key": "sky",
+  "label": "Sky",
+  "tags": [
+    "structure",
+    "exterior"
+  ],
+  "spanning": true,
+  "params": [
+    {
+      "key": "bandHeight",
+      "label": "Horizon haze height",
+      "type": "number",
+      "default": 130,
+      "min": 0,
+      "max": 400,
+      "step": 10
+    }
+  ],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "rect",
+          "f": "ceiling",
+          "l": 0,
+          "x": "setX0",
+          "y": "setY0",
+          "w": "setWidth",
+          "h": "setHorizonY - setY0"
+        },
+        {
+          "k": "rect",
+          "f": "wall",
+          "l": 0,
+          "x": "setX0",
+          "y": "setHorizonY - bandHeight",
+          "w": "setWidth",
+          "h": "bandHeight",
+          "show": "bandHeight > 0"
+        }
+      ]
+    }
+  }
+}

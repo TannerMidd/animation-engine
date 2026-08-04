@@ -1,0 +1,108 @@
+{
+  "format": 2,
+  "key": "streetlight",
+  "label": "Streetlight",
+  "tags": [
+    "exterior"
+  ],
+  "spanning": false,
+  "params": [
+    {
+      "key": "height",
+      "label": "Height",
+      "type": "number",
+      "default": 460,
+      "min": 150,
+      "max": 900,
+      "step": 10
+    },
+    {
+      "key": "lit",
+      "label": "Lit",
+      "type": "boolean",
+      "default": true
+    }
+  ],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "ellipse",
+          "f": "metalDark",
+          "cx": 0,
+          "cy": 0,
+          "rx": 20,
+          "ry": 7
+        },
+        {
+          "k": "rect",
+          "f": "metal",
+          "x": -6,
+          "y": "-height",
+          "w": 12,
+          "h": "height"
+        },
+        {
+          "k": "poly",
+          "f": null,
+          "c": 0,
+          "sw": 10,
+          "p": [
+            0.0,
+            "-height - 0.0",
+            2.16,
+            "-height - 12.24",
+            8.64,
+            "-height - 21.76",
+            19.44,
+            "-height - 28.56",
+            34.56,
+            "-height - 32.64",
+            54.0,
+            "-height - 34.0"
+          ]
+        },
+        {
+          "k": "ellipse",
+          "f": "light",
+          "cx": 56,
+          "cy": "-height - 30",
+          "rx": 24,
+          "ry": 12,
+          "show": "lit"
+        },
+        {
+          "k": "ellipse",
+          "f": "metalDark",
+          "cx": 56,
+          "cy": "-height - 30",
+          "rx": 24,
+          "ry": 12,
+          "show": "!lit"
+        },
+        {
+          "k": "poly",
+          "l": 0,
+          "f": "lightGlow",
+          "o": 0.16,
+          "show": "lit",
+          "p": [
+            34,
+            "-height - 22",
+            78,
+            "-height - 22",
+            130,
+            0,
+            -18,
+            0
+          ]
+        }
+      ]
+    }
+  }
+}

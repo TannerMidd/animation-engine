@@ -1,0 +1,64 @@
+{
+  "format": 2,
+  "key": "bush",
+  "label": "Bush",
+  "tags": [
+    "exterior"
+  ],
+  "spanning": false,
+  "params": [
+    {
+      "key": "width",
+      "label": "Width",
+      "type": "number",
+      "default": 140,
+      "min": 40,
+      "max": 400,
+      "step": 10
+    },
+    {
+      "key": "height",
+      "label": "Height",
+      "type": "number",
+      "default": 80,
+      "min": 20,
+      "max": 250,
+      "step": 5
+    }
+  ],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "ellipse",
+          "f": "foliageDark",
+          "cx": "-width*0.26",
+          "cy": "-height*0.6",
+          "rx": "width*0.4",
+          "ry": "height*0.6"
+        },
+        {
+          "k": "ellipse",
+          "f": "foliageDark",
+          "cx": "width*0.26",
+          "cy": "-height*0.55",
+          "rx": "width*0.38",
+          "ry": "height*0.55"
+        },
+        {
+          "k": "ellipse",
+          "f": "foliage",
+          "cx": 0,
+          "cy": "-height*0.72",
+          "rx": "width*0.42",
+          "ry": "height*0.72"
+        }
+      ]
+    }
+  }
+}

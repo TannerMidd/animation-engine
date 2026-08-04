@@ -1,0 +1,69 @@
+{
+  "format": 2,
+  "key": "stairs",
+  "label": "Stairs",
+  "tags": [
+    "structure",
+    "interior"
+  ],
+  "spanning": false,
+  "params": [
+    {
+      "key": "steps",
+      "label": "Steps",
+      "type": "number",
+      "default": 5,
+      "min": 2,
+      "max": 14,
+      "step": 1
+    },
+    {
+      "key": "rise",
+      "label": "Step rise",
+      "type": "number",
+      "default": 26,
+      "min": 10,
+      "max": 60,
+      "step": 2
+    },
+    {
+      "key": "run",
+      "label": "Step depth",
+      "type": "number",
+      "default": 40,
+      "min": 15,
+      "max": 100,
+      "step": 5
+    }
+  ],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "poly",
+          "f": "surface",
+          "p": [
+            "-steps*run/2",
+            0,
+            {
+              "n": "steps",
+              "of": [
+                "-steps*run/2 + i*run",
+                "-(i+1)*rise",
+                "-steps*run/2 + (i+1)*run",
+                "-(i+1)*rise"
+              ]
+            },
+            "steps*run/2",
+            0
+          ]
+        }
+      ]
+    }
+  }
+}

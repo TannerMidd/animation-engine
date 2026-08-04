@@ -1,0 +1,84 @@
+{
+  "format": 2,
+  "key": "poster",
+  "label": "Poster",
+  "tags": [
+    "generic",
+    "interior"
+  ],
+  "spanning": false,
+  "params": [
+    {
+      "key": "width",
+      "label": "Width",
+      "type": "number",
+      "default": 110,
+      "min": 40,
+      "max": 400,
+      "step": 5
+    },
+    {
+      "key": "height",
+      "label": "Height",
+      "type": "number",
+      "default": 150,
+      "min": 40,
+      "max": 500,
+      "step": 5
+    },
+    {
+      "key": "y",
+      "label": "Height off floor",
+      "type": "number",
+      "default": 280,
+      "min": 0,
+      "max": 600,
+      "step": 10
+    }
+  ],
+  "provenance": {
+    "blender": "none (migrated from TypeScript)",
+    "source": "sha1:0000000000000000000000000000000000000000",
+    "baked": "2026-08-04"
+  },
+  "views": {
+    "default": {
+      "primitives": [
+        {
+          "k": "rect",
+          "f": "surface",
+          "x": "-width/2",
+          "y": "-y - height",
+          "w": "width",
+          "h": "height"
+        },
+        {
+          "k": "ellipse",
+          "f": "accent",
+          "cx": 0,
+          "cy": "-y - height + height*0.36",
+          "rx": "width*0.26",
+          "ry": "width*0.26"
+        },
+        {
+          "k": "rect",
+          "l": 0,
+          "f": "line",
+          "x": "-width*0.32",
+          "y": "-y - height + height*0.68",
+          "w": "width*0.64",
+          "h": 8
+        },
+        {
+          "k": "rect",
+          "l": 0,
+          "f": "line",
+          "x": "-width*0.22",
+          "y": "-y - height + height*0.8",
+          "w": "width*0.44",
+          "h": 6
+        }
+      ]
+    }
+  }
+}
