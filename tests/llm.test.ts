@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { cleanup } from '../src/llm/script.ts';
 import { setJsonSchema } from '../src/llm/set.ts';
 import { Ollama, pickModel, freeVramForRender, SUGGESTED_MODELS } from '../src/llm/ollama.ts';
-import { PROP_KEYS } from '../src/sets/props/index.ts';
+import { propKeys } from '../src/sets/props/index.ts';
 import { PALETTE_NAMES } from '../src/sets/palettes.ts';
 import { parseScript } from '../src/parse/index.ts';
 
@@ -58,7 +58,7 @@ describe('set generation schema', () => {
     // The same guard the director has: a model cannot name a prop that does not
     // exist, because the grammar it generates against does not contain one.
     const enums = schema.properties.layers.properties['back']!.items.properties.prop.enum;
-    expect(enums).toEqual(PROP_KEYS);
+    expect(enums).toEqual(propKeys());
     expect(enums).toContain('bar-counter');
     expect(enums).not.toContain('hovercar');
   });
@@ -73,7 +73,7 @@ describe('set generation schema', () => {
 
   it('grows automatically when a prop is added', () => {
     const enums = schema.properties.layers.properties['fore']!.items.properties.prop.enum;
-    expect(enums.length).toBe(PROP_KEYS.length);
+    expect(enums.length).toBe(propKeys().length);
   });
 });
 

@@ -92,9 +92,3 @@ export function loadBakedProps(dir: string = PROPS_DIR): LoadedBakedProps {
 
   return out;
 }
-
-const loaded = loadBakedProps();
-
-export const BAKED_PROPS: Record<string, PropDef> = loaded.props;
-export const BAKED_ERRORS: BakedPropError[] = loaded.errors;
-export const BAKED_TOTALS = { shapes: loaded.shapes, points: loaded.points };

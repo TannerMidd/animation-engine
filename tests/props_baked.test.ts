@@ -3,15 +3,13 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import {
-  BAKED_ERRORS,
-  BAKED_TOTALS,
   BAKE_BUDGET,
   PALETTE_SLOTS,
   bakedProp,
   loadBakedProps,
   BakedProp,
 } from '../src/sets/props/baked.ts';
-import { PROPS, PROP_KEYS, getProp, mergeProps } from '../src/sets/props/index.ts';
+import { allProps, propKeys, getProp, mergeProps, bakedErrors, bakedTotals } from '../src/sets/props/index.ts';
 import { PALETTE_NAMES, getPalette } from '../src/sets/palettes.ts';
 import { geometryFor, SetDescriptor } from '../src/sets/schema.ts';
 import { lintSet } from '../src/sets/index.ts';
@@ -252,24 +250,24 @@ describe('baked prop loading', () => {
   it('loads the committed catalogue cleanly', () => {
     // Whatever is in props/ has to be valid, or the registry is lying about
     // what a set may reference.
-    expect(BAKED_ERRORS).toEqual([]);
-    expect(BAKED_TOTALS.shapes).toBeGreaterThan(0);
+    expect(bakedErrors()).toEqual([]);
+    expect(bakedTotals().shapes).toBeGreaterThan(0);
   });
 });
 
 describe('the merged registry', () => {
   it('registers baked props alongside the built-in ones', () => {
-    expect(PROP_KEYS).toContain('crate-stack');
-    expect(PROP_KEYS).toContain('crate');
+    expect(propKeys()).toContain('crate-stack');
+    expect(propKeys()).toContain('crate');
     expect(getProp('crate-stack').tags).toContain('baked');
   });
 
   it('renders every prop in the catalogue, baked or not, in every palette', () => {
     // The existing guard, restated here because baked props are the first
     // entries a person can add without touching TypeScript.
-    for (const key of PROP_KEYS) {
+    for (const key of propKeys()) {
       for (const palette of PALETTE_NAMES) {
-        const svg = PROPS[key]!.render(ctx(palette));
+        const svg = allProps()[key]!.render(ctx(palette));
         expect(svg, `${key} @ ${palette}`).not.toContain('undefined');
         expect(svg, `${key} @ ${palette}`).not.toContain('NaN');
       }

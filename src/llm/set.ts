@@ -2,7 +2,7 @@ import { Ollama } from './ollama.ts';
 import { activeIdentity } from '../show/context.ts';
 import { SetDescriptor } from '../sets/schema.ts';
 import { validateSet, lintSet, tidySet } from '../sets/index.ts';
-import { PROP_KEYS, propManifest } from '../sets/props/index.ts';
+import { propKeys, propManifest } from '../sets/props/index.ts';
 import { PALETTE_NAMES } from '../sets/palettes.ts';
 import type { SetDescriptor as SetDescriptorType } from '../sets/schema.ts';
 
@@ -21,7 +21,7 @@ export function setJsonSchema(): unknown {
   const propInstance = {
     type: 'object',
     properties: {
-      prop: { type: 'string', enum: PROP_KEYS },
+      prop: { type: 'string', enum: propKeys() },
       x: { type: 'number' },
       y: { type: 'number' },
       scale: { type: 'number' },

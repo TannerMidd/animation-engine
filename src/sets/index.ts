@@ -11,7 +11,7 @@ import {
   type SetLayout,
 } from './schema.ts';
 import { getPalette, type Palette } from './palettes.ts';
-import { getProp, PROP_KEYS, PROPS } from './props/index.ts';
+import { getProp, propKeys, allProps } from './props/index.ts';
 import { r } from './props/types.ts';
 import { resolveSetProps, type ResolvedSetProp } from './interaction.ts';
 
@@ -176,7 +176,7 @@ export function validateSet(desc: SetDescriptor): string[] {
   for (const [layerName, items] of Object.entries(desc.layers)) {
     items.forEach((inst, i) => {
       const at = `${layerName}[${i}]`;
-      if (!PROP_KEYS.includes(inst.prop)) {
+      if (!propKeys().includes(inst.prop)) {
         errors.push(`${at}: unknown prop "${inst.prop}"`);
         return;
       }
@@ -245,7 +245,7 @@ export function tidySet(input: SetDescriptor): SetDescriptor {
 
   for (const items of Object.values(desc.layers)) {
     for (const inst of items) {
-      const def = PROPS[inst.prop];
+      const def = allProps()[inst.prop];
       if (!def) continue;
 
       if (def.spanning) {
@@ -267,8 +267,8 @@ export function tidySet(input: SetDescriptor): SetDescriptor {
   // the only things that legitimately pass in front of someone.
   const { mid, fore } = desc.layers;
   if (fore.length > mid.length && fore.length > 1) {
-    const structural = fore.filter((i) => PROPS[i.prop]?.tags.includes('structure'));
-    desc.layers.mid = [...mid, ...fore.filter((i) => !PROPS[i.prop]?.tags.includes('structure'))];
+    const structural = fore.filter((i) => allProps()[i.prop]?.tags.includes('structure'));
+    desc.layers.mid = [...mid, ...fore.filter((i) => !allProps()[i.prop]?.tags.includes('structure'))];
     desc.layers.fore = structural;
   }
 
@@ -278,7 +278,7 @@ export function tidySet(input: SetDescriptor): SetDescriptor {
   // intent survives.
   const standing = [desc.layers.back, desc.layers.mid, desc.layers.fore]
     .flat()
-    .filter((i) => PROPS[i.prop] && !PROPS[i.prop]!.spanning);
+    .filter((i) => allProps()[i.prop] && !allProps()[i.prop]!.spanning);
 
   const middle = STAGE.width / 2;
   const crowded = standing.filter((i) => i.x !== undefined && i.x > 380 && i.x < 900);
@@ -326,11 +326,11 @@ export function lintSet(desc: SetDescriptor): SetNote[] {
   const geo = geometryFor(desc.layout);
 
   const standing = [...back, ...mid, ...fore].filter((i) => {
-    const def = PROPS[i.prop];
+    const def = allProps()[i.prop];
     return def && !def.spanning;
   });
 
-  if (!back.some((i) => PROPS[i.prop]?.spanning)) {
+  if (!back.some((i) => allProps()[i.prop]?.spanning)) {
     notes.push({
       message: 'no wall/sky or floor in "back" — the room has no shell',
       fix: 'Insert a wall (interior) or sky (exterior) prop as the FIRST item in "back", and a floor ' +
@@ -342,7 +342,7 @@ export function lintSet(desc: SetDescriptor): SetNote[] {
   if (fore.length > mid.length && fore.length > 1) {
     // Structural pieces are the ones that legitimately pass in front of someone;
     // a desk is not.
-    const misplaced = fore.filter((i) => !PROPS[i.prop]?.tags.includes('structure'));
+    const misplaced = fore.filter((i) => !allProps()[i.prop]?.tags.includes('structure'));
     const names = [...new Set(misplaced.map((i) => i.prop))].join(', ');
     notes.push({
       message:
@@ -364,7 +364,7 @@ export function lintSet(desc: SetDescriptor): SetNote[] {
     const k = desc.layout.parallax[layerName];
     if (k.x === 1 && k.y === 1) continue;
     const drifting = desc.layers[layerName].filter(
-      (i) => PROPS[i.prop]?.tags.includes('ground') && !(i.parallax?.x === 1 && i.parallax?.y === 1),
+      (i) => allProps()[i.prop]?.tags.includes('ground') && !(i.parallax?.x === 1 && i.parallax?.y === 1),
     );
     if (!drifting.length) continue;
     const names = [...new Set(drifting.map((i) => i.prop))].join(', ');
@@ -385,7 +385,7 @@ export function lintSet(desc: SetDescriptor): SetNote[] {
   // the floor is not.
   for (const layerName of LAYERS) {
     for (const inst of desc.layers[layerName]) {
-      const frame = PROPS[inst.prop]?.bakedFrame;
+      const frame = allProps()[inst.prop]?.bakedFrame;
       if (!frame) continue;
       const drift: string[] = [];
       if (frame.horizonY !== geo.horizonY) drift.push(`horizonY ${geo.horizonY} vs baked ${frame.horizonY}`);
@@ -409,7 +409,7 @@ export function lintSet(desc: SetDescriptor): SetNote[] {
 
   for (const [layerName, items] of Object.entries(desc.layers)) {
     items.forEach((inst, i) => {
-      const def = PROPS[inst.prop];
+      const def = allProps()[inst.prop];
       if (!def || def.spanning) return;
 
       // A prop that positions itself via a `y` param does not want an instance y.

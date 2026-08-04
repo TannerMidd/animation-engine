@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect, beforeAll } from 'vitest';
-import { PROP_KEYS, getProp, type ParamSpec } from '../src/sets/props/index.ts';
+import { propKeys, getProp, type ParamSpec } from '../src/sets/props/index.ts';
 import { PALETTES, PALETTE_NAMES } from '../src/sets/palettes.ts';
 import { geometryFor, type ParamValue } from '../src/sets/schema.ts';
 import { setActiveIdentity } from '../src/show/context.ts';
@@ -60,7 +60,7 @@ function edges(spec: ParamSpec): Array<[string, ParamValue]> {
 
 function cases(): Case[] {
   const out: Case[] = [];
-  for (const key of PROP_KEYS) {
+  for (const key of propKeys()) {
     // Defaults in every palette: catches a prop reaching for a slot whose
     // meaning differs between palettes.
     for (const palette of PALETTE_NAMES) {
@@ -135,11 +135,11 @@ describe('prop golden corpus', () => {
 
   it('covers every prop in every palette', () => {
     const all = cases();
-    for (const key of PROP_KEYS) {
+    for (const key of propKeys()) {
       const mine = all.filter((c) => c.key === key);
       expect(new Set(mine.map((c) => c.palette)).size, key).toBeGreaterThanOrEqual(PALETTE_NAMES.length);
     }
-    expect(all.length).toBeGreaterThan(PROP_KEYS.length * PALETTE_NAMES.length);
+    expect(all.length).toBeGreaterThan(propKeys().length * PALETTE_NAMES.length);
   });
 
   it('pins a rendering that actually drew something', () => {

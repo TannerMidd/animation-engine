@@ -9,7 +9,7 @@ import { asrAvailable } from '../voice/qa.ts';
 import { listRigs } from '../cast/store.ts';
 import { Ollama } from '../llm/ollama.ts';
 import { findBlender, blenderAvailable, blenderVersion } from '../render/blender.ts';
-import { BAKED_ERRORS } from '../sets/props/baked.ts';
+import { bakedErrors } from '../sets/props/index.ts';
 import { listBakedProps } from './propbake.ts';
 
 /**
@@ -178,7 +178,7 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<DoctorReport>
       points: baked.reduce((sum, p) => sum + p.points, 0),
       stale: baked.filter((p) => p.stale).map((p) => p.key),
       errors: [
-        ...BAKED_ERRORS,
+        ...bakedErrors(),
         ...baked.filter((p) => p.error).map((p) => ({ file: `${p.key}/`, error: p.error! })),
       ],
     },

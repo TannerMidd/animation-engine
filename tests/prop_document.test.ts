@@ -285,6 +285,14 @@ describe('repeat', () => {
     expect((svg.match(/<path/g) ?? []).length).toBe(6 * 2);
   });
 
+  it('puts the index in scope only inside the repeat that owns it', () => {
+    // Otherwise `i` at the top level would silently be zero, which reads as
+    // "the first one" and draws a plausible-looking wrong prop.
+    expect(() => build({
+      views: { default: { primitives: [{ k: 'rect', f: 'wood', x: 'i * 10', y: 0, w: 1, h: 1 }] } },
+    })).toThrow(/unknown name "i"/);
+  });
+
   it('refuses to nest deeper than the loop variables allow', () => {
     const nest = (depth: number): Record<string, unknown> =>
       depth === 0

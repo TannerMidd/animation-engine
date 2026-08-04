@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { renderSet, validateSet, lintSet, SetDescriptor } from '../src/sets/index.ts';
 import { BUILTIN_SETS, BUILTIN_SET_NAMES } from '../src/sets/builtins.ts';
-import { PROPS, PROP_KEYS, propManifest, getProp } from '../src/sets/props/index.ts';
+import { allProps, propKeys, propManifest, getProp } from '../src/sets/props/index.ts';
 import { PALETTES, PALETTE_NAMES, getPalette } from '../src/sets/palettes.ts';
 import { geometryFor } from '../src/sets/schema.ts';
 
@@ -135,7 +135,7 @@ describe('prop registry', () => {
   it('renders every prop in every palette without throwing', () => {
     // Props read colours from the palette rather than hardcoding them, so a
     // missing slot would only ever surface on the one set that used it.
-    for (const key of PROP_KEYS) {
+    for (const key of propKeys()) {
       for (const paletteName of PALETTE_NAMES) {
         const svg = getProp(key).render({
           palette: PALETTES[paletteName]!,
@@ -152,7 +152,7 @@ describe('prop registry', () => {
   });
 
   it('survives extreme param values', () => {
-    for (const key of PROP_KEYS) {
+    for (const key of propKeys()) {
       const def = getProp(key);
       for (const spec of def.params) {
         if (spec.type !== 'number') continue;
@@ -181,7 +181,7 @@ describe('prop registry', () => {
   });
 
   it('gives every prop at least one tag, for palette filtering', () => {
-    for (const [key, def] of Object.entries(PROPS)) {
+    for (const [key, def] of Object.entries(allProps())) {
       expect(def.tags.length, key).toBeGreaterThan(0);
     }
   });

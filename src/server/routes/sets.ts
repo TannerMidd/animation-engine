@@ -5,8 +5,6 @@ import { STAGE, storePreview, protectRunningRenderState } from '../state.ts';
 import { listSets, loadSet, saveSet, validateSet, lintSet, tidySet, setPath, renderSet } from '../../sets/index.ts';
 import { SetDescriptor } from '../../sets/schema.ts';
 import { BUILTIN_SETS, BUILTIN_SET_NAMES } from '../../sets/builtins.ts';
-import { propManifest, propTags } from '../../sets/props/index.ts';
-import { PALETTES } from '../../sets/palettes.ts';
 import { listRigs, loadRig, type LoadedRig } from '../../cast/store.ts';
 import { buildPlaceholderRig, buildPlaceholderSvg } from '../../cast/placeholder.ts';
 import { compileScene, DEFAULT_PLAN } from '../../compile/index.ts';
@@ -127,6 +125,4 @@ export function registerSetRoutes(router: Router): void {
     json(res, { set: tidied, notes: lintSet(tidied).map((n) => n.message) });
   });
 
-  router.get('/api/props', ({ res }) => json(res, { props: propManifest(), tags: propTags() }));
-  router.get('/api/palettes', ({ res }) => json(res, PALETTES));
 }

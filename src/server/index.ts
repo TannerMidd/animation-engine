@@ -9,6 +9,7 @@ import { registerSceneRoutes } from './routes/scenes.ts';
 import { registerCastRoutes } from './routes/cast.ts';
 import { registerVoiceRoutes } from './routes/voices.ts';
 import { registerSetRoutes } from './routes/sets.ts';
+import { registerPropRoutes } from './routes/props.ts';
 import { exists } from '../pipeline/scene.ts';
 import { initShow } from '../show/store.ts';
 
@@ -30,6 +31,7 @@ registerSceneRoutes(router);
 registerCastRoutes(router);
 registerVoiceRoutes(router);
 registerSetRoutes(router);
+registerPropRoutes(router);
 
 // --- preview pages ---
 

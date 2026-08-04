@@ -397,7 +397,9 @@ function compilePrimitive(prim: Primitive, ctx: Ctx): Emit {
       throw new Error(`repeats nest at most ${MAX_REPEAT_DEPTH} deep`);
     }
     const variable = LOOP_VARS[ctx.depth]!;
-    const inner: Ctx = { ...ctx, depth: ctx.depth + 1 };
+    // The index comes into scope here and nowhere else, so `i` outside a repeat
+    // is a rejection naming it rather than a silent zero.
+    const inner: Ctx = { ...ctx, depth: ctx.depth + 1, names: [...ctx.names, variable] };
     const n = compileField(prim.n, ctx.names);
     const dx = field(prim.dx, ctx, 0);
     const dy = field(prim.dy, ctx, 0);
@@ -609,7 +611,7 @@ export function propFromDocument(doc: PropDocument): PropDef {
   // that an accident of naming — "side" would quietly beat "three-quarter".
   const viewKeys = Object.keys(doc.views);
   const first = viewKeys[0]!;
-  const names = scopeNames(doc);
+  const names = scopeNames(doc, 0);
 
   const compiled = new Map<string, Emit[]>();
   for (const [name, view] of Object.entries(doc.views)) {
