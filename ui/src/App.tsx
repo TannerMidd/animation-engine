@@ -188,7 +188,13 @@ export default function App() {
               />
             )}
             {legacy.kind === 'cast' && <CastEditor health={health} vocab={vocab} open={legacy.name} />}
-            {legacy.kind === 'props' && <PropStudio open={legacy.name} onCatalogueChanged={() => void refreshSets()} />}
+            {legacy.kind === 'props' && (
+              <PropStudio
+                open={legacy.name}
+                llm={health?.llm ?? null}
+                onCatalogueChanged={() => void refreshSets()}
+              />
+            )}
           </div>
         </div>
       )}

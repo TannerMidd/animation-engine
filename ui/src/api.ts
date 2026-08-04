@@ -242,6 +242,11 @@ export const api = {
       '/api/llm/script',
       { premise, ...opts },
     ),
+  /** Returns a document to open in the studio; nothing is saved until you say so. */
+  generateProp: (description: string, key: string) =>
+    post<{ document: PropDocument; attempts: number; warnings: string[]; model: string }>(
+      '/api/llm/prop', { description, key },
+    ),
   generateSet: (description: string, name: string) =>
     post<{ set: SetDescriptor; attempts: number; model: string }>('/api/llm/set', { description, name }),
 };

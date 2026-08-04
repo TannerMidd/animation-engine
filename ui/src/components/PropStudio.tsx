@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.ts';
 import type {
-  Palette, ParamSpec, ParamValue, Primitive, PropDefInfo, PropDocument, PropRender,
+  LlmStatus, Palette, ParamSpec, ParamValue, Primitive, PropDefInfo, PropDocument, PropRender,
 } from '../types.ts';
 import { Badge, Button, Empty, Field, Panel, Select, Spinner, TextInput } from './ui.tsx';
 import { PropCanvas, type Tool } from './PropCanvas.tsx';
 import { InteractionEditor, ParamControl, ParamEditor, PrimitiveInspector } from './PropInspector.tsx';
+import { GenerateDialog } from './GenerateDialog.tsx';
 
 /**
  * Making a prop.
@@ -131,8 +132,9 @@ function shifted(prim: Primitive, dx: number, dy: number): Primitive {
   }
 }
 
-export function PropStudio({ open, onCatalogueChanged }: {
+export function PropStudio({ open, llm, onCatalogueChanged }: {
   open: string | null;
+  llm: LlmStatus | null;
   onCatalogueChanged?: () => void;
 }) {
   const [catalogue, setCatalogue] = useState<PropDefInfo[]>([]);
@@ -154,6 +156,9 @@ export function PropStudio({ open, onCatalogueChanged }: {
   const [render, setRender] = useState<PropRender | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: 'good' | 'bad'; text: string } | null>(null);
+  const [describing, setDescribing] = useState(false);
+  const [genBusy, setGenBusy] = useState(false);
+  const [genError, setGenError] = useState<string | null>(null);
 
   const refreshCatalogue = useCallback(async () => {
     const { props, tags: t } = await api.props();
@@ -318,6 +323,39 @@ export function PropStudio({ open, onCatalogueChanged }: {
     }
   };
 
+  /**
+   * Describe it, then edit it.
+   *
+   * The result is never saved: a local model drawing a recognisable object from
+   * coordinates is the least certain part of this tool, so what comes back is a
+   * starting point on the canvas rather than a file somebody has to go and
+   * delete.
+   */
+  const describe = async (text: string) => {
+    setGenBusy(true);
+    setGenError(null);
+    try {
+      const proposed = slug(text) || 'new-prop';
+      const unique = catalogue.some((p) => p.key === proposed) ? `${proposed}-2` : proposed;
+      const result = await api.generateProp(text, unique);
+      setKey(null);
+      setDoc(result.document);
+      setReadOnly(false);
+      setSaved(false);
+      setView('default');
+      setSelected(null);
+      setParams({});
+      setDescribing(false);
+      setMessage(result.warnings.length
+        ? { tone: 'bad', text: `${result.model}: ${result.warnings[0]}` }
+        : { tone: 'good', text: `Drawn by ${result.model}. Nothing is saved yet.` });
+    } catch (e) {
+      setGenError((e as Error).message);
+    } finally {
+      setGenBusy(false);
+    }
+  };
+
   const shapeCount = countPrimitives(primitives);
 
   return (
@@ -326,7 +364,14 @@ export function PropStudio({ open, onCatalogueChanged }: {
       <Panel
         title="Props"
         className="w-56 shrink-0"
-        actions={<Button variant="primary" onClick={() => void create()}>New</Button>}
+        actions={
+          <>
+            <Button onClick={() => { setGenError(null); setDescribing(true); }} title="Describe it to the local model">
+              Describe
+            </Button>
+            <Button variant="primary" onClick={() => void create()}>New</Button>
+          </>
+        }
       >
         <div className="p-1.5 border-b border-edge">
           <Select value={tag} options={['all', ...tags]} onChange={setTag} className="w-full" />
@@ -510,6 +555,22 @@ export function PropStudio({ open, onCatalogueChanged }: {
           </>
         )}
       </Panel>
+
+      {describing && (
+        <GenerateDialog
+          title="Describe a prop"
+          label="What is it?"
+          placeholder="a dented metal waste bin"
+          hint="You get a drawing to edit, not a finished prop. Nothing is saved until you save it."
+          examples={['a dented metal waste bin', 'a tall filing cabinet with four drawers', 'a potted fern', 'a stack of pizza boxes']}
+          busy={genBusy}
+          error={genError}
+          disabled={!llm?.ok}
+          disabledReason={llm?.reason ?? null}
+          onGenerate={(text) => void describe(text)}
+          onClose={() => setDescribing(false)}
+        />
+      )}
     </div>
   );
 }

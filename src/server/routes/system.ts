@@ -12,6 +12,7 @@ import { listRigs } from '../../cast/store.ts';
 import { Ollama, pickModel, SUGGESTED_MODELS } from '../../llm/ollama.ts';
 import { generateScript } from '../../llm/script.ts';
 import { generateSet } from '../../llm/set.ts';
+import { generateProp } from '../../llm/prop.ts';
 import { activeIdentity } from '../../show/context.ts';
 import { planMigration, applyMigration } from '../../show/migrate.ts';
 import { stampOf } from '../../schema/identity.ts';
@@ -219,6 +220,32 @@ export function registerSystemRoutes(router: Router): void {
     const result = await generateSet({
       description: body.description,
       name: body.name.trim().toLowerCase().replace(/[^\w-]/g, '-'),
+      model,
+    });
+    json(res, { ...result, model });
+  });
+
+  /**
+   * Describe a prop and get a drawing back.
+   *
+   * Returns the document rather than saving it: what comes out is a starting
+   * point for the studio, and a model that draws a poor waste bin should cost
+   * somebody a glance, not a file they have to go and delete.
+   */
+  router.post('/api/llm/prop', async ({ req, res }) => {
+    const body = await readJson<{ description: string; key: string; model?: string }>(req);
+    if (!body.description?.trim()) throw new HttpError(400, 'expected { description }');
+    if (!body.key?.trim()) throw new HttpError(400, 'expected { key }');
+
+    const status = await new Ollama().available();
+    if (!status.ok) throw new HttpError(503, status.reason);
+
+    const model = pickModel(status.models, body.model);
+    if (!model) throw new HttpError(503, 'no Ollama model installed');
+
+    const result = await generateProp({
+      description: body.description,
+      key: body.key.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
       model,
     });
     json(res, { ...result, model });
