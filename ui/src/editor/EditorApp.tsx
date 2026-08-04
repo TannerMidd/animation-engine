@@ -58,6 +58,16 @@ export function EditorApp({
   const [source, setSource] = useState('');
   const [shots, setShots] = useState<ShotList | null>(null);
   const [check, setCheck] = useState<CheckResult | null>(null);
+  /**
+   * The source `check` describes. Beat indexes only line up with the script
+   * that produced them, so the composer needs to know when its errors have
+   * fallen behind rather than pinning them on whichever line moved into place.
+   */
+  const [checkedSource, setCheckedSource] = useState<string | null>(null);
+  const applyCheck = useCallback((result: CheckResult, from: string) => {
+    setCheck(result);
+    setCheckedSource(from);
+  }, []);
   const [preview, setPreview] = useState<PreviewInfo | null>(null);
   const [dialogue, setDialogue] = useState<DialogueDocument | null>(null);
   const [animation, setAnimation] = useState<AnimationDocument | null>(null);
@@ -173,6 +183,8 @@ export function EditorApp({
     setSelectedMotionId(null);
     setPreflight(null);
     setPlayheadMs(0);
+    setCheck(null);
+    setCheckedSource(null);
     accurateBroken.current = false;
     void (async () => {
       try {
@@ -194,7 +206,7 @@ export function EditorApp({
           // staleness comparison below has both sides on arrival. Without it a
           // scene that is *already* out of date looks fine until you type.
           void api.check(scene, { source: d.source, set: d.shots.set })
-            .then((res) => { if (!cancelled) setCheck(res); })
+            .then((res) => { if (!cancelled) applyCheck(res, d.source); })
             .catch(() => {});
         }
       } catch (err) {
@@ -277,7 +289,7 @@ export function EditorApp({
           savedAt.current = Date.now();
           editCount.current = 0;
           setSave({ state: 'saved', agoS: 0 });
-          setCheck(await api.check(scene, { source, set: setName }));
+          applyCheck(await api.check(scene, { source, set: setName }), source);
         } catch (err) {
           setSave({ state: 'failed', reason: (err as Error).message });
         }
@@ -726,7 +738,7 @@ export function EditorApp({
         setError(res.errors.length ? res.errors.join('; ') : null);
         // Re-establish the comparison against whatever the script says *now* —
         // it may have moved on while the diff was sitting in the dialog.
-        void api.check(scene, { source, set: setName }).then(setCheck).catch(() => {});
+        void api.check(scene, { source, set: setName }).then((res) => applyCheck(res, source)).catch(() => {});
         if (mode === 'write') setMode('direct');
         onSceneChanged();
       };
@@ -918,7 +930,7 @@ export function EditorApp({
     setBusy('check');
     try {
       const res = await api.check(scene, { source, set: setName });
-      setCheck(res);
+      applyCheck(res, source);
       setInfo(res.errors.length
         ? `Check: ${res.errors.length} error${res.errors.length === 1 ? '' : 's'} — ${res.errors[0]}`
         : `Check passed · ${res.beats.length} beats · ~${(res.estimateMs / 1000).toFixed(1)}s`);
@@ -1283,7 +1295,18 @@ export function EditorApp({
       className="shrink-0 flex flex-col bg-stage border-r border-edge min-h-0"
       style={{ width: subPaneWidth(mode) }}
     >
-      {(mode === 'write' || mode === 'direct') && <ScriptPane scene={scene} source={source} onChange={setSource} />}
+      {(mode === 'write' || mode === 'direct') && (
+        <ScriptPane
+          scene={scene}
+          source={source}
+          onChange={setSource}
+          mode={mode}
+          vocab={vocab}
+          cast={cast}
+          check={check}
+          checkedSource={checkedSource}
+        />
+      )}
       {mode === 'perform' && (
         <LinesPane dialogue={dialogue} shots={shots} selected={selected} onSelect={(i) => { selectBeat(i); setTab('voice'); }} speakerFilter={null} />
       )}

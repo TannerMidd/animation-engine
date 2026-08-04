@@ -121,6 +121,10 @@ export interface Vocab {
   cameraMoves: CameraMove[];
   marks: Mark[];
   gestures: string[];
+  /** Optional so an older server degrades to a plain parenthetical field. */
+  emotions?: EmotionVocab;
+  /** Optional for the same reason; without it the action card stays free text. */
+  actions?: ActionVocab;
   palettes: string[];
   engines: string[];
   look: LookVocab;
@@ -128,6 +132,50 @@ export interface Vocab {
   auditionLines: string[];
   referenceSeconds: { min: number; max: number };
 }
+
+/**
+ * The director's parenthetical table, as data.
+ *
+ * `words` is ordered and first match wins, so the composer can show what a
+ * hand-typed parenthetical will actually resolve to without reimplementing —
+ * or drifting from — the rule in src/direct/emotions.ts.
+ */
+export interface EmotionVocab {
+  words: Array<{ pattern: string; expression: string }>;
+  /** Expression -> the word to write when the choice was made by picking. */
+  canonical: Record<string, string>;
+  /** Expression -> what a rig lacking it plays instead, in order. */
+  fallbacks: Record<string, string[]>;
+}
+
+/**
+ * Ways of writing an action the director is known to understand.
+ *
+ * The wording lives in src/direct/action-canon.ts and arrives as templates, so
+ * the builder fills in blanks rather than inventing phrasing the prose parser
+ * would reject.
+ */
+export interface ActionVocab {
+  templates: ActionTemplateVocab[];
+  /** Mark -> how to say it ("FAR_L" -> "far left"). */
+  marks: Record<string, string>;
+  /** Facing -> how to say it ("front" -> "toward camera"). */
+  directions: Record<string, string>;
+  counts: string[];
+}
+
+/** A stage action the builder can compose, and the fields it needs to do it. */
+export interface ActionTemplateVocab {
+  id: string;
+  type: string;
+  label: string;
+  fields: ActionField[];
+  /** Placeholders in {braces}, one per field. */
+  template: string;
+}
+
+export type ActionField =
+  | 'actor' | 'targetActor' | 'object' | 'target' | 'mark' | 'direction' | 'seat' | 'count';
 
 export type OutfitKey = 'sleeves' | 'collar' | 'neckwear' | 'pattern' | 'hat' | 'shoes';
 

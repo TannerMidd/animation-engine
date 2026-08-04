@@ -2,6 +2,7 @@ import { Rng, deriveSeed } from '../core/rng.ts';
 import { activeIdentity } from '../show/context.ts';
 import { stampOf } from '../schema/identity.ts';
 import type { LoadedRig } from '../cast/store.ts';
+import { expressionFor, supportable } from './emotions.ts';
 import {
   SHOTS,
   SHOT_PURPOSES,
@@ -48,65 +49,6 @@ export function buildCapabilityManifest(rigs: Map<string, LoadedRig>): Capabilit
     stageActions: SUPPORTED_STAGE_ACTIONS,
     characters,
   };
-}
-
-/**
- * Parenthetical keywords to expressions.
- *
- * Longest match wins, so "not angry" doesn't trip the "angry" rule by accident
- * — checked against the whole parenthetical, lowercased.
- */
-const EMOTION_WORDS: Array<[RegExp, string]> = [
-  [/dead ?pan|flat|monotone|blank|no ?emotion|beat\b/, 'DEADPAN'],
-  [/angry|annoyed|irritat|snap|furious|shout|yell|mad\b/, 'ANGRY'],
-  [/shock|surpris|alarm|startl|horrifi|panic/, 'SHOCKED'],
-  [/suspic|sceptic|skeptic|doubt|wary|dubious|unconvinced|side-?eye/, 'SUSPICIOUS'],
-  [/smug|pleased|satisfi|smir|superior|proud/, 'SMUG'],
-  [/exhaust|weary|drain|worn ?out|tired|hollow|beyond caring/, 'EXHAUSTED'],
-  [/sad|defeat|deflat|quiet|small|resign|defl|miserab|glum/, 'SAD'],
-  [/confus|puzzl|uncertain|lost|baffl|unsure/, 'CONFUSED'],
-  [/delight|thrill|beam|grin|laugh|joy|gleeful|cheer|bright|happy|excited/, 'JOY'],
-  [/warm|friendly|calm|even/, 'NEUTRAL'],
-];
-
-/**
- * Where to go when a rig lacks the expression a line asked for.
- *
- * A puppet drawn before an expression existed — or a hand-drawn one with a
- * deliberately small face set — should still get something in the spirit of the
- * line. Without this the compiler throws on a rig it has every right to accept,
- * which turns "I added a new expression" into "everyone's old characters are
- * broken".
- */
-const EXPRESSION_FALLBACKS: Record<string, string[]> = {
-  JOY: ['SMUG', 'NEUTRAL'],
-  SUSPICIOUS: ['SMUG', 'CONFUSED', 'DEADPAN'],
-  EXHAUSTED: ['SAD', 'DEADPAN'],
-  SHOCKED: ['CONFUSED', 'NEUTRAL'],
-  SMUG: ['NEUTRAL'],
-  ANGRY: ['NEUTRAL'],
-  SAD: ['DEADPAN', 'NEUTRAL'],
-  CONFUSED: ['NEUTRAL'],
-  DEADPAN: ['NEUTRAL'],
-};
-
-function expressionFor(parenthetical: string | null, fallback: string): string {
-  if (!parenthetical) return fallback;
-  const p = parenthetical.toLowerCase();
-  for (const [re, expr] of EMOTION_WORDS) {
-    if (re.test(p)) return expr;
-  }
-  return fallback;
-}
-
-/** Narrow a wanted expression to one the character can actually pull. */
-function supportable(want: string, available: Set<string>, resting: string): string {
-  if (available.has(want)) return want;
-  for (const alt of EXPRESSION_FALLBACKS[want] ?? []) {
-    if (available.has(alt)) return alt;
-  }
-  if (available.has(resting)) return resting;
-  return [...available][0] ?? want;
 }
 
 const SHRUG_WORDS = /\b(i don'?t know|dunno|whatever|i guess|no idea|beats me|somehow)\b/i;

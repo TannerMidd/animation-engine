@@ -16,6 +16,10 @@ import { activeIdentity } from '../../show/context.ts';
 import { planMigration, applyMigration } from '../../show/migrate.ts';
 import { stampOf } from '../../schema/identity.ts';
 import { SHOTS, SHOT_PURPOSES, CAMERA_MOVES, MARKS } from '../../schema/script.ts';
+import { EMOTION_WORDS, CANONICAL_EMOTION_KEYWORDS, EXPRESSION_FALLBACKS } from '../../direct/emotions.ts';
+import {
+  ACTION_TEMPLATES, MARK_PHRASES, DIRECTION_PHRASES, COUNT_PHRASES,
+} from '../../direct/action-canon.ts';
 import { PALETTE_NAMES } from '../../sets/palettes.ts';
 import { LOOK_CHOICES, LOOK_SWATCHES, LOOK_SLIDERS, OUTFIT_CHOICES, ACCENTS } from '../../schema/index.ts';
 import { AUDITION_LINES } from '../../pipeline/audition.ts';
@@ -89,6 +93,23 @@ export function registerSystemRoutes(router: Router): void {
       // TALK and NONE are compiler concepts rather than rig poses, so they are
       // always offered even though no rig declares them.
       gestures: ['NONE', 'TALK', 'POINT', 'SHRUG', 'ARMS_UP', 'LEAN_IN'],
+      // The parenthetical vocabulary, shipped as data so the composer can offer
+      // it and replay the resolution rule rather than keep its own copy. Order
+      // matters — the client tests patterns in this sequence and takes the
+      // first hit, exactly as expressionFor does.
+      emotions: {
+        words: EMOTION_WORDS.map(([re, expression]) => ({ pattern: re.source, expression })),
+        canonical: CANONICAL_EMOTION_KEYWORDS,
+        fallbacks: EXPRESSION_FALLBACKS,
+      },
+      // Wordings the director is known to read back, so the composer can offer
+      // staging as a choice instead of leaving it to be guessed at in prose.
+      actions: {
+        templates: ACTION_TEMPLATES,
+        marks: MARK_PHRASES,
+        directions: DIRECTION_PHRASES,
+        counts: COUNT_PHRASES,
+      },
       palettes: PALETTE_NAMES,
       engines: ENGINE_NAMES,
       // The appearance editor builds its controls from these rather than

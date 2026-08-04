@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, fmtMs } from '../api.ts';
 import type {
-  DialogueDocument, ProductionPreflightNote, ProductionPreflightReport, SceneSoundInfo, ShotList, StemId,
+  CastSummary, CheckResult, DialogueDocument, ProductionPreflightNote, ProductionPreflightReport,
+  SceneSoundInfo, ShotList, StemId, Vocab,
 } from '../types.ts';
 import { ScriptEditor } from '../components/ScriptEditor.tsx';
+import { ScriptComposer } from './compose/ScriptComposer.tsx';
 import { Dot, Spinner } from './chrome.tsx';
 import { cueApproval, cueUndecided, humanHint, speakerColour, type Mode } from './lib.ts';
 
@@ -26,18 +28,63 @@ export function SubPaneHeader({ title, meta }: { title: string; meta: string }) 
   );
 }
 
-/** Write/Direct: the fountain source, colours doing the parsing for you. */
+/**
+ * Write/Direct: the script, as cards or as the file itself.
+ *
+ * Compose is the default when writing, because the vocabulary — which feelings
+ * exist, what a pause looks like — should be something you pick, not something
+ * you remember. Source is the default when directing, where the file is being
+ * read rather than written. Both stay mounted so flipping tabs keeps the
+ * editor's cursor and undo history intact.
+ */
 export function ScriptPane({
-  scene, source, onChange,
+  scene, source, onChange, mode, vocab, cast, check, checkedSource,
 }: {
   scene: string;
   source: string;
   onChange: (source: string) => void;
+  mode: Mode;
+  vocab: Vocab | null;
+  cast: CastSummary[];
+  check: CheckResult | null;
+  checkedSource: string | null;
 }) {
+  const [tab, setTab] = useState<'compose' | 'source'>(mode === 'write' ? 'compose' : 'source');
+  // A mode switch re-asserts the default; within a mode the choice sticks.
+  useEffect(() => setTab(mode === 'write' ? 'compose' : 'source'), [mode]);
+
   return (
     <>
-      <SubPaneHeader title="Script" meta={`${scene}.md · fountain`} />
-      <div className="flex-1 min-h-0">
+      <div className="h-7 shrink-0 flex items-center gap-[7px] px-[9px] border-b border-[#2f353d] bg-[#22262c]">
+        {(['compose', 'source'] as const).map((name) => (
+          <button
+            key={name}
+            type="button"
+            onClick={() => setTab(name)}
+            className={`text-[10px] tracking-[.09em] uppercase cursor-pointer ${
+              tab === name ? 'text-ink' : 'text-ink-faint hover:text-ink-dim'
+            }`}
+          >
+            {name}
+          </button>
+        ))}
+        <div className="flex-1" />
+        <span className="font-mono text-[9px] text-ink-ghost">
+          {tab === 'source' ? `${scene}.md · fountain` : `${scene}.md`}
+        </span>
+      </div>
+      <div className={`flex-1 min-h-0 flex flex-col ${tab === 'compose' ? '' : 'hidden'}`}>
+        <ScriptComposer
+          source={source}
+          onChange={onChange}
+          vocab={vocab}
+          cast={cast}
+          check={check}
+          checkedSource={checkedSource}
+          compact={mode !== 'write'}
+        />
+      </div>
+      <div className={`flex-1 min-h-0 ${tab === 'source' ? '' : 'hidden'}`}>
         <ScriptEditor value={source} onChange={onChange} />
       </div>
     </>
