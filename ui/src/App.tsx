@@ -4,6 +4,7 @@ import type { CastSummary, Health, SceneSummary, SetSummary, ShowInfo, Vocab } f
 import { EditorApp } from './editor/EditorApp.tsx';
 import { SetDesigner } from './components/SetDesigner.tsx';
 import { CastEditor } from './components/CastEditor.tsx';
+import { PropStudio } from './components/PropStudio.tsx';
 import { Spinner } from './editor/chrome.tsx';
 import { isTyping } from './editor/lib.ts';
 
@@ -41,7 +42,7 @@ export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
   const [show, setShow] = useState<ShowInfo | null>(null);
   const [booting, setBooting] = useState(true);
-  const [legacy, setLegacy] = useState<null | { kind: 'sets' | 'cast'; name: string | null }>(null);
+  const [legacy, setLegacy] = useState<null | { kind: 'sets' | 'cast' | 'props'; name: string | null }>(null);
 
   const refreshScenes = useCallback(async () => {
     const list = await api.scenes();
@@ -171,15 +172,23 @@ export default function App() {
               ← Back to the editor
             </button>
             <span className="text-[11px] tracking-[.06em] uppercase text-ink-faint">
-              {legacy.kind === 'cast' ? 'Cast editor' : 'Set designer'}
+              {legacy.kind === 'cast' ? 'Cast editor' : legacy.kind === 'props' ? 'Prop studio' : 'Set designer'}
             </span>
             {legacy.name && <span className="font-serif text-[14px] text-ink">{legacy.name}</span>}
             <div className="flex-1" />
             <span className="text-[10px] text-ink-ghost">edits here land on disk and show up in the scene on the next preview</span>
           </div>
           <div className="flex-1 min-h-0">
-            {legacy.kind === 'sets' && <SetDesigner vocab={vocab} llm={health?.llm ?? null} open={legacy.name} />}
+            {legacy.kind === 'sets' && (
+              <SetDesigner
+                vocab={vocab}
+                llm={health?.llm ?? null}
+                open={legacy.name}
+                onOpenProps={(name) => setLegacy({ kind: 'props', name })}
+              />
+            )}
             {legacy.kind === 'cast' && <CastEditor health={health} vocab={vocab} open={legacy.name} />}
+            {legacy.kind === 'props' && <PropStudio open={legacy.name} onCatalogueChanged={() => void refreshSets()} />}
           </div>
         </div>
       )}

@@ -233,6 +233,7 @@ const SET: SetDescriptor = {
     marginX: 40,
     marginY: 20,
     walkable: { x: 100, y: 380, width: 1080, height: 160 },
+    parallax: { back: { x: 1, y: 1 }, mid: { x: 1, y: 1 }, fore: { x: 1, y: 1 } },
   },
   layers: {
     back: [

@@ -138,4 +138,4 @@ export function bakedTotals(): { shapes: number; points: number } {
 
 export * from './types.ts';
 export { loadBakedProps, BAKE_BUDGET, PALETTE_SLOTS, DOC_FORMAT, countView } from './baked.ts';
-export { PropDocument, propFromDocument } from './document.ts';
+export { PropDocument, propFromDocument, documentBoxes, type PrimitiveBox, type Primitive } from './document.ts';

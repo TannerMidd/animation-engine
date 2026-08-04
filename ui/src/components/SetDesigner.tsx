@@ -15,11 +15,13 @@ const LAYERS: LayerName[] = ['back', 'mid', 'fore'];
  * empty — the only question that matters is whether people read against it.
  * The layer tabs are depth: characters render between `mid` and `fore`.
  */
-export function SetDesigner({ vocab, llm, open }: {
+export function SetDesigner({ vocab, llm, open, onOpenProps }: {
   vocab: Vocab | null;
   llm: LlmStatus | null;
   /** The set the caller asked for; without it the designer opens on whatever sorts first. */
   open?: string | null;
+  /** Hand off to the prop studio, for when the room needs something that does not exist. */
+  onOpenProps?: (key: string | null) => void;
 }) {
   const [names, setNames] = useState<string[]>([]);
   const [name, setName] = useState<string>(open ?? '');
@@ -317,7 +319,18 @@ export function SetDesigner({ vocab, llm, open }: {
           title="Add prop"
           className="h-52 shrink-0"
           bodyClass="p-1"
-          actions={<Select value={tag} options={['all', ...tags]} onChange={setTag} />}
+          actions={
+            <>
+              {/* The moment you realise the room needs something the catalogue
+                  does not have is the moment you are looking at this list. */}
+              {onOpenProps && (
+                <Button variant="ghost" onClick={() => onOpenProps(null)} title="Draw a new prop">
+                  + New
+                </Button>
+              )}
+              <Select value={tag} options={['all', ...tags]} onChange={setTag} />
+            </>
+          }
         >
           <div className="grid grid-cols-2 gap-1">
             {visibleProps.map((p) => (

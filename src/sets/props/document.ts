@@ -568,6 +568,124 @@ export function escapeXml(s: string): string {
     .replace(/'/g, '&apos;');
 }
 
+// --- measurement ----------------------------------------------------------
+
+export interface PrimitiveBox {
+  /** Index path into the view's primitives, so a click can name what it hit. */
+  path: number[];
+  kind: Primitive['k'];
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Which expansion of an enclosing repeat this is; empty for a plain primitive. */
+  copy: number[];
+}
+
+/** So one runaway repeat cannot hand the canvas a hundred thousand hit targets. */
+const MAX_BOXES = 400;
+
+/**
+ * Where every primitive landed, at these params.
+ *
+ * The canvas shows server-rendered markup, which is opaque — you cannot click a
+ * rectangle in a string. Rather than teach the client to evaluate expressions,
+ * which would be the whole language reimplemented for the sake of a drag
+ * handle, the server says where the shapes are and the client draws handles
+ * over them.
+ *
+ * Boxes are the authored geometry, not the drawn geometry: the wobble pushes
+ * outlines a few units past this, and a handle that chased the wobble would sit
+ * somewhere the author never put anything.
+ */
+export function documentBoxes(
+  doc: PropDocument,
+  params: Record<string, ParamValue> = {},
+  viewName?: string,
+): PrimitiveBox[] {
+  const viewKeys = Object.keys(doc.views);
+  const chosen = viewName && doc.views[viewName] ? viewName : viewKeys[0]!;
+  const primitives = upgrade(doc.views[chosen]!);
+  const out: PrimitiveBox[] = [];
+  const base = scopeFor(doc, params);
+
+  const walk = (prims: Primitive[], names: string[], scope: Scope, prefix: number[], copy: number[], dx: number, dy: number): void => {
+    prims.forEach((prim, index) => {
+      if (out.length >= MAX_BOXES) return;
+      const path = [...prefix, index];
+      const value = (v: Num | undefined, fallback = 0): number => {
+        if (v === undefined) return fallback;
+        try {
+          return compileField(v, names).eval(scope);
+        } catch {
+          return fallback;
+        }
+      };
+
+      if (prim.show) {
+        try {
+          if (!truthy(compileExpr(prim.show, names).eval(scope))) return;
+        } catch {
+          return;
+        }
+      }
+
+      if (prim.k === 'repeat') {
+        const variable = LOOP_VARS[copy.length];
+        if (!variable) return;
+        const count = Math.min(MAX_REPEAT_COUNT, Math.max(0, Math.round(value(prim.n))));
+        for (let n = 0; n < count && out.length < MAX_BOXES; n++) {
+          const local: Scope = { ...scope, [variable]: n };
+          const inner = [...names, variable];
+          const ox = (prim.dx === undefined ? 0 : compileField(prim.dx, inner).eval(local)) * n;
+          const oy = (prim.dy === undefined ? 0 : compileField(prim.dy, inner).eval(local)) * n;
+          walk(prim.of, inner, local, path, [...copy, n], dx + ox, dy + oy);
+        }
+        return;
+      }
+
+      let box: { x: number; y: number; width: number; height: number };
+      if (prim.k === 'rect') {
+        box = { x: value(prim.x), y: value(prim.y), width: value(prim.w), height: value(prim.h) };
+      } else if (prim.k === 'ellipse') {
+        const [cx, cy, rx, ry] = [value(prim.cx), value(prim.cy), value(prim.rx), value(prim.ry)];
+        box = { x: cx - rx, y: cy - ry, width: rx * 2, height: ry * 2 };
+      } else if (prim.k === 'line') {
+        const [x1, y1, x2, y2] = [value(prim.x1), value(prim.y1), value(prim.x2), value(prim.y2)];
+        box = { x: Math.min(x1, x2), y: Math.min(y1, y2), width: Math.abs(x2 - x1), height: Math.abs(y2 - y1) };
+      } else if (prim.k === 'text') {
+        // Text has no measurable extent without a font, so this is the anchor
+        // box: enough to grab, honest about not being the glyph bounds.
+        const size = value(prim.size, 12);
+        box = { x: value(prim.x) - size, y: value(prim.y) - size, width: size * 2, height: size * 1.3 };
+      } else {
+        const flat = prim.p.map((v) => value(v));
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (let n = 0; n + 1 < flat.length; n += 2) {
+          minX = Math.min(minX, flat[n]!); maxX = Math.max(maxX, flat[n]!);
+          minY = Math.min(minY, flat[n + 1]!); maxY = Math.max(maxY, flat[n + 1]!);
+        }
+        if (!Number.isFinite(minX)) return;
+        box = { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+      }
+
+      if (!Number.isFinite(box.x) || !Number.isFinite(box.y)) return;
+      out.push({
+        path,
+        kind: prim.k,
+        x: r(box.x + dx),
+        y: r(box.y + dy),
+        width: r(Math.abs(box.width)),
+        height: r(Math.abs(box.height)),
+        copy,
+      });
+    });
+  };
+
+  walk(primitives, scopeNames(doc, 0), base, [], [], 0, 0);
+  return out;
+}
+
 // --- format 1 -------------------------------------------------------------
 
 /** Read a format-1 view as primitives. A baked shape is exactly a polygon. */

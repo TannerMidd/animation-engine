@@ -270,31 +270,149 @@ export interface ParamSpec {
   choices?: string[];
 }
 
+export type HandleKind = 'grip' | 'contact' | 'placement' | 'control' | 'seat';
+
+export interface PropInteraction {
+  portable: boolean;
+  bounds: { x: number; y: number; width: number; height: number };
+  handles: Array<{
+    id: string;
+    label: string;
+    kind: HandleKind;
+    x: number;
+    y: number;
+    radius: number;
+    normal?: { x: number; y: number };
+  }>;
+}
+
 export interface PropDefInfo {
   key: string;
   label: string;
   tags: string[];
   spanning: boolean;
   params: ParamSpec[];
+  interaction?: PropInteraction | null;
+  /** A document can be edited in the studio; a builtin is still a render function. */
+  source: 'document' | 'builtin';
+}
+
+// --- prop documents -------------------------------------------------------
+
+/**
+ * A number in a document is either a literal or arithmetic over the prop's own
+ * params. The studio writes the expressions; a person can, but should not have
+ * to.
+ */
+export type Num = number | string;
+
+interface PrimBase {
+  /** Palette slot, or null for an unfilled shape. On a line, the stroke colour. */
+  f?: string | null;
+  /** Outline. */
+  l?: 0 | 1;
+  /** At the edge of the world: square, unwobbled, fill only. */
+  e?: 0 | 1;
+  /** Draw crisply, keeping the outline. */
+  sm?: 0 | 1;
+  o?: Num;
+  sw?: Num;
+  rot?: Num;
+  /** Expression; the primitive is omitted when it evaluates to zero. */
+  show?: string;
+}
+
+export interface RectPrim extends PrimBase { k: 'rect'; x: Num; y: Num; w: Num; h: Num; rx?: Num }
+export interface EllipsePrim extends PrimBase { k: 'ellipse'; cx: Num; cy: Num; rx: Num; ry: Num }
+export interface PolyPrim extends PrimBase { k: 'poly'; p: Num[]; c?: 0 | 1 }
+export interface LinePrim extends PrimBase { k: 'line'; x1: Num; y1: Num; x2: Num; y2: Num }
+export interface TextPrim extends PrimBase {
+  k: 'text';
+  x: Num; y: Num; size: Num;
+  /** `$key` interpolates a text param. */
+  value: string;
+  anchor?: 'start' | 'middle' | 'end';
+  weight?: 'normal' | 'bold';
+  st?: string | null;
+}
+export interface RepeatPrim { k: 'repeat'; n: Num; dx?: Num; dy?: Num; of: Primitive[]; show?: string }
+
+export type Primitive = RectPrim | EllipsePrim | PolyPrim | LinePrim | TextPrim | RepeatPrim;
+export type PrimitiveKind = Primitive['k'];
+
+export interface PropView {
+  primitives?: Primitive[];
+  /** Format 1 geometry, still read so committed bakes keep working. */
+  shapes?: Array<{ f?: string | null; l?: 0 | 1; c?: 0 | 1; e?: 0 | 1; p: number[] }>;
+}
+
+export interface PropDocument {
+  format: 1 | 2;
+  key: string;
+  label: string;
+  tags: string[];
+  spanning: boolean;
+  params: ParamSpec[];
+  provenance: { blender: string; source: string; baked: string };
+  frame?: { x0: number; y0: number; width: number; height: number; horizonY: number; ceilingY: number };
   interaction?: {
     portable: boolean;
-    bounds: { x: number; y: number; width: number; height: number };
-    handles: Array<{
-      id: string;
-      label: string;
-      kind: 'grip' | 'contact' | 'placement' | 'control' | 'seat';
-      x: number;
-      y: number;
-      radius: number;
-      normal?: { x: number; y: number };
-    }>;
-  } | null;
+    bounds: { x: Num; y: Num; width: Num; height: Num };
+    handles: Array<{ id: string; label: string; kind: HandleKind; x: Num; y: Num; radius: Num; normal?: { x: number; y: number } }>;
+  };
+  views: Record<string, PropView>;
+}
+
+/** `GET /api/props/:key`. */
+export interface PropDetail {
+  key: string;
+  label: string;
+  tags: string[];
+  spanning: boolean;
+  params: ParamSpec[];
+  interaction: PropInteraction | null;
+  editable: boolean;
+  document: PropDocument | null;
+}
+
+/** Where a primitive landed, so the canvas can put a handle on it. */
+export interface PrimitiveBox {
+  /** Index path into the view's primitives — the address of the authored shape. */
+  path: number[];
+  kind: PrimitiveKind;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Which expansion of an enclosing repeat this is; empty for a plain primitive. */
+  copy: number[];
+}
+
+/** `POST /api/props/render`. */
+export interface PropRender {
+  svg: string;
+  extent: { x: number; y: number; width: number; height: number } | null;
+  boxes: PrimitiveBox[];
+  spanning: boolean;
+  params: ParamSpec[];
+  interaction: PropInteraction | null;
+  warnings: string[];
+}
+
+export type Palette = Record<string, string>;
+
+/** How much of the camera's travel a layer takes, per axis. 1 is locked to the stage. */
+export interface ParallaxFactor {
+  x: number;
+  y: number;
 }
 
 export interface PropInstance {
   /** Stable set-local identity used by staging and prop contacts. */
   id?: string;
   prop: string;
+  /** Overrides the layer's factor, for a prop at its own depth. */
+  parallax?: ParallaxFactor;
   x?: number;
   y?: number;
   scale: number;
@@ -314,6 +432,7 @@ export interface SetDescriptor {
     marginY: number;
     /** Set-authored valid area for visible actor root motion. */
     walkable: { x: number; y: number; width: number; height: number };
+    parallax: Record<LayerName, ParallaxFactor>;
   };
   layers: Record<LayerName, PropInstance[]>;
 }

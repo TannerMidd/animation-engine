@@ -1,7 +1,8 @@
 import type {
   AnimationDocument, BenchResult, CastSummary, CheckResult, ConversionCheckResult, DialogueCue, DialogueDocument,
   DoctorReport, FacePlate, Health, JobEvent, JobSummary, LlmStatus, Look, MigrationInfo, PreviewInfo, Outfit,
-  ProductionPreflightReport, ProfileDiff, ProfileValidation, PropDefInfo, RecordedTake, RigCheckResult, RigDoc,
+  ProductionPreflightReport, ProfileDiff, ProfileValidation, PropDefInfo, PropDetail, PropDocument, PropRender,
+  Palette, ParamValue, RecordedTake, RigCheckResult, RigDoc,
   SceneDetail, SceneSoundInfo, SceneSummary, SetDescriptor, SetSummary, ShotList, ShowInfo, StemId, Vocab,
 } from './types.ts';
 
@@ -210,6 +211,30 @@ export const api = {
     post<{ set: SetDescriptor; notes: string[] }>(`/api/sets/${name}/tidy`, { set }),
 
   props: () => call<{ props: PropDefInfo[]; tags: string[] }>('/api/props'),
+  palettes: () => call<Record<string, Palette>>('/api/palettes'),
+
+  // --- prop authoring ---
+  prop: (key: string) => call<PropDetail>(`/api/props/${key}`),
+  /** `renames` carries saved sets across a param rename; without it the old value is dropped. */
+  saveProp: (key: string, document: PropDocument, renames?: Record<string, string>) =>
+    put<{ ok: true; path: string; migratedSets: string[]; warnings: string[] }>(
+      `/api/props/${key}`, { document, renames },
+    ),
+  deleteProp: (key: string) => del<{ ok: true }>(`/api/props/${key}`),
+  propUsage: (key: string) => call<{ sets: string[] }>(`/api/props/${key}/usage`),
+  /**
+   * Render one prop. Takes the document rather than the key so the canvas shows
+   * what is being drawn rather than what was last saved.
+   */
+  renderProp: (body: {
+    document?: PropDocument;
+    key?: string;
+    params?: Record<string, ParamValue>;
+    palette?: string;
+    view?: string;
+  }) => post<PropRender>('/api/props/render', body),
+  checkProp: (body: { document?: PropDocument; key?: string }) =>
+    post<{ ok: boolean; problems: string[] }>('/api/props/check', body),
 
   llm: () => call<LlmStatus & { suggested: string[] }>('/api/llm'),
   generateScript: (premise: string, opts: { characters?: number; targetSeconds?: number } = {}) =>

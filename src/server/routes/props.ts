@@ -5,7 +5,7 @@ import { protectRunningRenderState } from '../state.ts';
 import { PROPS_DIR, ROOT } from '../../core/paths.ts';
 import {
   PropDocument, propFromDocument, propManifest, propTags, propKeys, allProps,
-  getProp, reloadProps, BAKE_BUDGET,
+  getProp, reloadProps, BAKE_BUDGET, documentBoxes,
 } from '../../sets/props/index.ts';
 import type { PropDef } from '../../sets/props/types.ts';
 import { PALETTES, PALETTE_NAMES, getPalette } from '../../sets/palettes.ts';
@@ -328,6 +328,7 @@ export function registerPropRoutes(router: Router): void {
     const body = await readJson<RenderRequest>(req);
     const def = subjectOf(body);
     const palette = body.palette ?? 'office-fluorescent';
+    const document = body.document === undefined ? null : PropDocument.parse(body.document);
 
     let svg: string;
     try {
@@ -349,6 +350,9 @@ export function registerPropRoutes(router: Router): void {
     json(res, {
       svg,
       extent: extentOf(svg),
+      // Where each primitive landed, so the canvas can put a handle on it
+      // without reimplementing the expression language to find out.
+      boxes: document ? documentBoxes(document, body.params ?? {}, body.view) : [],
       spanning: def.spanning ?? false,
       params: def.params,
       interaction: def.interactionFor?.(body.params ?? {}) ?? def.interaction ?? null,
