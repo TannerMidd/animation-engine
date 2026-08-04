@@ -366,3 +366,48 @@ export function defaultTabFor(mode: Mode): InspectorTab {
   if (mode === 'publish' || mode === 'sound') return 'scene';
   return 'beat';
 }
+
+// --- pointer and keyboard chrome ------------------------------------------
+
+/**
+ * Whether text is being edited at `target`.
+ *
+ * Three separate features defer to this: shortcuts must not fire while you are
+ * typing, right-click must keep the browser's own menu where Paste and
+ * spell-check live, and a drag has to blur the script editor by hand now that
+ * it prevents the default focus move.
+ */
+export function isTyping(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
+  return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT'
+    || el.isContentEditable || Boolean(el.closest?.('.cm-editor'));
+}
+
+/**
+ * Where a context menu lands, given the pointer, the menu's measured size and
+ * the viewport.
+ *
+ * Flip before clamping. Flipping is what keeps the pointer on a corner of the
+ * menu the way a native one does; clamping is the fallback for when neither
+ * orientation fits, and doing it first would slide the menu out from under the
+ * cursor at every edge instead of only the impossible ones. `maxHeight` is
+ * returned rather than applied so a menu taller than the screen scrolls
+ * instead of overflowing off it.
+ */
+export function placeMenu(
+  at: { x: number; y: number },
+  size: { w: number; h: number },
+  viewport: { w: number; h: number },
+  gutter = 8,
+): { left: number; top: number; maxHeight: number } {
+  const maxHeight = Math.min(size.h, Math.max(0, viewport.h - gutter * 2));
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+  const left = at.x + size.w + gutter <= viewport.w ? at.x : at.x - size.w;
+  const top = at.y + maxHeight + gutter <= viewport.h ? at.y : at.y - maxHeight;
+  return {
+    left: clamp(left, gutter, Math.max(gutter, viewport.w - size.w - gutter)),
+    top: clamp(top, gutter, Math.max(gutter, viewport.h - maxHeight - gutter)),
+    maxHeight,
+  };
+}

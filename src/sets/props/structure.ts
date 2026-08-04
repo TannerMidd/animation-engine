@@ -57,7 +57,10 @@ export const STRUCTURE_PROPS: Record<string, PropDef> = {
 
   'room-floor': {
     label: 'Floor',
-    tags: ['structure', 'interior', 'exterior'],
+    // "ground" marks the surface the characters stand on. The linter uses it to
+    // catch a floor left in a parallaxed layer, where it would slide out from
+    // under everyone's feet.
+    tags: ['structure', 'interior', 'exterior', 'ground'],
     spanning: true,
     params: [
       { key: 'bandOffset', label: 'Near-band offset', type: 'number', default: 96, min: 0, max: 400, step: 8 },

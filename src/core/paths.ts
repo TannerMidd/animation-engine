@@ -9,6 +9,8 @@ export const SETS_DIR = path.join(ROOT, 'sets');
 export const SCRIPTS_DIR = path.join(ROOT, 'scripts');
 export const OUT_DIR = path.join(ROOT, 'out');
 export const SHOW_DIR = path.join(ROOT, 'show');
+/** Baked props: procedural source, bake config, and the committed geometry. */
+export const PROPS_DIR = path.join(ROOT, 'props');
 
 /** Per-scene working directory. Holds audio, timing, IR, frames and the final MP4. */
 export function sceneDir(scene: string): string {

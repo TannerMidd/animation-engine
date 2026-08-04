@@ -286,7 +286,7 @@ export function ReadinessPane({
   return (
     <>
       <SubPaneHeader title="Readiness" meta="policy production-v1" />
-      <div className="flex-1 min-h-0 overflow-y-auto px-[9px] py-2 pb-4 flex flex-col gap-[9px]">
+      <div className="flex-1 min-h-0 overflow-y-auto px-[9px] py-2 pb-4 flex flex-col gap-[9px] select-text">
         <div className="flex gap-1.5">
           <StatCell n={errors} label="blockers" color="#c8595a" />
           <StatCell n={warns} label="warnings" color="#c8834a" />

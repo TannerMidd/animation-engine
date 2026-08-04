@@ -407,6 +407,30 @@ export function SetDesigner({ vocab, llm, open }: {
           </div>
           <div className="text-[10px] text-ink-faint mt-1">Body drags clamp here; entrances and exits remain explicit stage actions.</div>
         </div>
+
+        <div className="mb-3 pb-3 border-b border-edge">
+          <div className="text-[11px] text-ink-dim mb-1">Depth (camera tracking)</div>
+          <div className="grid grid-cols-3 gap-1.5">
+            {LAYERS.map((l) => (
+              <Field key={l} label={l}>
+                <NumberInput
+                  value={desc.layout.parallax[l].x}
+                  min={0}
+                  max={2}
+                  step={0.01}
+                  onChange={(value) => mutate((draft) => {
+                    draft.layout.parallax[l].x = Math.max(0, Math.min(2, value));
+                    return draft;
+                  })}
+                />
+              </Field>
+            ))}
+          </div>
+          <div className="text-[10px] text-ink-faint mt-1">
+            1 moves with the camera. Below 1 lags and reads further away. Only horizontal —
+            sliding a layer vertically moves the horizon out from under the characters.
+          </div>
+        </div>
         {!current || !currentDef ? (
           <Empty>Select a prop</Empty>
         ) : (

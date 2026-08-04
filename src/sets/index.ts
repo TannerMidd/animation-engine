@@ -1,7 +1,15 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { SETS_DIR } from '../core/paths.ts';
-import { SetDescriptor, geometryFor, STAGE, type PropInstance, type SetGeometry } from './schema.ts';
+import {
+  SetDescriptor,
+  geometryFor,
+  LAYERS,
+  STAGE,
+  type PropInstance,
+  type SetGeometry,
+  type SetLayout,
+} from './schema.ts';
 import { getPalette, type Palette } from './palettes.ts';
 import { getProp, PROP_KEYS, PROPS } from './props/index.ts';
 import { r } from './props/types.ts';
@@ -10,17 +18,25 @@ import { resolveSetProps, type ResolvedSetProp } from './interaction.ts';
 /**
  * Set descriptor -> SVG.
  *
- * Emits two fragments rather than one. Everything in `back` and `mid` draws
- * behind the characters; `fore` draws in front of them. That split is what lets
- * someone stand behind a bar instead of on top of it.
+ * Emits one fragment per depth layer. `back` and `mid` draw behind the
+ * characters, `fore` in front of them — that split is what lets someone stand
+ * behind a bar instead of on top of it.
+ *
+ * `back` and `mid` were a single string until parallax arrived. They are
+ * separate now because the two planes can track the camera at different rates,
+ * and a shared string cannot be given two transforms. Draw order is unchanged:
+ * the page emits back, then mid, then the actors.
  */
 export interface RenderedSet {
   back: string;
+  mid: string;
   fore: string;
   /** Movable copies of interaction-enabled props, placed above actors by the page builder. */
   dynamic: string;
   geo: SetGeometry;
   palette: Palette;
+  /** Per-layer camera tracking, carried through so the page can put it on the DOM. */
+  parallax: SetLayout['parallax'];
 }
 
 function renderInstance(
@@ -38,8 +54,22 @@ function renderInstance(
     y: inst.y ?? geo.horizonY,
   };
 
+  /**
+   * An instance opting out of its layer's parallax gets its own wrapper.
+   *
+   * It has to be a separate element from the placement transform below: the
+   * runtime writes `transform` on whatever carries `data-px`, and writing it
+   * onto the placement group would throw the prop's position away on the first
+   * frame. Nesting is fine — the runtime emits the difference against the
+   * layer's own offset, so the two compose to exactly this instance's factor.
+   */
+  const withParallax = (set: string): string =>
+    inst.parallax
+      ? `<g data-px="${inst.parallax.x}" data-py="${inst.parallax.y}">${set}</g>`
+      : set;
+
   // Spanning props cover the whole set and place themselves in set coordinates.
-  if (def.spanning) return { set: def.render(ctx), dynamic: '' };
+  if (def.spanning) return { set: withParallax(def.render(ctx)), dynamic: '' };
 
   // Everything else authors in local space around its own base, and the
   // registry places it. Keeping that arithmetic in one place is deliberate:
@@ -49,7 +79,7 @@ function renderInstance(
   const transform = `translate(${r(ctx.x)},${r(ctx.y)}) scale(${r(sx)},${r(inst.scale)})`;
   const art = def.render(ctx);
   if (!resolved?.interaction) {
-    return { set: `<g transform="${transform}">${art}</g>`, dynamic: '' };
+    return { set: withParallax(`<g transform="${transform}">${art}</g>`), dynamic: '' };
   }
 
   // The authored instance remains in its original depth layer until runtime
@@ -57,7 +87,7 @@ function renderInstance(
   // interaction layer so a held object can cross cuts without DOM reparenting.
   const attrs = `data-prop-id="${resolved.id}" data-prop-kind="${resolved.prop}"`;
   return {
-    set: `<g id="set-prop-${resolved.id}" ${attrs} transform="${transform}">${art}</g>`,
+    set: withParallax(`<g id="set-prop-${resolved.id}" ${attrs} transform="${transform}">${art}</g>`),
     dynamic: `<g id="dynamic-prop-${resolved.id}" ${attrs} style="display:none">${art}</g>`,
   };
 }
@@ -81,11 +111,13 @@ export function renderSet(desc: SetDescriptor): RenderedSet {
   const fore = layer('fore', desc.layers.fore);
 
   return {
-    back: [...back, ...mid].map((item) => item.set).join('\n'),
+    back: back.map((item) => item.set).join('\n'),
+    mid: mid.map((item) => item.set).join('\n'),
     fore: fore.map((item) => item.set).join('\n'),
     dynamic: [...back, ...mid, ...fore].map((item) => item.dynamic).filter(Boolean).join('\n'),
     geo,
     palette,
+    parallax: desc.layout.parallax,
   };
 }
 
@@ -322,6 +354,57 @@ export function lintSet(desc: SetDescriptor): SetNote[] {
         'add any. Only something meant to pass in front of a character — a pillar, a doorway, a plant ' +
         'at the very edge — belongs in "fore".',
     });
+  }
+
+  // The ground is the one surface that cannot lag the camera: characters stand
+  // on it, so moving it relative to them moves the floor out from under their
+  // feet. Everything else in the same layer can still parallax — the instance
+  // override exists so the floor does not have to be relocated to escape it.
+  for (const layerName of LAYERS) {
+    const k = desc.layout.parallax[layerName];
+    if (k.x === 1 && k.y === 1) continue;
+    const drifting = desc.layers[layerName].filter(
+      (i) => PROPS[i.prop]?.tags.includes('ground') && !(i.parallax?.x === 1 && i.parallax?.y === 1),
+    );
+    if (!drifting.length) continue;
+    const names = [...new Set(drifting.map((i) => i.prop))].join(', ');
+    notes.push({
+      message:
+        `"${layerName}" has parallax (x=${k.x}, y=${k.y}) and contains the ground: ${names}. The floor ` +
+        'will slide relative to the characters standing on it',
+      fix:
+        `Keep every prop where it is. Add "parallax": { "x": 1, "y": 1 } to each of these instances in ` +
+        `"${layerName}": ${names}. That pins the ground to the camera while the rest of the layer keeps ` +
+        'its depth. Do not move them to another layer and do not delete them.',
+    });
+  }
+
+  // A baked room has its perspective fixed at bake time. A drawn wall rebuilds
+  // itself around whatever horizon the layout names; this one cannot, so a
+  // layout that has drifted from the bake puts the characters' feet somewhere
+  // the floor is not.
+  for (const layerName of LAYERS) {
+    for (const inst of desc.layers[layerName]) {
+      const frame = PROPS[inst.prop]?.bakedFrame;
+      if (!frame) continue;
+      const drift: string[] = [];
+      if (frame.horizonY !== geo.horizonY) drift.push(`horizonY ${geo.horizonY} vs baked ${frame.horizonY}`);
+      if (frame.ceilingY !== geo.ceilingY) drift.push(`ceilingY ${geo.ceilingY} vs baked ${frame.ceilingY}`);
+      if (frame.width !== geo.width || frame.height !== geo.height) {
+        drift.push(`margins give ${geo.width}x${geo.height} vs baked ${frame.width}x${frame.height}`);
+      }
+      if (!drift.length) continue;
+      notes.push({
+        message:
+          `"${inst.prop}" is a baked room whose perspective no longer matches this set's layout ` +
+          `(${drift.join('; ')})`,
+        fix:
+          `Keep every prop. Set this set's layout to horizonY ${frame.horizonY}, ceilingY ${frame.ceilingY}, ` +
+          `marginX ${(frame.width - STAGE.width) / 2} and marginY ${(frame.height - STAGE.height) / 2} to match ` +
+          `the bake — or re-bake "${inst.prop}" against the layout you want. A baked room cannot bend to a new ` +
+          'horizon the way a drawn wall does.',
+      });
+    }
   }
 
   for (const [layerName, items] of Object.entries(desc.layers)) {

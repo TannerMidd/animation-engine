@@ -8,6 +8,9 @@ import { ENGINE_NAMES, getEngine } from '../voice/index.ts';
 import { asrAvailable } from '../voice/qa.ts';
 import { listRigs } from '../cast/store.ts';
 import { Ollama } from '../llm/ollama.ts';
+import { findBlender, blenderAvailable, blenderVersion } from '../render/blender.ts';
+import { BAKED_ERRORS } from '../sets/props/baked.ts';
+import { listBakedProps } from './propbake.ts';
 
 /**
  * The toolchain, checked end to end and returned as data.
@@ -40,6 +43,20 @@ export interface DoctorReport {
   engines: DoctorEngineStatus[];
   asr: { ok: boolean; reason: string | null };
   cast: string[];
+  /**
+   * The prop foundry. Optional in the strongest sense: baked geometry is
+   * committed, so a checkout without Blender renders every prop in the
+   * catalogue and merely cannot produce new ones.
+   */
+  blender: { ok: boolean; version: string | null; path: string | null; reason: string | null };
+  bakedProps: {
+    count: number;
+    shapes: number;
+    points: number;
+    /** Bakes whose source has changed since they were written. */
+    stale: string[];
+    errors: Array<{ file: string; error: string }>;
+  };
 }
 
 export interface DoctorOptions {
@@ -124,6 +141,11 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<DoctorReport>
 
   const asr = await asrAvailable();
 
+  const blenderExe = await findBlender().catch(() => null);
+  const blenderStatus = await blenderAvailable();
+  const blenderVer = blenderExe ? await blenderVersion(blenderExe) : null;
+  const baked = await listBakedProps();
+
   return {
     ffmpeg: {
       version: ff,
@@ -144,5 +166,21 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<DoctorReport>
     engines,
     asr: asr.ok ? { ok: true, reason: null } : { ok: false, reason: asr.reason },
     cast: await listRigs(),
+    blender: {
+      ok: blenderStatus.ok,
+      version: blenderVer?.raw ?? null,
+      path: blenderExe ? path.relative(ROOT, blenderExe) : null,
+      reason: blenderStatus.ok ? null : blenderStatus.reason,
+    },
+    bakedProps: {
+      count: baked.filter((p) => !p.error).length,
+      shapes: baked.reduce((sum, p) => sum + p.shapes, 0),
+      points: baked.reduce((sum, p) => sum + p.points, 0),
+      stale: baked.filter((p) => p.stale).map((p) => p.key),
+      errors: [
+        ...BAKED_ERRORS,
+        ...baked.filter((p) => p.error).map((p) => ({ file: `${p.key}/`, error: p.error! })),
+      ],
+    },
   };
 }

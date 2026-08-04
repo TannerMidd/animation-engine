@@ -3,9 +3,11 @@ import {
   reducePuppeteeringSamples,
   type PuppeteeringSample,
 } from '../../../src/animation/recording.ts';
+import type { OpenMenu } from '../editor/ContextMenu.tsx';
 import {
   clientToStage,
   clientToWorld,
+  layerParallaxOffset,
   worldPerCssPx,
   worldToOverlay,
   type CameraRect,
@@ -137,7 +139,7 @@ const CLICK_SLOP_PX = 3;
 export function AnimationOverlay({
   iframe, frame, target, validArea, scale, width, height,
   showOnion, showPath, showPropHandles, snapEnabled, snapCandidates, propTargets,
-  onCommitProp, onInteractStart,
+  onCommitProp, onInteractStart, onContextMenu,
 }: {
   iframe: React.RefObject<HTMLIFrameElement | null>;
   frame: number;
@@ -155,6 +157,8 @@ export function AnimationOverlay({
   propTargets: readonly StagePropTarget[];
   onCommitProp?: (prop: StagePropTarget, to: [number, number]) => void;
   onInteractStart?: () => void;
+  /** Right-click, resolved against whatever the hit test finds under the pointer. */
+  onContextMenu?: OpenMenu;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -425,6 +429,27 @@ export function AnimationOverlay({
       if (best) return { kind: 'actor', controller: best.controller };
     }
     return null;
+  };
+
+  /**
+   * Right-click on the stage, resolved to whatever is under the pointer.
+   *
+   * This layer is in the parent document and sits above the iframe, so when a
+   * motion target is being edited it intercepts before StageColumn's in-frame
+   * bridge — which is what lets the menu know it is about an actor rather than
+   * about the picture in general.
+   */
+  const onSurfaceContextMenu = (event: React.MouseEvent) => {
+    if (!onContextMenu) return;
+    const rect = frameRect();
+    const hit = rect && camera ? hitTest(clientToStage(geom, rect.left, rect.top, event.clientX, event.clientY)) : null;
+    onContextMenu(
+      event,
+      hit?.kind === 'prop' ? { kind: 'prop', propId: hit.prop.id }
+        : hit?.kind === 'other-actor' ? { kind: 'actor', actorId: hit.actorId }
+          : hit?.kind === 'actor' ? { kind: 'actor', actorId: target.actorId }
+            : { kind: 'stage' },
+    );
   };
 
   const onSurfacePointerDown = (event: React.PointerEvent) => {
@@ -754,9 +779,14 @@ export function AnimationOverlay({
     if (!drag || !pointerWorld) return null;
     if (drag.kind === 'prop') {
       const resolved = resolvePropDrag(drag, pointerWorld);
+      // Same correction as the resting handle: the ghost has to travel with the
+      // art, not with the authored coordinates behind it.
+      const shift = layerParallaxOffset(iframe.current?.contentDocument, drag.prop.layer);
+      const shifted = (p: [number, number]): [number, number] =>
+        toOverlay([p[0] + shift[0], p[1] + shift[1]]);
       return {
-        origin: toOverlay(drag.startPos),
-        point: toOverlay(resolved.point),
+        origin: shifted(drag.startPos),
+        point: shifted(resolved.point),
         hits: resolved.hits,
         clamped: false,
       };
@@ -875,6 +905,7 @@ export function AnimationOverlay({
       onPointerDown={onSurfacePointerDown}
       onPointerMove={onSurfacePointerMove}
       onPointerLeave={onSurfacePointerLeave}
+      onContextMenu={onSurfaceContextMenu}
       className={`absolute inset-0 z-20 pointer-events-auto touch-none select-none ${cursorClass}`}
     >
       {!actor?.visible && (
@@ -956,7 +987,14 @@ export function AnimationOverlay({
 
       {showPropHandles && propTargets.map((prop) => {
         const dragging = drag?.kind === 'prop' && drag.prop.id === prop.id;
-        const at = dragging && dragVisual ? dragVisual.point : toOverlay([prop.x, prop.y]);
+        // A prop in a parallaxed layer is drawn offset from its authored
+        // position, so the handle has to move with the art or it detaches from
+        // the thing it grabs. Drag deltas need no such correction: parallax is
+        // translation only, so a pointer delta is still a world delta.
+        const shift = layerParallaxOffset(iframe.current?.contentDocument, prop.layer);
+        const at = dragging && dragVisual
+          ? dragVisual.point
+          : toOverlay([prop.x + shift[0], prop.y + shift[1]]);
         return (
           <button
             key={prop.id}

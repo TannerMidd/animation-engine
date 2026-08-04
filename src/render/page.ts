@@ -1,8 +1,11 @@
+import fs from 'node:fs/promises';
 import type { SceneIR, Rig } from '../schema/index.ts';
 import type { LoadedRig } from '../cast/store.ts';
 import type { RenderedSet } from '../sets/index.ts';
 import { activeStyle } from '../style/index.ts';
 import { grainOverlay } from '../style/wobble.ts';
+
+const PARALLAX_PATH = new URL('./parallax.js', import.meta.url);
 
 /**
  * Rewrite every id in an SVG fragment to be unique to one actor.
@@ -61,17 +64,42 @@ function runtimeRig(rig: Rig) {
   };
 }
 
+/**
+ * One depth layer, tagged with everything the runtime needs to parallax it.
+ *
+ * The tracking factor and the artwork bounds live on the DOM rather than in the
+ * IR on purpose. They are constant for the whole scene, so putting them in every
+ * frame would bloat the IR and force a schema version bump, an identity-stamp
+ * change and a migration — for data that never varies. The runtime reads them
+ * once when it binds the page.
+ */
+function layerGroup(id: string, art: string, set: RenderedSet, k: { x: number; y: number }): string {
+  const { geo } = set;
+  const bounds = `${geo.x0},${geo.y0},${geo.width},${geo.height}`;
+  const neutral = `${geo.stageWidth / 2},${geo.stageHeight / 2}`;
+  return (
+    `<g id="${id}" data-px="${k.x}" data-py="${k.y}" ` +
+    `data-bounds="${bounds}" data-neutral="${neutral}">${art}</g>`
+  );
+}
+
 export async function buildPage(opts: PageOptions): Promise<string> {
   const { ir, rigs, runtime } = opts;
 
   // Set art is split around the actors: back and mid behind them, fore in
   // front. That is the whole reason a character can stand behind a bar rather
-  // than on top of it.
-  const setBack = opts.set ? `<g id="set-back">${opts.set.back}</g>` : '';
-  const setFore = opts.set ? `<g id="set-fore">${opts.set.fore}</g>` : '';
-  const dynamicProps = opts.set?.dynamic
-    ? `<g id="dynamic-props">${opts.set.dynamic}</g>`
-    : '';
+  // than on top of it. Back and mid are separate groups so the two planes can
+  // track the camera at different rates.
+  const set = opts.set;
+  const setBack = set ? layerGroup('set-back', set.back, set, set.parallax.back) : '';
+  const setMid = set ? layerGroup('set-mid', set.mid, set, set.parallax.mid) : '';
+  const setFore = set ? layerGroup('set-fore', set.fore, set, set.parallax.fore) : '';
+  const dynamicProps = set?.dynamic ? `<g id="dynamic-props">${set.dynamic}</g>` : '';
+
+  // Injected ahead of the runtime as a classic script, so __parallaxOffset is
+  // defined by the time the runtime binds. A module would be deferred and the
+  // runtime would find it missing.
+  const parallax = await fs.readFile(PARALLAX_PATH, 'utf8');
 
   const actorMarkup = ir.cast
     .map((member) => {
@@ -150,6 +178,7 @@ export async function buildPage(opts: PageOptions): Promise<string> {
 <body>
 <svg id="stage" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
     ${setBack}
+    ${setMid}
     ${actorMarkup}
     ${dynamicProps}
     ${setFore}
@@ -159,6 +188,9 @@ ${cards}
 <script>
 window.__IR = ${JSON.stringify(ir)};
 window.__RIGS = ${JSON.stringify(rigData)};
+</script>
+<script>
+${parallax}
 </script>
 <script>
 ${runtime}

@@ -25,6 +25,86 @@
   var ir = null;
   var actors = {};
   var props = {};
+  var layers = [];
+
+  function parseNums(value) {
+    return String(value || '').split(',').map(Number);
+  }
+
+  /**
+   * Resolve the depth layers and their camera-tracking factors, once.
+   *
+   * Everything needed sits on the DOM as data attributes because it is constant
+   * for the whole scene — putting per-layer depth in every IR frame would cost a
+   * schema version for data that never changes.
+   */
+  function bindLayers() {
+    layers = [];
+    if (typeof window.__parallaxOffset !== 'function') {
+      throw new Error('runtime: __parallaxOffset was not defined before the runtime loaded');
+    }
+
+    var ids = ['set-back', 'set-mid', 'set-fore'];
+    for (var i = 0; i < ids.length; i++) {
+      var el = document.getElementById(ids[i]);
+      if (!el) continue;
+
+      var b = parseNums(el.getAttribute('data-bounds'));
+      var n = parseNums(el.getAttribute('data-neutral'));
+      var layer = {
+        el: el,
+        k: { x: Number(el.getAttribute('data-px')), y: Number(el.getAttribute('data-py')) },
+        bounds: { x0: b[0], y0: b[1], width: b[2], height: b[3] },
+        neutral: { x: n[0], y: n[1] },
+        last: null,
+        overrides: [],
+      };
+
+      // Instances that opted out of their layer's factor. querySelectorAll does
+      // not match the layer element itself, so this is exactly the overrides.
+      var owned = el.querySelectorAll('[data-px]');
+      for (var j = 0; j < owned.length; j++) {
+        layer.overrides.push({
+          el: owned[j],
+          k: {
+            x: Number(owned[j].getAttribute('data-px')),
+            y: Number(owned[j].getAttribute('data-py')),
+          },
+          last: null,
+        });
+      }
+
+      layers.push(layer);
+    }
+  }
+
+  function setTranslate(el, dx, dy, memo) {
+    // No offset means no attribute at all, not translate(0,0) — a set with no
+    // parallax has to produce byte-identical markup to one from before parallax
+    // existed, or every existing scene re-renders differently for no reason.
+    var value = dx === 0 && dy === 0 ? '' : 'translate(' + dx + ',' + dy + ')';
+    if (value === memo.last) return;
+    if (value === '') el.removeAttribute('transform');
+    else el.setAttribute('transform', value);
+    memo.last = value;
+  }
+
+  function applyParallax(cam) {
+    for (var i = 0; i < layers.length; i++) {
+      var layer = layers[i];
+      var d = window.__parallaxOffset(cam, layer.k, layer.bounds, layer.neutral);
+      setTranslate(layer.el, d[0], d[1], layer);
+
+      for (var j = 0; j < layer.overrides.length; j++) {
+        var o = layer.overrides[j];
+        var od = window.__parallaxOffset(cam, o.k, layer.bounds, layer.neutral);
+        // The override is nested inside the layer, so its transform composes
+        // with the layer's. Emit the difference and the two multiply out to
+        // exactly this instance's own offset.
+        setTranslate(o.el, od[0] - d[0], od[1] - d[1], o);
+      }
+    }
+  }
 
   function castKey(scene) {
     return scene.cast
@@ -107,6 +187,8 @@
         lastPlacement: null,
       };
     });
+
+    bindLayers();
 
     ir = scene;
     window.__IR = scene;
@@ -225,6 +307,7 @@
 
     var cam = frame.camera;
     root.setAttribute('viewBox', cam.x + ' ' + cam.y + ' ' + cam.w + ' ' + cam.h);
+    applyParallax(cam);
 
     for (var id in actors) {
       var actor = actors[id];

@@ -139,7 +139,7 @@ export function PreflightPopover({
         </span>
         <button type="button" onClick={onClose} className="w-5 h-5 text-ink-faint text-[12px] cursor-pointer hover:text-ink">×</button>
       </div>
-      <div className="flex-1 min-h-0 overflow-y-auto px-[11px] py-[9px] pb-3 flex flex-col gap-2">
+      <div className="flex-1 min-h-0 overflow-y-auto px-[11px] py-[9px] pb-3 flex flex-col gap-2 select-text">
         <div className="text-[11px] text-ink-dim leading-[1.5]">
           Production render is stricter than preview. Errors block export. Warnings do not, but need a review
           acknowledgement bound to these exact inputs — any relevant edit makes it stale.
@@ -203,7 +203,7 @@ export function ConfirmDialog({ spec, onClose }: { spec: ConfirmSpec; onClose: (
   return (
     <div className="absolute inset-0 bg-[rgba(12,13,15,.6)] z-[45] grid place-items-center">
       <div className="w-[430px] bg-panel border border-edge-2 rounded-[5px] shadow-[0_28px_70px_-18px_rgba(0,0,0,.85)] overflow-hidden">
-        <div className="px-4 pt-3.5 pb-3">
+        <div className="px-4 pt-3.5 pb-3 select-text">
           <div className="font-serif text-[17px] text-ink mb-[7px]">{spec.title}</div>
           <div className="text-[11.5px] text-ink-dim leading-[1.55]">{spec.body}</div>
           {spec.list && (

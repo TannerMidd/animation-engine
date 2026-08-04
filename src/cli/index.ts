@@ -4,8 +4,9 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ROOT, OUT_DIR, CAST_DIR, SCRIPTS_DIR, sceneDir } from '../core/paths.ts';
 import { loadSet, saveSet, listSets, validateSet, setPath } from '../sets/index.ts';
+import { SetDescriptor } from '../sets/schema.ts';
 import { BUILTIN_SETS, BUILTIN_SET_NAMES } from '../sets/builtins.ts';
-import { propManifest, propTags } from '../sets/props/index.ts';
+import { getProp, propManifest, propTags } from '../sets/props/index.ts';
 import { PALETTE_NAMES } from '../sets/palettes.ts';
 import { buildPlaceholderRig, buildPlaceholderSvg } from '../cast/placeholder.ts';
 import { createRig, regenerateRig } from '../cast/authoring.ts';
@@ -34,6 +35,7 @@ import {
 import { readShotList, writeShotList, shotlistPath, writeScript } from '../pipeline/scene.ts';
 import { blockingPreflightNotes, markExportManifestDraft, productionRenderBlocked } from '../pipeline/draft.ts';
 import { runDoctor } from '../pipeline/doctor.ts';
+import { bakeProp, listBakedProps, listSources, BlenderUnavailableError } from '../pipeline/propbake.ts';
 import { checkRigs, renderCastSheet } from '../pipeline/cast-tools.ts';
 import { STAGE, autoStage, renderIdle, renderStill } from '../pipeline/stills.ts';
 import {
@@ -532,6 +534,93 @@ async function cmdSets(args: Args) {
   console.log(`anim sets palettes               list palettes`);
 }
 
+/**
+ * The prop foundry, from the outside.
+ *
+ * Thin over `src/pipeline/propbake.ts` like every other command here, so the
+ * server can run the same code rather than a second implementation that slowly
+ * disagrees with this one.
+ */
+async function cmdProps(args: Args) {
+  const sub = args._[0];
+
+  if (sub === 'bake') {
+    const all = args.flags['all'] === true;
+    const name = args._[1];
+    if (!all && !name) throw new Error('usage: anim props bake <name> | anim props bake --all');
+
+    const sources = await listSources();
+    const wanted = all ? sources : sources.filter((s) => s.key === name);
+    if (!wanted.length) {
+      const known = sources.map((s) => s.key).join(', ') || '(none)';
+      throw new Error(`no bakeable source for "${name}". Sources with a build.py and bake.json: ${known}`);
+    }
+
+    for (const source of wanted) {
+      process.stdout.write(`${source.key}  baking…`);
+      try {
+        const result = await bakeProp(source, {
+          onProgress: (done, total) => process.stdout.write(`\r${source.key}  baking ${done}/${total}   `),
+        });
+        const detail = result.views
+          .map((v) => `${v.name}: ${v.shapes} shapes, ${v.points} points`)
+          .join('; ');
+        console.log(`\r${source.key}  ${detail}${' '.repeat(8)}`);
+        for (const warning of result.warnings) console.log(`  note   ${warning}`);
+        console.log(`  wrote  ${path.relative(process.cwd(), result.out)}`);
+      } catch (err) {
+        if (err instanceof BlenderUnavailableError) {
+          console.log(`\r${source.key}  cannot bake — ${err.reason}`);
+          process.exitCode = 1;
+          return;
+        }
+        console.log(`\r${source.key}  FAILED`);
+        throw err;
+      }
+    }
+    return;
+  }
+
+  if (sub === 'preview') {
+    const name = args._[1];
+    if (!name) throw new Error('usage: anim props preview <name> [--palette bar-night] [--view front]');
+    const def = getProp(name);
+    const palette = typeof args.flags['palette'] === 'string' ? args.flags['palette'] : 'office-fluorescent';
+
+    // Drop it into a plain room so it is judged the way it will be used —
+    // against the house line weight, at set scale, next to a character.
+    const desc = SetDescriptor.parse({
+      name: `prop-${name}`,
+      palette,
+      layers: {
+        back: [{ prop: 'room-wall' }, { prop: 'room-floor' }],
+        mid: [{ prop: name, x: 640, scale: num(args.flags, 'scale', 1), params: {} }],
+      },
+    });
+    await saveSet(desc);
+    console.log(`${name}  ${def.label}  palette=${palette}`);
+    console.log(`Wrote ${path.relative(process.cwd(), setPath(desc.name))}`);
+    console.log(`  npm run anim -- sets preview ${desc.name}`);
+    return;
+  }
+
+  const baked = await listBakedProps();
+  if (!baked.length) {
+    console.log('No baked props yet. A source lives in props/<name>/ as build.py plus bake.json.');
+    return;
+  }
+  for (const prop of baked) {
+    const state = prop.error ? 'BROKEN' : prop.stale ? 'STALE' : prop.stale === null ? '—' : 'current';
+    console.log(
+      `${prop.key.padEnd(18)} ${state.padEnd(8)} ${String(prop.shapes).padStart(4)} shapes  ` +
+      `${String(prop.points).padStart(5)} points  [${prop.views.join(', ')}]`,
+    );
+    if (prop.error) console.log(`${' '.repeat(18)} ${prop.error.split('\n')[0]}`);
+    if (prop.stale) console.log(`${' '.repeat(18)} source changed since the bake — anim props bake ${prop.key}`);
+  }
+  console.log(`\n"—" means hand-authored geometry with no procedural source to compare against.`);
+}
+
 async function resolveScript(arg: string | undefined): Promise<string> {
   if (!arg) throw new Error('usage: anim check <script.md>');
   const p = path.isAbsolute(arg)
@@ -912,6 +1001,24 @@ async function cmdDoctor() {
     ? 'ok (whisper small.en — generated lines are verified against the script)'
     : `unavailable — generated lines ship unverified. ${report.asr.reason?.split('\n')[0]}`}`);
 
+  // Absent Blender is a normal state, not a broken toolchain: baked geometry is
+  // committed, so the catalogue renders either way.
+  console.log(`blender    ${report.blender.ok
+    ? `ok (${report.blender.version}${report.blender.path ? `, ${report.blender.path}` : ''})`
+    : `not installed — re-baking props unavailable, existing baked props still render`}`);
+  if (!report.blender.ok && report.blender.reason) {
+    console.log(`           ${report.blender.reason}`);
+  }
+
+  const { bakedProps } = report;
+  console.log(`props      ${bakedProps.count} baked (${bakedProps.shapes} shapes, ${bakedProps.points} points)`);
+  for (const key of bakedProps.stale) {
+    console.log(`           STALE  ${key} — its source changed since the bake. Run: anim props bake ${key}`);
+  }
+  for (const failure of bakedProps.errors) {
+    console.log(`           BROKEN ${failure.file}: ${failure.error.split('\n')[0]}`);
+  }
+
   console.log(`cast       ${report.cast.length ? report.cast.join(', ') : '(none yet)'}`);
 }
 
@@ -1049,6 +1156,10 @@ const HELP = `anim — script to limited-animation scene
                          vocabulary a descriptor can draw from.
                          "sets describe <text>" designs one with the local model.
                          "sets preview <name>" renders it with characters in it
+  props                  list baked props and whether each matches its source.
+                         "props bake <name>" runs the foundry (--all for every
+                         one); "props preview <name>" renders it against a palette.
+                         Baking needs Blender; rendering a baked prop does not
   voices                 list installed SAPI voices.
                          "voices check --source <wav>" converts one performance
                          into every character voice and scores each result
@@ -1124,6 +1235,8 @@ async function main() {
       return cmdIdle(rest);
     case 'sets':
       return cmdSets(rest);
+    case 'props':
+      return cmdProps(rest);
     case 'voices':
       return rest._[0] === 'check'
         ? cmdVoicesCheck({ ...rest, _: rest._.slice(1) })

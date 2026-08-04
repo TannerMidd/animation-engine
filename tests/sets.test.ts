@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { renderSet, validateSet, SetDescriptor } from '../src/sets/index.ts';
+import { renderSet, validateSet, lintSet, SetDescriptor } from '../src/sets/index.ts';
 import { BUILTIN_SETS, BUILTIN_SET_NAMES } from '../src/sets/builtins.ts';
 import { PROPS, PROP_KEYS, propManifest, getProp } from '../src/sets/props/index.ts';
 import { PALETTES, PALETTE_NAMES, getPalette } from '../src/sets/palettes.ts';
@@ -29,6 +29,74 @@ describe('builtin sets', () => {
 
   it('emits nothing for an empty fore layer rather than stray markup', () => {
     expect(renderSet(BUILTIN_SETS['office']!).fore.trim()).toBe('');
+  });
+
+  it('keeps back and mid as separate fragments in the original draw order', () => {
+    // They were one string until the two planes could parallax independently.
+    // Order is the part that must not have changed: back, then mid, then actors.
+    const out = renderSet(BUILTIN_SETS['dive-bar']!);
+    expect(out.mid.length).toBeGreaterThan(0);
+    expect(out.back).not.toContain(out.mid);
+    const combined = [out.back, out.mid].filter(Boolean).join('\n');
+    expect(combined.indexOf(out.back)).toBe(0);
+    expect(combined.endsWith(out.mid)).toBe(true);
+  });
+
+  it.each(BUILTIN_SET_NAMES)('%s defaults to tracking the camera exactly', (name) => {
+    // Parallax is opt-in per set. A default of anything but 1 would silently
+    // re-render every scene ever made.
+    const { parallax } = renderSet(BUILTIN_SETS[name]!);
+    expect(parallax).toEqual({
+      back: { x: 1, y: 1 },
+      mid: { x: 1, y: 1 },
+      fore: { x: 1, y: 1 },
+    });
+  });
+
+  it('fills in neutral parallax for a set that predates it', () => {
+    const legacy = SetDescriptor.parse({ name: 'no-depth', layers: { mid: [{ prop: 'mug' }] } });
+    expect(legacy.layout.parallax.back).toEqual({ x: 1, y: 1 });
+    expect(legacy.layout.parallax.fore).toEqual({ x: 1, y: 1 });
+  });
+
+  it('rejects a parallax factor that looks like a slipped decimal point', () => {
+    const bad = { name: 'oops', layout: { parallax: { back: { x: 85 } } }, layers: {} };
+    expect(() => SetDescriptor.parse(bad)).toThrow();
+  });
+
+  it('wraps only the instances that opt out of their layer parallax', () => {
+    const desc = SetDescriptor.parse({
+      name: 'pinned-floor',
+      layout: { parallax: { back: { x: 0.85, y: 1 } } },
+      layers: {
+        back: [
+          { prop: 'room-wall' },
+          { prop: 'room-floor', parallax: { x: 1, y: 1 } },
+        ],
+      },
+    });
+    const out = renderSet(desc);
+    expect(out.back).toContain('data-px="1" data-py="1"');
+    // One wrapper, for the floor only — the wall rides its layer.
+    expect(out.back.match(/data-px=/g)).toHaveLength(1);
+  });
+
+  it('warns when the ground is left in a parallaxed layer', () => {
+    const drifting = SetDescriptor.parse({
+      name: 'sliding-floor',
+      layout: { parallax: { back: { x: 0.85, y: 1 } } },
+      layers: { back: [{ prop: 'room-wall' }, { prop: 'room-floor' }] },
+    });
+    const note = lintSet(drifting).find((n) => n.message.includes('contains the ground'));
+    expect(note).toBeDefined();
+    expect(note!.fix).toContain('"parallax"');
+
+    const pinned = SetDescriptor.parse({
+      name: 'pinned-floor',
+      layout: { parallax: { back: { x: 0.85, y: 1 } } },
+      layers: { back: [{ prop: 'room-wall' }, { prop: 'room-floor', parallax: { x: 1, y: 1 } }] },
+    });
+    expect(lintSet(pinned).find((n) => n.message.includes('contains the ground'))).toBeUndefined();
   });
 
   it('keeps legacy prop instances valid while preserving optional stable ids', () => {

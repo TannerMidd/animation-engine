@@ -42,11 +42,37 @@ export const SetEntityId = z
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/, 'must start with a letter or number and use only letters, numbers, . _ : or -');
 export type SetEntityId = z.infer<typeof SetEntityId>;
 
+/**
+ * How strongly something tracks the camera, per axis.
+ *
+ * 1 moves with the camera exactly — no parallax, and the behaviour every set had
+ * before this existed. Below 1 lags behind it and reads as further away; above 1
+ * leads it and reads as nearer. Bounded rather than free so that a slipped
+ * decimal point (85 for 0.85) is a validation error instead of a set that
+ * teleports on the first close-up.
+ */
+export const ParallaxFactor = z.object({
+  x: z.number().finite().min(0).max(2).default(1),
+  y: z.number().finite().min(0).max(2).default(1),
+});
+export type ParallaxFactor = z.infer<typeof ParallaxFactor>;
+
 export const PropInstance = z.object({
   /** Stable, set-local identity used by staging, attachment and contact events. */
   id: SetEntityId.optional(),
   /** Key into the prop registry. */
   prop: z.string().min(1),
+  /**
+   * Tracking factor for this instance, overriding its layer's.
+   *
+   * The case this exists for: a room's far shell and its floor sit in the same
+   * layer, but the floor is the surface the characters stand on. Parallaxing the
+   * shell is depth; parallaxing the ground plane slides it out from under
+   * everyone's feet. Rather than force the two into separate layers — which
+   * would change draw order for reasons that have nothing to do with draw order —
+   * a single prop can opt out.
+   */
+  parallax: ParallaxFactor.optional(),
   /**
    * Horizontal position in set coordinates. Omitted means the prop places
    * itself — walls and floors span the whole set and ignore x.
@@ -103,6 +129,29 @@ export const SetLayout = z.object({
   marginY: z.number().default(220),
   /** Valid actor-root blocking area in stage coordinates. */
   walkable: WalkableArea,
+  /**
+   * How each depth layer tracks the camera.
+   *
+   * Everything defaults to 1, so a set that says nothing renders exactly as it
+   * did before parallax existed — that equivalence is worth more than a
+   * pleasant default, because it means turning this on is a per-set decision
+   * rather than a silent change to every scene ever made.
+   *
+   * Two defaults are deliberate rather than merely conservative. `y` stays at 1
+   * even on sets that lag `x`: sliding a layer vertically moves the horizon line
+   * relative to the characters standing on it, and horizontal-only is how cutout
+   * parallax is normally done anyway. And `fore` stays at 1 because a leading
+   * layer reaches its own edge sooner than a lagging one — the clamp keeps it
+   * safe, but a foreground that quietly stops tracking during the tightest shot
+   * is worse than one that never started.
+   */
+  parallax: z
+    .object({
+      back: ParallaxFactor.default({}),
+      mid: ParallaxFactor.default({}),
+      fore: ParallaxFactor.default({}),
+    })
+    .default({}),
 }).superRefine((layout, ctx) => {
   const { x, y, width, height } = layout.walkable;
   if (x < 0 || y < 0 || x + width > STAGE.width || y + height > STAGE.height) {
@@ -114,6 +163,16 @@ export const SetLayout = z.object({
   }
 });
 export type SetLayout = z.infer<typeof SetLayout>;
+
+/**
+ * Every layer tracking the camera exactly — what a set did before parallax.
+ *
+ * A function rather than a shared constant so callers cannot accidentally alias
+ * one another's depth settings through a nested object.
+ */
+export function defaultParallax(): SetLayout['parallax'] {
+  return { back: { x: 1, y: 1 }, mid: { x: 1, y: 1 }, fore: { x: 1, y: 1 } };
+}
 
 export const SetDescriptor = z
   .object({

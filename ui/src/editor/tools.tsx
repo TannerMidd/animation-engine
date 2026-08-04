@@ -37,7 +37,8 @@ function ToolShell({
           {headerRight}
           <button type="button" onClick={onClose} className="w-5 h-5 text-ink-faint text-[12px] cursor-pointer hover:text-ink">×</button>
         </div>
-        <div className="flex-1 min-h-0 overflow-y-auto">{children}</div>
+        {/* Diagnostics are meant to be copied into a bug report. */}
+        <div className="flex-1 min-h-0 overflow-y-auto select-text">{children}</div>
       </div>
     </div>
   );
@@ -200,6 +201,31 @@ export function SystemReport({ onClose }: { onClose: () => void }) {
             ok={report.llm.ok}
             value={report.llm.ok ? `ok (${report.llm.models.join(', ')})` : 'unavailable'}
             detail={report.llm.ok ? null : report.llm.reason}
+          />
+          {/*
+            Blender shows as neutral rather than failed when absent. Baked props
+            are committed geometry, so a machine without it renders the whole
+            catalogue and only loses the ability to bake new props.
+          */}
+          <ReportRow
+            label="blender"
+            ok={report.blender.ok ? true : null}
+            value={report.blender.ok ? `ok (${report.blender.version})` : 'not installed'}
+            detail={report.blender.ok
+              ? report.blender.path
+              : 're-baking props unavailable — existing baked props still render'}
+            fix={report.blender.ok ? null : report.blender.reason}
+          />
+          <ReportRow
+            label="props"
+            ok={report.bakedProps.errors.length ? false : true}
+            value={`${report.bakedProps.count} baked`}
+            detail={`${report.bakedProps.shapes} shapes, ${report.bakedProps.points} points`}
+            fix={report.bakedProps.errors.length
+              ? report.bakedProps.errors.map((e) => `${e.file}: ${e.error.split('\n')[0]}`).join(' · ')
+              : report.bakedProps.stale.length
+                ? `stale against source: ${report.bakedProps.stale.join(', ')} — run: anim props bake <name>`
+                : null}
           />
 
           <SectionHead label="Model storage" />

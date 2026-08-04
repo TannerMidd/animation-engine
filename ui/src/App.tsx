@@ -5,6 +5,7 @@ import { EditorApp } from './editor/EditorApp.tsx';
 import { SetDesigner } from './components/SetDesigner.tsx';
 import { CastEditor } from './components/CastEditor.tsx';
 import { Spinner } from './editor/chrome.tsx';
+import { isTyping } from './editor/lib.ts';
 
 const STARTER = `# NEW SCENE
 
@@ -122,7 +123,18 @@ export default function App() {
   }
 
   return (
-    <div className="h-full relative">
+    <div
+      className="h-full relative"
+      /*
+       * Kill the browser's menu for the whole app, here rather than on the
+       * editor: the cast editor and set designer open as a *sibling* overlay
+       * below, so a handler inside EditorApp would never see them. Capture
+       * phase means no surface can forget to suppress it. Text fields and the
+       * script editor keep the native menu — Paste cannot be rebuilt, because
+       * the page is not allowed to read the clipboard on demand.
+       */
+      onContextMenuCapture={(e) => { if (!isTyping(e.target)) e.preventDefault(); }}
+    >
       <EditorApp
         key={scene}
         scene={scene}

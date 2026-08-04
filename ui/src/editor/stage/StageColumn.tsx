@@ -7,7 +7,8 @@ import {
   type StagePropTarget,
 } from '../../components/AnimationOverlay.tsx';
 import { Mono } from '../chrome.tsx';
-import { MARK_X, captionAt, fmtTimecode, speakerColour, type Mode } from '../lib.ts';
+import type { OpenMenu } from '../ContextMenu.tsx';
+import { MARK_X, captionAt, fmtTimecode, isTyping, speakerColour, type Mode } from '../lib.ts';
 import { buildSnapCandidates, listPropTargets } from './interaction.ts';
 
 interface RuntimeWindow extends Window {
@@ -87,10 +88,11 @@ export const StageColumn = forwardRef<StageHandle, {
   onAudioError?: (message: string) => void;
   toolbarExtra?: ReactNode;
   bottomStrip?: ReactNode;
+  onContextMenu: OpenMenu;
 }>(function StageColumn({
   mode, preview, audioUrl, shots, beatStarts, totalMs, selected, setDescriptor,
   prefs, onPrefs, onPlayhead, onSelectBeat, animationTarget, validArea, onCommitProp,
-  recording, draftMarked, previewError, onAudioError, bottomStrip,
+  recording, draftMarked, previewError, onAudioError, bottomStrip, onContextMenu,
 }, ref) {
   const host = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -244,14 +246,54 @@ export const StageColumn = forwardRef<StageHandle, {
   }, [width, height]);
 
   const scale = zoom ?? fitScale;
+
+  /**
+   * The picture is an iframe, so a right-click on it never reaches the app —
+   * the parent's suppressor cannot see it, and the *iframe's* own browser menu
+   * is what opens. It is same-origin by design (the dev server proxies
+   * /preview for exactly this reason), so listen inside it and hand the event
+   * back out.
+   *
+   * Coordinates have to come out too: the frame is scaled from its top left,
+   * so an inner point sits at `rect.left + x * scale`.
+   */
+  useEffect(() => {
+    const frameEl = iframeRef.current;
+    const doc = frameEl?.contentDocument;
+    if (!frameEl || !doc) return;
+    const onMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      const rect = frameEl.getBoundingClientRect();
+      onContextMenu({
+        clientX: rect.left + e.clientX * scale,
+        clientY: rect.top + e.clientY * scale,
+        preventDefault: () => {},
+        stopPropagation: () => {},
+      }, { kind: 'stage' });
+    };
+    doc.addEventListener('contextmenu', onMenu);
+    return () => doc.removeEventListener('contextmenu', onMenu);
+    // `ready` is a dependency because the iframe's document is replaced as the
+    // preview loads — the listener has to be reattached to the new one.
+  }, [preview?.previewId, ready, scale, onContextMenu]);
+
   const playMs = (frame / fps) * 1000;
   const activeBeatIndex = beatStarts.length
     ? beatStarts.reduce((acc, start, i) => (playMs >= start ? i : acc), 0)
     : 0;
   const activeBeat: Beat | null = shots?.beats[activeBeatIndex] ?? null;
 
+  /**
+   * Scrub the transport. Same shape as the timeline's — preventDefault keeps
+   * the drag from selecting the chrome it crosses, and pointer capture keeps a
+   * release over the preview iframe from leaving the scrub running.
+   */
   const scrub = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    if (isTyping(document.activeElement)) (document.activeElement as HTMLElement).blur();
     const el = e.currentTarget;
+    const pointerId = e.pointerId;
     const move = (clientX: number) => {
       const rect = el.getBoundingClientRect();
       const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
@@ -260,12 +302,18 @@ export const StageColumn = forwardRef<StageHandle, {
     };
     move(e.clientX);
     const onMove = (ev: PointerEvent) => move(ev.clientX);
-    const onUp = () => {
+    const stop = () => {
       window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointerup', stop);
+      window.removeEventListener('pointercancel', stop);
+      window.removeEventListener('blur', stop);
+      try { el.releasePointerCapture(pointerId); } catch { /* already released */ }
     };
+    try { el.setPointerCapture(pointerId); } catch { /* best effort — window listeners still track */ }
     window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointerup', stop);
+    window.addEventListener('pointercancel', stop);
+    window.addEventListener('blur', stop);
   };
 
   const tools: Array<{ label: string; hint: string; on?: boolean; go?: () => void }> = [
@@ -408,7 +456,7 @@ export const StageColumn = forwardRef<StageHandle, {
                   <div className="flex items-center gap-1.5 mb-1.5">
                     <span className="text-[8.5px] tracking-[.07em] uppercase text-bad border border-bad rounded-[2px] px-1">preview blocked</span>
                   </div>
-                  <div className="text-[11px] text-[#d6c3c3] leading-[1.5]">{previewError}</div>
+                  <div className="text-[11px] text-[#d6c3c3] leading-[1.5] select-text">{previewError}</div>
                   <div className="text-[10px] text-ink-faint leading-[1.5] mt-1.5">
                     Fix the beat in the inspector — unstaged action beats carry a red ! in the shot list.
                   </div>
@@ -582,6 +630,7 @@ export const StageColumn = forwardRef<StageHandle, {
               propTargets={propTargets}
               onCommitProp={onCommitProp}
               onInteractStart={() => setPlaying(false)}
+              onContextMenu={onContextMenu}
             />
           )}
         </div>
@@ -623,7 +672,7 @@ export const StageColumn = forwardRef<StageHandle, {
         <span className="font-mono text-[11px] text-ink whitespace-nowrap shrink-0">
           {fmtTimecode(playMs)} <span className="text-ink-ghost">/ {fmtTimecode(durationMs)}</span>
         </span>
-        <div onPointerDown={ready ? scrub : undefined} title="Scrub" className="flex-1 h-[22px] flex items-center cursor-ew-resize relative">
+        <div onPointerDown={ready ? scrub : undefined} title="Scrub" className="flex-1 h-[22px] flex items-center cursor-ew-resize relative touch-none">
           <div className="w-full h-[3px] rounded-[2px] bg-panel-2 relative">
             <div
               className="absolute left-0 top-0 bottom-0 bg-accent rounded-[2px]"

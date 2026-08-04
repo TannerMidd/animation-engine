@@ -66,3 +66,28 @@ export function clientToWorld(
 export function worldPerCssPx(cam: CameraRect, g: FrameGeom): number {
   return cam.w / (g.width * g.scale);
 }
+
+/**
+ * The parallax translation currently applied to one set layer.
+ *
+ * Read back off the preview document rather than recomputed here. The overlay's
+ * only job is to put a handle on top of the art, so the one number that can
+ * never be wrong is the one the renderer actually used — recomputing it would
+ * add a second implementation of the depth maths whose whole purpose is to agree
+ * with the first.
+ *
+ * A layer with no parallax carries no transform at all, so the common case is
+ * the early return.
+ */
+export function layerParallaxOffset(
+  doc: Document | null | undefined,
+  layer: string,
+): [number, number] {
+  const value = doc?.getElementById(`set-${layer}`)?.getAttribute('transform');
+  if (!value) return [0, 0];
+  const match = /^translate\(\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*\)$/.exec(value);
+  if (!match) return [0, 0];
+  const dx = Number(match[1]);
+  const dy = Number(match[2]);
+  return Number.isFinite(dx) && Number.isFinite(dy) ? [dx, dy] : [0, 0];
+}

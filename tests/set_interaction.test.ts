@@ -96,7 +96,9 @@ describe('production office proof set', () => {
       .toThrow(/no seat handle/i);
 
     const rendered = renderSet(set);
-    expect(rendered.back).toContain('data-prop-id="desk-main"');
+    // The desk is furniture, so it lives in "mid" — a separate fragment from
+    // "back" since those two planes can parallax independently.
+    expect(rendered.mid).toContain('data-prop-id="desk-main"');
     expect(rendered.dynamic).toContain('dynamic-prop-mug-hero');
   });
 });

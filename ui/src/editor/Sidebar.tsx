@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { AnimationDocument, CastSummary, DialogueDocument, Health, SceneDetail, SceneSummary, SetSummary, ShotList } from '../types.ts';
 import { Dot, SectionRule } from './chrome.tsx';
+import type { MenuTarget, OpenMenu } from './ContextMenu.tsx';
 import { cueUndecided, type Mode } from './lib.ts';
 
 interface Row {
@@ -18,14 +19,17 @@ interface Row {
   count?: string;
   hint: string;
   go?: () => void;
+  /** What a right-click on this row is about. */
+  menu?: MenuTarget;
 }
 
-function TreeRow({ row }: { row: Row }) {
+function TreeRow({ row, onContextMenu }: { row: Row; onContextMenu: OpenMenu }) {
   return (
     <button
       type="button"
       title={row.hint}
       onClick={row.go}
+      onContextMenu={row.menu ? (e) => onContextMenu(e, row.menu!) : undefined}
       className="w-full flex items-center gap-1.5 pr-2 border-0 text-left cursor-pointer hover:bg-panel-2"
       style={{
         height: row.h,
@@ -66,6 +70,7 @@ function TreeRow({ row }: { row: Row }) {
 export function Sidebar({
   scenes, scene, detail, shots, dialogue, animation, dirty, hasStaleRender, staleBeats,
   cast, sets, health, mode, onScene, onMode, onNewScene, onOpenCast, onOpenSets, onOpenSystem,
+  onContextMenu,
 }: {
   scenes: SceneSummary[];
   scene: string | null;
@@ -88,6 +93,7 @@ export function Sidebar({
   onOpenSets: (name: string | null) => void;
   /** The health strip opens the full System report — doctor, in the place people already look. */
   onOpenSystem: () => void;
+  onContextMenu: OpenMenu;
 }) {
   const [filter, setFilter] = useState('');
   const [open, setOpen] = useState<Record<string, boolean>>({ scripts: true, cast: true, sets: true });
@@ -116,11 +122,13 @@ export function Sidebar({
         hint: summary?.directed
           ? `${summary.beats} beats · directed${summary.hasVideo ? ' · rendered' : ''}${staleBeats ? ' · the script has moved ahead' : ''}`
           : 'undirected',
+        menu: { kind: 'scene', name: scene },
       },
       {
         key: 'md', label: `${scene}.md`, glyph: '≡', pad: 22, h: 22,
         dot: dirty ? { color: '#c8834a', hint: 'Modified — unsaved edits' } : undefined,
         hint: 'Fountain source. Saved on a 500 ms debounce.', go: () => onMode('write'),
+        menu: { kind: 'sceneFile', file: 'script' },
       },
     ];
     if (shots) {
@@ -136,16 +144,19 @@ export function Sidebar({
           ? 'Readable shot list — behind the script. Apply direction to catch it up.'
           : 'Readable shot list. Edit it here or by hand.',
         go: () => onMode('direct'),
+        menu: { kind: 'sceneFile', file: 'shotlist' },
       });
       rows.push({
         key: 'dialogue', label: 'dialogue.json', glyph: '▤', pad: 22, h: 22,
         dot: behind ?? (missing ? { color: '#c8595a', hint: `${missing} of ${lineCues.length} lines undecided` } : { color: '#6f9b5a', hint: 'Every line has a decided voice' }),
         hint: 'Immutable takes, trims, approvals, timing.', go: () => onMode('perform'),
+        menu: { kind: 'sceneFile', file: 'dialogue' },
       });
       rows.push({
         key: 'animation', label: 'animation.json', glyph: '▤', pad: 22, h: 22,
         dot: behind ?? (lockedSegments ? { color: '#a89050', hint: `${lockedSegments} locked motion segment${lockedSegments === 1 ? '' : 's'}` } : undefined),
         hint: 'Generated + creator-owned motion layers.', go: () => onMode('animate'),
+        menu: { kind: 'sceneFile', file: 'animation' },
       });
     }
     if (detail?.hasVideo) {
@@ -154,6 +165,7 @@ export function Sidebar({
         dot: hasStaleRender ? { color: '#5e6874', hint: 'Stale — inputs changed since this render' } : { color: '#6f9b5a', hint: 'Current render' },
         hint: 'Rendered master. Opens in a new tab.',
         go: () => window.open(`/api/scenes/${scene}/video`, '_blank'),
+        menu: { kind: 'sceneFile', file: 'video' },
       });
     }
     return rows;
@@ -178,6 +190,7 @@ export function Sidebar({
           dot: s.hasVideo ? { color: '#6f9b5a', hint: 'Rendered' } : undefined,
           hint: s.directed ? `${s.beats} beats · directed` : 'undirected',
           go: () => onScene(s.name),
+          menu: { kind: 'scene', name: s.name },
         });
       }
       rows.push({
@@ -195,6 +208,7 @@ export function Sidebar({
             ? { color: '#6f9b5a', hint: 'Rig valid · voice reference bound' }
             : { color: '#c8595a', hint: 'Missing voice reference — conversion is blocked' },
           hint: 'Open the cast editor', go: () => onOpenCast(member.name),
+          menu: { kind: 'cast', name: member.name },
         });
       }
     }
@@ -208,6 +222,7 @@ export function Sidebar({
           fg: inUse ? '#e6e3dc' : '#6b737d',
           dot: inUse ? { color: '#c8834a', hint: 'In use by this scene' } : undefined,
           hint: `${s.propCount} props · palette ${s.palette}`, go: () => onOpenSets(s.name),
+          menu: { kind: 'set', name: s.name },
         });
       }
     }
@@ -255,12 +270,12 @@ export function Sidebar({
 
       <div className="flex-1 min-h-0 overflow-y-auto py-1.5 pb-2.5">
         <SectionRule label="Open scene" />
-        {openSceneRows.map((row) => <TreeRow key={row.key} row={row} />)}
+        {openSceneRows.map((row) => <TreeRow key={row.key} row={row} onContextMenu={onContextMenu} />)}
 
         <div className="pt-2">
           <SectionRule label="Project" />
         </div>
-        {projectRows.map((row) => <TreeRow key={row.key} row={row} />)}
+        {projectRows.map((row) => <TreeRow key={row.key} row={row} onContextMenu={onContextMenu} />)}
       </div>
 
       <button

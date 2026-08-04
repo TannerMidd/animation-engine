@@ -1,0 +1,52 @@
+{
+  "label": "Room (perspective)",
+  "tags": [
+    "structure",
+    "interior",
+    "baked"
+  ],
+  "spanning": true,
+  "resolution": [
+    2120,
+    1160
+  ],
+  "frame": [
+    -420,
+    -220,
+    1700,
+    940
+  ],
+  "horizon_probe": [
+    0,
+    7.0,
+    0
+  ],
+  "ceiling_probe": [
+    0,
+    7.0,
+    3.2
+  ],
+  "coplanar_angle": 1.5,
+  "params": {
+    "width": 6.0,
+    "depth": 7.0,
+    "height": 3.2,
+    "ceiling_panels": true
+  },
+  "views": {
+    "default": {
+      "type": "persp",
+      "lens": 31.442,
+      "location": [
+        0,
+        -5.5,
+        1.3907
+      ],
+      "target": [
+        0,
+        0,
+        1.3907
+      ]
+    }
+  }
+}

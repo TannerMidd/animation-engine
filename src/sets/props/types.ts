@@ -85,6 +85,21 @@ export interface PropDef {
   params: ParamSpec[];
   /** Spans the whole set and draws in set coordinates. Walls, floors, skies. */
   spanning?: boolean;
+  /**
+   * The stage geometry a baked spanning prop was projected against.
+   *
+   * Only baked rooms have one. Perspective is baked in, so unlike a drawn wall
+   * this prop cannot adapt to a different horizon — the linter compares this
+   * against the set's own layout and says so when they have drifted apart.
+   */
+  bakedFrame?: {
+    x0: number;
+    y0: number;
+    width: number;
+    height: number;
+    horizonY: number;
+    ceilingY: number;
+  };
   /** Optional local-space bounds and stable handles for staging/contact authoring. */
   interaction?: PropInteractionGeometry;
   /** Resolve parameter-bound geometry for a concrete set instance. */

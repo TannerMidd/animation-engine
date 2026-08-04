@@ -641,6 +641,14 @@ export interface DoctorReport {
   engines: Array<{ name: string; ok: boolean; reason: string | null; checking?: boolean }>;
   asr: { ok: boolean; reason: string | null };
   cast: string[];
+  blender: { ok: boolean; version: string | null; path: string | null; reason: string | null };
+  bakedProps: {
+    count: number;
+    shapes: number;
+    points: number;
+    stale: string[];
+    errors: Array<{ file: string; error: string }>;
+  };
 }
 
 export interface ProfileValidation {

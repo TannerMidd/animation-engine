@@ -44,7 +44,13 @@ It also cannot go up.
 
 BRAD
 (warm)
-Which is why we hit target every quarter for the next four hundred years. Finance cried.
+Which is why we hit target every quarter for the next four hundred years.
+
+[BEAT 1000]
+
+BRAD
+(smug)
+Finance cried.
 
 [BEAT 800]
 
@@ -58,7 +64,7 @@ Face north.
 
 MEGAN
 (alarmed)
-That's the job?
+That's all I do?
 
 BRAD
 (pleased)

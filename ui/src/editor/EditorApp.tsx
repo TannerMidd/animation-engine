@@ -16,11 +16,12 @@ import { StageColumn, type OverlayPrefs, type StageHandle } from './stage/StageC
 import { ExportStrip, ShotStrip, TakeStrip } from './stage/strips.tsx';
 import { LinesPane, MixerPane, ReadinessPane, ScriptPane, subPaneWidth } from './panes.tsx';
 import { CommandPalette, ConfirmDialog, PreflightPopover, type Command, type ConfirmSpec } from './overlays.tsx';
+import { ContextMenu, act, sep, section, type MenuItem, type MenuTarget, type OpenMenu } from './ContextMenu.tsx';
 import { AuditionOverlay, CompareOverlay, ConversionCheckOverlay, SystemReport } from './tools.tsx';
 import { Mono, Spinner } from './chrome.tsx';
 import {
-  beatSpine, beatStartsFor, cueForBeat, defaultTabFor, fmtTimecode, motionDeletionBlocker, speakerColour,
-  spineDrift, totalMsFor, withoutMotionSegment, type InspectorTab, type Mode,
+  beatSpine, beatStartsFor, cueForBeat, defaultTabFor, fmtTimecode, isTyping, motionDeletionBlocker,
+  MODE_DEFS, speakerColour, spineDrift, totalMsFor, withoutMotionSegment, type InspectorTab, type Mode,
 } from './lib.ts';
 
 type Quality = 'Draft' | 'Accurate' | 'Final';
@@ -99,6 +100,11 @@ export function EditorApp({
   /** Set once the creator picks; auto-defaulting must never override a choice. */
   const engineChosen = useRef(false);
   const [confirm, setConfirm] = useState<ConfirmSpec | null>(null);
+  /** Where the context menu is and what it is about; its items are built at render. */
+  const [menu, setMenu] = useState<{ x: number; y: number; target: MenuTarget } | null>(null);
+  /** Timeline view state, up here because the context menu drives it too. */
+  const [timelineZoom, setTimelineZoom] = useState(1);
+  const [trackLocks, setTrackLocks] = useState<Record<string, boolean>>({});
   const [writing, setWriting] = useState(false);
   const [genBusy, setGenBusy] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
@@ -1050,12 +1056,6 @@ export function EditorApp({
 
   // --- keyboard ---
   useEffect(() => {
-    const isTyping = (target: EventTarget | null) => {
-      const el = target as HTMLElement | null;
-      if (!el) return false;
-      return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT'
-        || el.isContentEditable || Boolean(el.closest?.('.cm-editor'));
-    };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
@@ -1063,6 +1063,10 @@ export function EditorApp({
         return;
       }
       if (e.key === 'Escape') {
+        // The context menu closes itself, in the capture phase. This is the
+        // backstop: without it, one Escape with a menu open over a dialog would
+        // dismiss both, and the menu's own guard depends on it holding focus.
+        if (menu) return;
         setCmd(false);
         setPreflightOpen(false);
         setConfirm(null);
@@ -1087,7 +1091,7 @@ export function EditorApp({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [askDeleteMotion, selected, selectedMotionId, shots, selectBeat]);
+  }, [askDeleteMotion, selected, selectedMotionId, shots, selectBeat, menu]);
 
   // --- context tools per mode ---
   const tools: ContextTool[] = useMemo(() => {
@@ -1216,6 +1220,222 @@ export function EditorApp({
     refreshPreflight, askRenderMaster, askRenderDraft, askRenderReel, runCastCheck, runContactSheet, switchIdentity,
     onScene, onOpenCast, onOpenSets, selectBeat,
   ]);
+
+  // --- context menu ---
+  /**
+   * Right-click selects what it is about, then opens.
+   *
+   * Selecting without seeking is deliberate: the menu must not rearrange the
+   * thing it is a menu for. For the same reason a dialogue clip does not go
+   * through `selectVoice`, which force-switches mode — that becomes an item you
+   * can choose instead of a side effect you cannot decline.
+   */
+  const openMenu: OpenMenu = (e, target) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (target.kind === 'beat' || target.kind === 'dialogue') selectBeat(target.index, false);
+    if (target.kind === 'motion') setSelectedMotionId(target.segmentId);
+    // Chrome reports 0,0 for a keyboard-invoked menu (the Menu key, Shift+F10).
+    // Anchor those to the focused row instead of the corner of the screen.
+    const box = e.clientX === 0 && e.clientY === 0
+      ? (document.activeElement as HTMLElement | null)?.getBoundingClientRect() ?? null
+      : null;
+    setMenu({ x: box ? box.left : e.clientX, y: box ? box.bottom : e.clientY, target });
+  };
+
+  /**
+   * What each kind of thing can do, assembled from the actions that already
+   * exist. Built during render rather than memoized: it closes over most of
+   * this component, and computing it live is what keeps the ✓ marks honest.
+   */
+  function menuItemsFor(target: MenuTarget): MenuItem[] {
+    const goMode = (m: Mode, label: string) => act({ label, on: mode === m, go: () => setMode(m) });
+    const overlay = (key: keyof OverlayPrefs, label: string) =>
+      act({ label, on: prefs[key], go: () => setPrefs({ [key]: !prefs[key] }) });
+    const snapItem = act({ label: 'Snap to beats', on: prefs.snap, go: () => setPrefs({ snap: !prefs.snap }) });
+    const fitItem = act({ label: 'Fit scene to width', on: timelineZoom === 1, go: () => setTimelineZoom(1) });
+
+    switch (target.kind) {
+      case 'beat': {
+        const beat = shots?.beats[target.index];
+        if (!beat) return [];
+        return [
+          act({ label: 'Edit this beat', keys: '↵', go: () => { selectBeat(target.index); selectTab('beat'); } }),
+          act({
+            label: beat.locked ? 'Unlock beat' : 'Lock beat',
+            on: beat.locked,
+            hint: 'Locked beats survive a re-direct untouched.',
+            go: () => void editBeat(target.index, { ...beat, locked: !beat.locked }),
+          }),
+          act({
+            label: 'Play from here',
+            keys: 'Space',
+            go: () => stageRef.current?.seekMs(beatStarts[target.index] ?? 0),
+          }),
+          sep,
+          goMode('write', 'Open in Write'),
+          goMode('direct', 'Open in Direct'),
+        ];
+      }
+      case 'dialogue': {
+        const beat = shots?.beats[target.index];
+        const cue = cueForBeat(dialogue, beat ?? null);
+        if (!cue) return [];
+        const takeId = cue.selectedTakeId;
+        const rigName = shots?.cast.find((m) => m.id === cue.speaker)?.rig ?? cue.speaker;
+        const bound = Boolean(cast.find((c) => c.name === rigName)?.voiceRef);
+        return [
+          act({ label: 'Open in Perform', go: () => selectVoice(target.index) }),
+          act({ label: 'Line Booth', hint: 'Perform this line with context playback and a count-in.', go: () => { selectVoice(target.index); openBooth(); } }),
+          sep,
+          act({
+            label: 'Use the character voice',
+            hint: 'Approve the generated voice for this line — the explicit decision that no recording is intended.',
+            go: () => useGenerated(cue, 'line'),
+          }),
+          act({
+            label: 'Convert to the character voice',
+            disabled: !takeId || !bound,
+            disabledReason: !takeId
+              ? 'Record or select a take first — conversion needs a performance to convert.'
+              : `${rigName} has no voice reference yet. Give them one in the cast editor.`,
+            go: () => convertToCharacter(cue),
+          }),
+          act({
+            label: 'Check the conversion',
+            disabled: !takeId,
+            disabledReason: 'No take is selected for this line.',
+            go: () => takeId && setScoreTake({
+              takeId,
+              label: `${cue.speaker} — “${cue.displayText.slice(0, 44)}${cue.displayText.length > 44 ? '…' : ''}”`,
+            }),
+          }),
+          sep,
+          act({
+            label: 'Discard the selected take',
+            danger: true,
+            disabled: !takeId,
+            disabledReason: 'No take is selected for this line.',
+            go: () => takeId && discardTake(takeId),
+          }),
+        ];
+      }
+      case 'motion': {
+        const blocker = animation ? motionDeletionBlocker(animation, target.segmentId) : 'No animation document is loaded.';
+        return [
+          act({
+            label: 'Open in Animate',
+            go: () => {
+              setSelected(null);
+              setSelectedMotionId(target.segmentId);
+              setMode('animate');
+            },
+          }),
+          sep,
+          act({
+            label: 'Delete motion',
+            danger: true,
+            keys: 'Del',
+            disabled: Boolean(blocker) || busy === 'delete-motion',
+            disabledReason: blocker ?? 'A motion delete is already running.',
+            go: () => askDeleteMotion(target.segmentId),
+          }),
+        ];
+      }
+      case 'track':
+        return [
+          act({
+            label: trackLocks[target.trackId] ? 'Unlock track' : 'Lock track',
+            on: trackLocks[target.trackId],
+            hint: 'A locked track ignores clicks on its clips.',
+            go: () => setTrackLocks((l) => ({ ...l, [target.trackId]: !l[target.trackId] })),
+          }),
+          sep,
+          snapItem,
+          fitItem,
+        ];
+      case 'ruler':
+      case 'lane':
+        return [
+          act({ label: 'Play from here', go: () => stageRef.current?.seekMs(target.ms) }),
+          sep,
+          snapItem,
+          fitItem,
+          sep,
+          act({ label: 'Command palette…', keys: '⌘K', go: () => setCmd(true) }),
+        ];
+      case 'actor': {
+        const member = shots?.cast.find((item) => item.id === target.actorId);
+        return [
+          act({ label: `Open ${target.actorId} in the cast editor`, go: () => onOpenCast(member?.rig ?? target.actorId) }),
+          act({ label: 'Character inspector', go: () => selectTab('character') }),
+          sep,
+          goMode('animate', 'Animate this character'),
+        ];
+      }
+      case 'prop':
+        return [
+          act({ label: 'Prop inspector', go: () => selectTab('prop') }),
+          act({ label: 'Open the set designer', go: () => onOpenSets(setName) }),
+        ];
+      case 'stage':
+        return [
+          act({ label: 'Play / pause', keys: 'Space', go: () => stageRef.current?.togglePlay() }),
+          sep,
+          section('Overlays'),
+          overlay('grid', 'Composition grid'),
+          overlay('safe', 'Safe areas'),
+          overlay('marks', 'Actor marks'),
+          overlay('path', 'Motion path'),
+          overlay('captions', 'Captions'),
+        ];
+      case 'scene':
+        return [
+          act({ label: `Open ${target.name}`, disabled: target.name === scene, disabledReason: 'Already open.', go: () => onScene(target.name) }),
+          sep,
+          act({ label: 'New scene…', go: onNewScene }),
+        ];
+      case 'cast':
+        return [
+          act({ label: `Open ${target.name} in the cast editor`, go: () => onOpenCast(target.name) }),
+          sep,
+          act({ label: 'Validate cast rigs', go: () => void runCastCheck() }),
+          act({ label: 'Contact sheet — whole cast', go: () => void runContactSheet() }),
+        ];
+      case 'set':
+        return [act({ label: `Open ${target.name} in the set designer`, go: () => onOpenSets(target.name) })];
+      case 'sceneFile': {
+        const open = (path: string) => window.open(`/api/scenes/${scene}/${path}`, '_blank');
+        if (target.file === 'video') {
+          return [
+            act({ label: 'Open the render', disabled: !detail?.hasExport, disabledReason: 'Nothing has been rendered yet.', go: () => open('video') }),
+            act({ label: 'Export manifest', disabled: !detail?.hasExport, disabledReason: 'Written by the render.', go: () => open('export') }),
+            sep,
+            goMode('publish', 'Open in Publish'),
+          ];
+        }
+        const owner: Record<Exclude<typeof target.file, 'video'>, Mode> = {
+          script: 'write', shotlist: 'direct', dialogue: 'perform', animation: 'animate',
+        };
+        return [
+          goMode(owner[target.file], `Open in ${owner[target.file][0]!.toUpperCase()}${owner[target.file].slice(1)}`),
+          sep,
+          act({ label: 'Production readiness', go: () => { setPreflightOpen(true); void refreshPreflight(); } }),
+        ];
+      }
+      case 'chrome':
+        return [
+          act({ label: 'Command palette…', keys: '⌘K', go: () => setCmd(true) }),
+          sep,
+          section('Go to'),
+          ...MODE_DEFS.map((m) => goMode(m.id, m.label)),
+          sep,
+          act({ label: 'Check', hint: 'Parse, direct and validate. Sub-second, renders nothing.', go: () => void runCheck() }),
+          act({ label: 'Production readiness', go: () => { setPreflightOpen(true); void refreshPreflight(); } }),
+          act({ label: 'System report', go: () => setSystemOpen(true) }),
+        ];
+    }
+  }
 
   // --- assembled pieces ---
   const identityLabel = show ? `${show.active.id}@${show.active.hash.slice(0, 12)}` : '…';
@@ -1375,7 +1595,15 @@ export function EditorApp({
     : 'nothing selected';
 
   return (
-    <div className="h-full flex flex-col bg-stage text-ink text-[12px] overflow-hidden relative">
+    <div
+      className="h-full flex flex-col bg-stage text-ink text-[12px] overflow-hidden relative"
+      /*
+       * The fallback menu, so right-click is never dead. Bubble phase, which
+       * gives specificity for free: a clip's own handler runs first and stops
+       * propagation, so this only fires on chrome nothing else claimed.
+       */
+      onContextMenu={(e) => { if (!isTyping(e.target)) openMenu(e, { kind: 'chrome' }); }}
+    >
       <AppBar
         sceneTitle={sceneTitle}
         sceneMeta={sceneMeta}
@@ -1442,6 +1670,7 @@ export function EditorApp({
           onOpenCast={onOpenCast}
           onOpenSets={onOpenSets}
           onOpenSystem={() => setSystemOpen(true)}
+          onContextMenu={openMenu}
         />
 
         <div className="flex-1 min-w-0 flex flex-col bg-deep">
@@ -1469,6 +1698,7 @@ export function EditorApp({
               draftMarked={Boolean(preflight?.productionBlocked)}
               previewError={preview ? null : error}
               bottomStrip={bottomStrip}
+              onContextMenu={openMenu}
             />
           </div>
         </div>
@@ -1521,7 +1751,11 @@ export function EditorApp({
         selectedMotionId={selectedMotionId}
         motionBusy={busy === 'delete-motion'}
         snap={prefs.snap}
+        zoom={timelineZoom}
+        locks={trackLocks}
         onToggleSnap={() => setPrefs({ snap: !prefs.snap })}
+        onZoom={setTimelineZoom}
+        onToggleLock={(trackId) => setTrackLocks((l) => ({ ...l, [trackId]: !l[trackId] }))}
         onSelect={selectBeat}
         onScrub={(ms) => stageRef.current?.seekMs(ms)}
         onSelectVoice={selectVoice}
@@ -1531,10 +1765,11 @@ export function EditorApp({
           setMode('animate');
         }}
         onDeleteMotion={askDeleteMotion}
+        onContextMenu={openMenu}
       />
 
       {/* status bar */}
-      <div className="h-[22px] shrink-0 flex items-center gap-2.5 px-2.5 bg-deep border-t border-edge font-mono text-[10px] text-ink-faint">
+      <div className="h-[22px] shrink-0 flex items-center gap-2.5 px-2.5 bg-deep border-t border-edge font-mono text-[10px] text-ink-faint select-text">
         <span>{statusSel}</span>
         <span className="text-edge">│</span>
         <span>{fmtTimecode(playheadMs)} / {fmtTimecode(totalMs)}</span>
@@ -1582,7 +1817,7 @@ export function EditorApp({
               <div className="flex-1" />
               <button type="button" onClick={() => setError(null)} className="text-ink-faint text-[11px] cursor-pointer hover:text-ink">×</button>
             </div>
-            <div className="text-[11px] text-[#d6c3c3] leading-[1.45] break-words">{error}</div>
+            <div className="text-[11px] text-[#d6c3c3] leading-[1.45] break-words select-text">{error}</div>
           </div>
         )}
         {info && (
@@ -1592,7 +1827,7 @@ export function EditorApp({
               <div className="flex-1" />
               <button type="button" onClick={() => setInfo(null)} className="text-ink-faint text-[11px] cursor-pointer hover:text-ink">×</button>
             </div>
-            <div className="text-[11px] text-[#c9ccd1] leading-[1.45] break-words">{info}</div>
+            <div className="text-[11px] text-[#c9ccd1] leading-[1.45] break-words select-text">{info}</div>
           </div>
         )}
       </div>
@@ -1622,6 +1857,14 @@ export function EditorApp({
         />
       )}
       {confirm && <ConfirmDialog spec={confirm} onClose={() => setConfirm(null)} />}
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={menuItemsFor(menu.target)}
+          onClose={() => setMenu(null)}
+        />
+      )}
       {writing && (
         <GenerateDialog
           title="Write a scene"

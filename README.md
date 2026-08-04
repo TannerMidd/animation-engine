@@ -88,6 +88,44 @@ nothing else. Every seeded stream (looks, voices, wardrobe, blinks, fidgets)
 keys off ids under the show's seed. Locks (`locks: ["look.hair"]` on a rig,
 `locked: true` on a beat) survive every regeneration and every director rerun.
 
+## Depth
+
+Two independent things, both opt-in, neither of which changes an existing scene
+until you ask.
+
+**Parallax.** `back`, `mid` and `fore` were pure draw order; they can now track
+the camera at different rates. `layout.parallax` gives each layer a factor — 1
+moves with the camera exactly (the default, and what every set did before), below
+1 lags and reads as further away. Offsets are measured from the camera's *centre*,
+so a centred push-in produces no drift, and each layer's travel is clamped to its
+own artwork so parallax can never open a hole at the edge of frame.
+
+Horizontal only by default: sliding a layer vertically moves the horizon line
+relative to the characters standing on it. For the same reason a single prop can
+opt out of its layer with `"parallax": { "x": 1, "y": 1 }` — that is how a floor
+stays put while the wall behind it recedes. The set designer flags it if you forget.
+
+**The prop foundry.** Props are flat elevations because they are drawn as flat
+elevations. `props/<name>/build.py` is a procedural Blender source; `anim props
+bake <name>` runs Blender headlessly, projects the geometry to polylines, and
+commits them as `<name>.geo.json`. The result registers as an ordinary prop — the
+designer palette, the set schema and the set-generating model all pick it up with
+no further work.
+
+The output goes through the same wobble, off-register fill and jittered line
+weight as a hand-drawn rectangle, so a baked staircase and a drawn desk look like
+they came from the same hand. Baked geometry is committed, which is the point:
+**rendering never runs Blender.** A checkout without it draws the whole catalogue
+and simply cannot bake new props — `anim doctor` reports it that way rather than
+as a broken toolchain.
+
+Spanning bakes are rooms with real perspective, and they carry the stage geometry
+they were projected against. That is a commitment a drawn wall does not make: the
+horizon is fixed at bake time, so the designer compares it against the set's own
+layout and tells you when the two have drifted apart. Rooms are baked in one-point
+perspective, and the baker refuses anything else — the engine stands actors at one
+height whatever their x, so a two-point room would imply staging it cannot do.
+
 ## The UI
 
 ```bash
@@ -267,6 +305,7 @@ speaks every line, lipsyncs it, renders, and muxes — from an empty `cast/` fol
 | `still [name...]` | one frame to a PNG — `--pose`, `--expression` |
 | `idle [name...]` | an idling MP4 — `--seconds`, `--char-fps` |
 | `sets` | list sets; `sets props`, `sets palettes`, `sets preview <name>` |
+| `props` | list baked props and whether each still matches its source; `props bake <name>` (`--all`), `props preview <name>` |
 | `voices` | list SAPI voices; `voices bench` renders a cast listening sheet, `voices check --source <wav>` scores conversion |
 | `doctor` | check the toolchain |
 
@@ -429,7 +468,9 @@ src/
   style/      hand-drawn line treatment: wobble, weight, misregistration, grain
   audio/      mix bus, ambience, Foley, stings, loudness QA
   render/     browser runtime, page builder, framing, capture, ffmpeg
-  sets/       descriptors, prop registry, palettes
+  sets/       descriptors, prop registry, palettes, baked-prop ingest
+props/
+  <name>/     build.py + bake.json (procedural source) and the committed .geo.json
   assets/     asset ledger: hashes and provenance
   pipeline/   check / voices / preview / render   ← shared by CLI and server
   server/     local HTTP API + SSE jobs

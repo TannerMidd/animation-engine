@@ -48,6 +48,40 @@ body {
   overflow: hidden;
 }
 
+/*
+ * Dragging is the primary gesture here — the ruler, the lanes, the transport
+ * and the stage handles are all press-and-move, and text selection is the
+ * browser's default answer to press-and-move. So a scrub used to leave a smear
+ * across every tick and clip label it passed over. Selection is off by default
+ * and turned back on where copying is the point.
+ *
+ * `user-select` is not inherited, but its initial `auto` resolves against the
+ * parent's used value — that is how one rule on #root reaches the whole app,
+ * and why a descendant that declares `select-text` still wins.
+ */
+#root {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/*
+ * The categorical exceptions. `.cm-editor` is not cosmetic: CodeMirror's
+ * drawSelection paints its own rects but reads the native DOM Selection, so
+ * without this the script editor cannot select at all.
+ *
+ * Named instances — toasts, reports, the status bar — opt back in with
+ * Tailwind's `select-text` at the JSX site instead; they have no stable
+ * selector and listing them here would rot.
+ */
+input,
+textarea,
+select,
+[contenteditable],
+.cm-editor {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 ::-webkit-scrollbar {
   width: 9px;
   height: 9px;

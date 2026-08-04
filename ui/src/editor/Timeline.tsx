@@ -1,7 +1,8 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef } from 'react';
 import type { AnimationDocument, Beat, DialogueDocument, ShotList } from '../types.ts';
 import { Mono } from './chrome.tsx';
-import { cueApproval, estimateBeatMs, motionDeletionBlocker, resolveAnchor, speakerColour } from './lib.ts';
+import type { MenuTarget, OpenMenu } from './ContextMenu.tsx';
+import { cueApproval, estimateBeatMs, isTyping, motionDeletionBlocker, resolveAnchor, speakerColour } from './lib.ts';
 
 interface Clip {
   key: string;
@@ -22,6 +23,8 @@ interface Clip {
   fontSize?: number;
   hint: string;
   onClick?: () => void;
+  /** What a right-click on this clip is about. */
+  menu?: MenuTarget;
 }
 
 interface Key {
@@ -59,8 +62,9 @@ const STRIPE = 'repeating-linear-gradient(135deg,rgba(255,255,255,.09) 0 3px,tra
  * attached to them.
  */
 export function Timeline({
-  shots, dialogue, animation, beatStarts, totalMs, playheadMs, selected, snap,
-  selectedMotionId, motionBusy, onToggleSnap, onSelect, onScrub, onSelectVoice, onSelectMotion, onDeleteMotion,
+  shots, dialogue, animation, beatStarts, totalMs, playheadMs, selected, snap, zoom, locks,
+  selectedMotionId, motionBusy, onToggleSnap, onZoom, onToggleLock, onSelect, onScrub,
+  onSelectVoice, onSelectMotion, onDeleteMotion, onContextMenu,
 }: {
   shots: ShotList | null;
   dialogue: DialogueDocument | null;
@@ -72,15 +76,20 @@ export function Timeline({
   selectedMotionId: string | null;
   motionBusy: boolean;
   snap: boolean;
+  /** Horizontal scale, 1× to 8×. Lifted so the context menu can reset it. */
+  zoom: number;
+  /** Per-track lock state, lifted for the same reason. */
+  locks: Record<string, boolean>;
   onToggleSnap: () => void;
+  onZoom: (zoom: number) => void;
+  onToggleLock: (trackId: string) => void;
   onSelect: (index: number) => void;
   onScrub: (ms: number) => void;
   onSelectVoice: (index: number) => void;
   onSelectMotion: (segmentId: string) => void;
   onDeleteMotion: (segmentId: string) => void;
+  onContextMenu: OpenMenu;
 }) {
-  const [zoom, setZoom] = useState(1);
-  const [locks, setLocks] = useState<Record<string, boolean>>({});
   const scroller = useRef<HTMLDivElement>(null);
 
   const beats = shots?.beats ?? [];
@@ -123,6 +132,7 @@ export function Timeline({
         sub: beat.shot,
         hint: `beat ${i} · ${beat.kind} · ${beat.shot} · ${beat.camera}\n${beat.kind === 'pause' ? `${beat.ms} ms` : beat.text}${beat.locked ? '\nlocked' : ''}${unsupported ? '\nunsupported physical business' : ''}`,
         onClick: () => onSelect(i),
+        menu: { kind: 'beat', index: i },
       };
     });
 
@@ -150,6 +160,7 @@ export function Timeline({
           : state === 'candidate' ? 'candidate take, not approved'
           : 'undecided — no take recorded'}`,
         onClick: () => onSelectVoice(i),
+        menu: { kind: 'dialogue', index: i },
       }];
     });
 
@@ -180,6 +191,7 @@ export function Timeline({
         label,
         hint: `${label}\n${creator ? 'creator-authored — survives regeneration' : 'generated — editable, replaced on rerun'}${segment.locked ? '\nlocked' : ''}`,
         onClick: () => onSelectMotion(segment.id),
+        menu: { kind: 'motion', segmentId: segment.id },
       };
     });
 
@@ -307,8 +319,24 @@ export function Timeline({
     }));
   }, [total]);
 
+  /**
+   * Scrub the playhead for as long as the button is held.
+   *
+   * `preventDefault` is what stops the drag smearing a text selection across
+   * the ticks and clip labels it passes over. Pointer capture is what stops the
+   * drag getting stuck: without it a release over the preview iframe delivers
+   * its pointerup to the iframe's document, and the playhead keeps following an
+   * unpressed mouse. Capture retargets the event but not its propagation path,
+   * so the window listeners below still see everything.
+   */
   const scrub = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    // preventDefault also suppresses the default focus move, so the script
+    // editor has to be blurred by hand — otherwise it keeps swallowing Space.
+    if (isTyping(document.activeElement)) (document.activeElement as HTMLElement).blur();
     const el = e.currentTarget;
+    const pointerId = e.pointerId;
     const move = (clientX: number) => {
       const rect = el.getBoundingClientRect();
       const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
@@ -316,12 +344,24 @@ export function Timeline({
     };
     move(e.clientX);
     const onMove = (ev: PointerEvent) => move(ev.clientX);
-    const onUp = () => {
+    const stop = () => {
       window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointerup', stop);
+      window.removeEventListener('pointercancel', stop);
+      window.removeEventListener('blur', stop);
+      try { el.releasePointerCapture(pointerId); } catch { /* already released */ }
     };
+    try { el.setPointerCapture(pointerId); } catch { /* best effort — window listeners still track */ }
     window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointerup', stop);
+    window.addEventListener('pointercancel', stop);
+    window.addEventListener('blur', stop);
+  };
+
+  /** Where along the scene a pointer event landed, for "play from here". */
+  const msAt = (e: React.MouseEvent<HTMLElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    return Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)) * total;
   };
 
   const playPct = Math.min(100, (playheadMs / total) * 100);
@@ -361,14 +401,14 @@ export function Timeline({
           step={0.5}
           value={zoom}
           title="Timeline zoom"
-          onChange={(e) => setZoom(Number(e.target.value))}
+          onChange={(e) => onZoom(Number(e.target.value))}
           className="w-[88px] h-3.5 accent-accent cursor-pointer"
         />
         <button
           type="button"
           title="Fit scene to width"
           onClick={() => {
-            setZoom(1);
+            onZoom(1);
             scroller.current?.scrollTo({ left: 0 });
           }}
           className="h-[19px] px-[7px] rounded-[3px] border border-edge bg-panel-2 text-ink-dim text-[10px] cursor-pointer hover:text-ink"
@@ -388,6 +428,7 @@ export function Timeline({
               <div
                 key={track.id}
                 title={`${track.label} track`}
+                onContextMenu={(e) => onContextMenu(e, { kind: 'track', trackId: track.id })}
                 className="flex items-center gap-1.5 px-[7px] border-b border-[#2a2f36]"
                 style={{ height: track.h, background: track.strong ? '#252a31' : 'transparent' }}
               >
@@ -401,7 +442,7 @@ export function Timeline({
                 <button
                   type="button"
                   title={locks[track.id] ? `${track.label} is locked — unlock to edit` : `Lock ${track.label}`}
-                  onClick={() => setLocks((l) => ({ ...l, [track.id]: !l[track.id] }))}
+                  onClick={() => onToggleLock(track.id)}
                   className="w-[15px] h-[15px] rounded-[2px] text-[9px] cursor-pointer hover:bg-panel-2 shrink-0"
                   style={{ color: locks[track.id] ? '#a89050' : '#454d57' }}
                 >
@@ -416,7 +457,12 @@ export function Timeline({
         <div ref={scroller} className="flex-1 min-w-0 overflow-x-auto overflow-y-hidden relative">
           <div className="relative flex flex-col min-h-full" style={{ width: `${zoom * 100}%`, minWidth: '100%' }}>
             {/* ruler */}
-            <div onPointerDown={scrub} title="Drag to scrub" className="h-5 shrink-0 border-b border-[#2f353d] bg-[#1f2329] relative cursor-ew-resize overflow-hidden">
+            <div
+              onPointerDown={scrub}
+              onContextMenu={(e) => onContextMenu(e, { kind: 'ruler', ms: msAt(e) })}
+              title="Drag to scrub"
+              className="h-5 shrink-0 border-b border-[#2f353d] bg-[#1f2329] relative cursor-ew-resize overflow-hidden touch-none"
+            >
               {ticks.map((tick, i) => (
                 <div
                   key={i}
@@ -443,6 +489,7 @@ export function Timeline({
               {lanes.map((lane) => (
                 <div
                   key={lane.id}
+                  onContextMenu={(e) => onContextMenu(e, { kind: 'lane', trackId: lane.id, ms: msAt(e) })}
                   className="border-b border-[#2a2f36] relative"
                   style={{ height: lane.h, background: lane.bg ?? 'transparent', opacity: locks[lane.id] ? 0.55 : 1 }}
                 >
@@ -451,10 +498,13 @@ export function Timeline({
                       key={clip.key}
                       title={clip.hint}
                       onPointerDown={(e) => {
-                        if (locks[lane.id]) return;
+                        if (e.button !== 0 || locks[lane.id]) return;
                         e.stopPropagation();
                         clip.onClick?.();
                       }}
+                      onContextMenu={clip.menu && !locks[lane.id]
+                        ? (e) => onContextMenu(e, clip.menu!)
+                        : undefined}
                       className="absolute rounded-[2px] overflow-hidden cursor-pointer flex items-center gap-[3px] px-[3px] border"
                       style={{
                         top: clip.top,
