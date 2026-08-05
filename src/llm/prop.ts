@@ -57,6 +57,12 @@ export function propJsonSchema(): unknown {
     properties: {
       label: { type: 'string' },
       tags: { type: 'array', items: { type: 'string' } },
+      // Stated before the geometry, and on purpose. Asked only for shapes, the
+      // model anchors on whatever numbers the examples used and produces ferns
+      // twenty units tall. Naming the size first gives it somewhere to reason
+      // about scale, and gives us a claim we can hold the drawing to.
+      widthUnits: { type: 'number' },
+      heightUnits: { type: 'number' },
       primitives: {
         type: 'array',
         items: {
@@ -65,7 +71,13 @@ export function propJsonSchema(): unknown {
             k: { type: 'string', enum: ['rect', 'ellipse', 'poly', 'line'] },
             f: { type: 'string', enum: PALETTE_SLOTS },
             outline: { type: 'boolean' },
-            x: number, y: number, w: number, h: number,
+            // Rectangles are given as their four edges rather than a corner
+            // plus a size. "Top-left plus height" is ambiguous when up is
+            // negative, and models read it as "height above the floor" — which
+            // produced stacks of boxes all starting at the floor and nested
+            // inside one another. Edges cannot be misread, and a pair given
+            // the wrong way round still describes the same rectangle.
+            left: number, right: number, top: number, bottom: number,
             cx: number, cy: number, rx: number, ry: number,
             x1: number, y1: number, x2: number, y2: number,
             points: { type: 'array', items: number },
@@ -74,7 +86,7 @@ export function propJsonSchema(): unknown {
         },
       },
     },
-    required: ['label', 'primitives'],
+    required: ['label', 'widthUnits', 'heightUnits', 'primitives'],
   };
 }
 
@@ -82,6 +94,8 @@ export interface RawPrimitive {
   k?: string;
   f?: string;
   outline?: boolean;
+  left?: number; right?: number; top?: number; bottom?: number;
+  /** Still read, in case a model answers in the older corner-and-size form. */
   x?: number; y?: number; w?: number; h?: number;
   cx?: number; cy?: number; rx?: number; ry?: number;
   x1?: number; y1?: number; x2?: number; y2?: number;
@@ -103,13 +117,29 @@ export function normalisePrimitive(raw: RawPrimitive): Primitive | null {
   const slot = raw.f && (PALETTE_SLOTS as string[]).includes(raw.f) ? raw.f : 'surface';
   const l = raw.outline === false ? (0 as const) : (1 as const);
 
-  if (raw.k === 'rect' && finite(raw.x) && finite(raw.y) && finite(raw.w) && finite(raw.h)) {
-    if (raw.w <= 0 || raw.h <= 0) return null;
-    return { k: 'rect', f: slot, l, x: raw.x, y: raw.y, w: raw.w, h: raw.h };
+  if (raw.k === 'rect') {
+    // Edges first, and either way round: a rectangle is the same rectangle
+    // whichever corner the model named first.
+    if (finite(raw.left) && finite(raw.right) && finite(raw.top) && finite(raw.bottom)) {
+      const x = Math.min(raw.left, raw.right);
+      const y = Math.min(raw.top, raw.bottom);
+      const w = Math.abs(raw.right - raw.left);
+      const h = Math.abs(raw.bottom - raw.top);
+      return w < 0.5 || h < 0.5 ? null : { k: 'rect', f: slot, l, x, y, w, h };
+    }
+    if (finite(raw.x) && finite(raw.y) && finite(raw.w) && finite(raw.h)) {
+      const w = Math.abs(raw.w);
+      const h = Math.abs(raw.h);
+      return w < 0.5 || h < 0.5
+        ? null
+        : { k: 'rect', f: slot, l, x: Math.min(raw.x, raw.x + raw.w), y: Math.min(raw.y, raw.y + raw.h), w, h };
+    }
+    return null;
   }
   if (raw.k === 'ellipse' && finite(raw.cx) && finite(raw.cy) && finite(raw.rx) && finite(raw.ry)) {
-    if (raw.rx <= 0 || raw.ry <= 0) return null;
-    return { k: 'ellipse', f: slot, l, cx: raw.cx, cy: raw.cy, rx: raw.rx, ry: raw.ry };
+    const rx = Math.abs(raw.rx);
+    const ry = Math.abs(raw.ry);
+    return rx < 0.5 || ry < 0.5 ? null : { k: 'ellipse', f: slot, l, cx: raw.cx, cy: raw.cy, rx, ry };
   }
   if (raw.k === 'line' && finite(raw.x1) && finite(raw.y1) && finite(raw.x2) && finite(raw.y2)) {
     return { k: 'line', f: slot, x1: raw.x1, y1: raw.y1, x2: raw.x2, y2: raw.y2, sw: 3 };
@@ -137,12 +167,24 @@ chair ~180, a door ~400, a tree ~600. Things that hang on a wall still measure
 from the floor, so a clock might sit around y=-380.
 
 SHAPES. You have four:
-  rect     x, y, w, h        — x,y is the TOP-LEFT corner (the smallest y)
-  ellipse  cx, cy, rx, ry    — centre and radii
-  poly     points [x,y,x,y…] — at least 3 points, in order around the outline
+  rect     left, right, top, bottom — the four EDGES. top is the more negative.
+  ellipse  cx, cy, rx, ry           — centre and radii
+  poly     points [x,y,x,y…]        — at least 3 points, in order around the outline
   line     x1, y1, x2, y2
 They are drawn in the order you list them, so later shapes cover earlier ones.
 Start with the big body of the object and add detail on top.
+
+A rect is its four edges, so a box 90 wide and 30 tall sitting on the floor is
+left -45, right 45, top -30, bottom 0. The SAME box resting on top of that one
+is top -60, bottom -30. Stacked things do not all start at the floor — each one
+starts where the one below it ended.
+
+SIZE. Give width as much thought as height; most things are wider than they are
+tall, and a prop that is 40 wide and 300 tall is a post, whatever it was meant
+to be. Roughly, in width × height:
+  mug 36×46      pizza box 110×14     crate 90×90       chair 112×180
+  bin 62×54      filing cabinet 90×180  desk 250×96     bookshelf 180×320
+  sofa 320×150   fridge 130×300       door 150×300      tree 340×420
 
 COLOUR is chosen by naming a palette SLOT, never a colour value. The same prop
 then works in a bright office and a dive bar. The slots:
@@ -160,18 +202,27 @@ THE SHOW'S VISUAL RULES:
 ${notes || '  - Plain, functional objects.'}`;
 }
 
-const EXAMPLES = `Here are two props in the format, to show the scale and the level of detail.
+const EXAMPLES = `Here are three props in the format, to show the scale, the level of detail, and
+how things sit on top of each other.
 
-A mug, 46 units tall, sitting on a surface:
-  {"k":"rect","f":"surface","x":-18,"y":-46,"w":36,"h":46}
+A mug, 36 wide and 46 tall:
+  {"k":"rect","f":"surface","left":-18,"right":18,"top":-46,"bottom":0}
   {"k":"ellipse","f":"surfaceDark","cx":0,"cy":-46,"rx":18,"ry":5}
   {"k":"line","f":"line","x1":18,"y1":-36,"x2":30,"y2":-24}
   {"k":"line","f":"line","x1":30,"y1":-24,"x2":18,"y2":-14}
 
-A wooden crate, 90 units on a side:
-  {"k":"rect","f":"wood","x":-45,"y":-90,"w":90,"h":90}
-  {"k":"line","f":"woodDark","x1":-45,"y1":-90,"x2":45,"y2":0}
-  {"k":"line","f":"woodDark","x1":45,"y1":-90,"x2":-45,"y2":0}`;
+A desk, 250 wide and 96 tall — note it is far wider than it is tall:
+  {"k":"rect","f":"woodDark","left":-111,"right":-99,"top":-80,"bottom":0}
+  {"k":"rect","f":"woodDark","left":99,"right":111,"top":-80,"bottom":0}
+  {"k":"rect","f":"wood","left":-125,"right":125,"top":-96,"bottom":-80}
+
+Three crates stacked, each 90 wide and 30 tall. Each one begins where the one
+below it ended, and they are nudged sideways so it reads as a stack:
+  {"k":"rect","f":"wood","left":-45,"right":45,"top":-30,"bottom":0}
+  {"k":"rect","f":"wood","left":-40,"right":50,"top":-60,"bottom":-30}
+  {"k":"rect","f":"wood","left":-48,"right":42,"top":-90,"bottom":-60}
+  {"k":"line","f":"woodDark","x1":-45,"y1":-15,"x2":45,"y2":-15}
+  {"k":"line","f":"woodDark","x1":-40,"y1":-45,"x2":50,"y2":-45}`;
 
 export interface GeneratePropOptions {
   description: string;
@@ -207,7 +258,7 @@ function problemsWith(def: PropDef): string[] {
 }
 
 /** Obvious drawing mistakes, phrased as instructions rather than complaints. */
-function critique(primitives: Primitive[]): string[] {
+function critique(primitives: Primitive[], stated?: { width?: number; height?: number }): string[] {
   const notes: string[] = [];
   let minY = 0;
   let maxY = 0;
@@ -227,7 +278,50 @@ function critique(primitives: Primitive[]): string[] {
   }
 
   const height = maxY - minY;
-  if (primitives.length < 3) {
+  const width = maxAbsX * 2;
+
+  // Every failure worth catching so far has been one of these three, and each
+  // one used to sail through: the model padded the shape list with copies, made
+  // everything the same narrow width, or stacked nothing.
+  const seen = new Set<string>();
+  let duplicates = 0;
+  for (const prim of primitives) {
+    const key = JSON.stringify(prim);
+    if (seen.has(key)) duplicates++;
+    seen.add(key);
+  }
+  if (duplicates) {
+    notes.push(
+      `${duplicates} of the shapes are exact copies of another one, which draws nothing new — ` +
+      'give each a different position or size, or remove it',
+    );
+  }
+
+  if (height > 0 && width > 0 && width * 3 < height && height > 90) {
+    notes.push(
+      `it is ${Math.round(width)} wide and ${Math.round(height)} tall, which is a post rather than an object — ` +
+      'unless it really is a pole, widen it towards the sizes in the table',
+    );
+  }
+
+  // The size it claimed, against the size it drew. A model that says "a vending
+  // machine is 180 by 400" and then draws something 100 tall has contradicted
+  // itself, and saying so is a far more useful correction than a bare
+  // complaint about proportions.
+  const claimed = (want: number | undefined, got: number, axis: string): void => {
+    if (!want || want < 5 || got < 1) return;
+    const ratio = got / want;
+    if (ratio < 0.6 || ratio > 1.7) {
+      notes.push(
+        `you said it is ${Math.round(want)} units ${axis} but drew it ${Math.round(got)} — ` +
+        `redraw the shapes so they actually reach ${Math.round(want)}`,
+      );
+    }
+  };
+  claimed(stated?.width, width, 'wide');
+  claimed(stated?.height, height, 'tall');
+
+  if (primitives.length < 4) {
     notes.push('it is too plain — add a few more shapes so it reads as an object rather than a block');
   }
   if (height > 0 && height < 12) {
@@ -262,8 +356,20 @@ export async function generateProp(opts: GeneratePropOptions): Promise<GenerateP
 
 ${EXAMPLES}
 
-Now draw "${opts.description}". Give it a short human label and two or three
-tags from: interior, exterior, office, home, bar, generic, structure.`;
+Now draw "${opts.description}".
+
+FIRST say how big the whole thing is, in units, as widthUnits and heightUnits —
+compare it against the table above and against a 500-unit-tall person. THEN
+draw shapes that fill that box: the widest shape should reach widthUnits across,
+and the topmost shape should reach heightUnits above the floor.
+
+The size is for EVERYTHING described, not for one part of it. A stack of five
+pizza boxes is as tall as all five together, not as tall as one box. A tree is
+as tall as the trunk and the canopy. If the description says several of
+something, draw all of them.
+
+Give it a short human label and two or three tags from: interior, exterior,
+office, home, bar, generic, structure.`;
 
     if (correction) {
       prompt +=
@@ -284,7 +390,7 @@ tags from: interior, exterior, office, home, bar, generic, structure.`;
     });
     previous = raw.slice(0, 3000);
 
-    let parsed: { label?: string; tags?: string[]; primitives?: RawPrimitive[] };
+    let parsed: { label?: string; tags?: string[]; widthUnits?: number; heightUnits?: number; primitives?: RawPrimitive[] };
     try {
       parsed = JSON.parse(raw) as typeof parsed;
     } catch (err) {
@@ -333,7 +439,7 @@ tags from: interior, exterior, office, home, bar, generic, structure.`;
     // Composition is fed back once and then accepted. A prop that is merely
     // odd is a few drags from fixed in the studio, and refusing outright would
     // leave the person with nothing to drag.
-    const notes = critique(primitives);
+    const notes = critique(primitives, { width: parsed.widthUnits, height: parsed.heightUnits });
     if (notes.length && attempt === 1) {
       correction = notes.slice(0, 3).join('\n');
       continue;

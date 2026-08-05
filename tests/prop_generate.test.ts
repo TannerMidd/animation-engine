@@ -49,7 +49,7 @@ describe('the schema a model is held to', () => {
 
 describe('the line between what a model said and what gets drawn', () => {
   it('accepts a well-formed shape of each kind', () => {
-    expect(normalisePrimitive({ k: 'rect', f: 'wood', x: -20, y: -40, w: 40, h: 40 }))
+    expect(normalisePrimitive({ k: 'rect', f: 'wood', left: -20, right: 20, top: -40, bottom: 0 }))
       .toEqual({ k: 'rect', f: 'wood', l: 1, x: -20, y: -40, w: 40, h: 40 });
     expect(normalisePrimitive({ k: 'ellipse', f: 'metal', cx: 0, cy: -10, rx: 8, ry: 4 }))
       .toMatchObject({ k: 'ellipse', f: 'metal', rx: 8 });
@@ -61,26 +61,40 @@ describe('the line between what a model said and what gets drawn', () => {
 
   it.each([
     ['a rect with no size', { k: 'rect', f: 'wood' }],
-    ['a rect with negative size', { k: 'rect', f: 'wood', x: 0, y: 0, w: -5, h: 10 }],
+    ['a rect with no width at all', { k: 'rect', f: 'wood', left: 5, right: 5, top: -10, bottom: 0 }],
     ['a zero-radius ellipse', { k: 'ellipse', f: 'wood', cx: 0, cy: 0, rx: 0, ry: 4 }],
+    ['a rect missing two of its edges', { k: 'rect', f: 'wood', left: -10, top: -10 }],
     ['a two-point polygon', { k: 'poly', f: 'wood', points: [0, 0, 10, 10] }],
     ['an odd number of coordinates', { k: 'poly', f: 'wood', points: [0, 0, 10, 10, 5] }],
     ['a shape kind that is not one', { k: 'spiral', f: 'wood', x: 0, y: 0, w: 1, h: 1 }],
-    ['NaN where a number should be', { k: 'rect', f: 'wood', x: Number.NaN, y: 0, w: 10, h: 10 }],
+    ['NaN where a number should be', { k: 'rect', f: 'wood', left: Number.NaN, right: 10, top: -10, bottom: 0 }],
     ['nothing at all', {}],
   ])('drops %s rather than repairing it', (_label, raw) => {
     expect(normalisePrimitive(raw as RawPrimitive)).toBeNull();
   });
 
+  it('reads a rectangle the same whichever corner was named first', () => {
+    // A model that swaps a pair still described the same rectangle, and losing
+    // the shape over it would be pedantry rather than safety.
+    const wanted = { k: 'rect', f: 'wood', l: 1, x: -20, y: -40, w: 40, h: 40 };
+    expect(normalisePrimitive({ k: 'rect', f: 'wood', left: 20, right: -20, top: -40, bottom: 0 })).toEqual(wanted);
+    expect(normalisePrimitive({ k: 'rect', f: 'wood', left: -20, right: 20, top: 0, bottom: -40 })).toEqual(wanted);
+  });
+
+  it('still reads the older corner-and-size form, taking it as written', () => {
+    expect(normalisePrimitive({ k: 'rect', f: 'wood', x: -20, y: -40, w: 40, h: 40 }))
+      .toEqual({ k: 'rect', f: 'wood', l: 1, x: -20, y: -40, w: 40, h: 40 });
+  });
+
   it('falls back to a neutral slot rather than failing on an unknown colour', () => {
     // Structured decoding should make this impossible; if it happens anyway,
     // a grey box is a better outcome than a set that will not render.
-    expect(normalisePrimitive({ k: 'rect', f: 'chartreuse', x: 0, y: -10, w: 10, h: 10 }))
+    expect(normalisePrimitive({ k: 'rect', f: 'chartreuse', left: 0, right: 10, top: -10, bottom: 0 }))
       .toMatchObject({ f: 'surface' });
   });
 
   it('honours a shape asking not to be outlined', () => {
-    expect(normalisePrimitive({ k: 'rect', f: 'screen', outline: false, x: 0, y: -10, w: 10, h: 10 }))
+    expect(normalisePrimitive({ k: 'rect', f: 'screen', outline: false, left: 0, right: 10, top: -10, bottom: 0 }))
       .toMatchObject({ l: 0 });
   });
 });
