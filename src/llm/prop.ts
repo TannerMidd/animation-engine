@@ -305,7 +305,7 @@ tags from: interior, exterior, office, home, bar, generic, structure.`;
     const document: PropDocument = {
       format: 2,
       key: opts.key,
-      label: parsed.label?.trim() || opts.description.slice(0, 40),
+      label: humanLabel(parsed.label) || sentenceCase(opts.description.slice(0, 40)),
       tags: (parsed.tags ?? []).map((t) => t.trim().toLowerCase()).filter(Boolean).slice(0, 5),
       spanning: false,
       params: [],
@@ -343,6 +343,27 @@ tags from: interior, exterior, office, home, bar, generic, structure.`;
   }
 
   throw new Error(`model "${opts.model}" did not draw a usable prop: ${correction}`);
+}
+
+const sentenceCase = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/**
+ * A name a person would have written.
+ *
+ * Asked for a label, a model reliably answers with an identifier — `wasteBin`,
+ * `waste_bin`, `WASTE BIN`. This is the one thing in the catalogue somebody
+ * reads every time they open the prop palette, so it is worth fixing rather
+ * than shrugging at.
+ */
+export function humanLabel(raw: string | undefined): string {
+  const words = (raw ?? '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+  return words.length ? sentenceCase(words.join(' ')) : '';
 }
 
 /** Date is not available inside prop rendering, but this is authoring time. */

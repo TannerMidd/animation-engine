@@ -6,6 +6,7 @@ import type {
   SceneSoundInfo, SceneSummary, SetDescriptor, SetSummary, ShotList, ShowInfo, Vocab, PropDefInfo,
 } from '../types.ts';
 import { GenerateDialog } from '../components/GenerateDialog.tsx';
+import { useLlmStart } from '../components/useLlmStart.ts';
 import type { AnimationEditTarget, StagePropTarget } from '../components/AnimationOverlay.tsx';
 import { propInstanceId } from './stage/interaction.ts';
 import { AppBar, StaleBar, type ContextTool, type EngineOption, type SaveState } from './AppBar.tsx';
@@ -104,6 +105,7 @@ export function EditorApp({
   const [confirm, setConfirm] = useState<ConfirmSpec | null>(null);
   /** Where the context menu is and what it is about; its items are built at render. */
   const [menu, setMenu] = useState<{ x: number; y: number; target: MenuTarget } | null>(null);
+  const llmStart = useLlmStart(llm);
   /** Timeline view state, up here because the context menu drives it too. */
   const [timelineZoom, setTimelineZoom] = useState(1);
   const [trackLocks, setTrackLocks] = useState<Record<string, boolean>>({});
@@ -1886,8 +1888,12 @@ export function EditorApp({
           ]}
           busy={genBusy}
           error={genError}
-          disabled={llm ? !llm.ok : false}
-          disabledReason={llm?.reason ?? null}
+          disabled={llmStart.status ? !llmStart.status.ok : false}
+          disabledReason={llmStart.status?.reason ?? null}
+          startable={llmStart.startable}
+          starting={llmStart.starting}
+          startError={llmStart.startError}
+          onStart={() => void llmStart.start()}
           onGenerate={(premise) => void runWrite(premise)}
           onClose={() => {
             setWriting(false);

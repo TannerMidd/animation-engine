@@ -1,6 +1,6 @@
 import type {
   AnimationDocument, BenchResult, CastSummary, CheckResult, ConversionCheckResult, DialogueCue, DialogueDocument,
-  DoctorReport, FacePlate, Health, JobEvent, JobSummary, LlmStatus, Look, MigrationInfo, PreviewInfo, Outfit,
+  DoctorReport, FacePlate, Health, JobEvent, JobSummary, LlmDaemon, LlmStatus, Look, MigrationInfo, PreviewInfo, Outfit,
   ProductionPreflightReport, ProfileDiff, ProfileValidation, PropDefInfo, PropDetail, PropDocument, PropRender,
   Palette, ParamValue, Recipe, RecordedTake, RigCheckResult, RigDoc,
   SceneDetail, SceneSoundInfo, SceneSummary, SetDescriptor, SetSummary, ShotList, ShowInfo, StemId, Vocab,
@@ -242,7 +242,9 @@ export const api = {
   bakeProp: (key: string, body: { recipe: string; params: Record<string, ParamValue>; label?: string; tags?: string[] }) =>
     post<{ jobId: string; key: string }>(`/api/props/${key}/bake`, body),
 
-  llm: () => call<LlmStatus & { suggested: string[] }>('/api/llm'),
+  llm: () => call<LlmStatus & { suggested: string[]; daemon: LlmDaemon }>('/api/llm'),
+  /** Starts the daemon with the project's model directory; the only safe launch path. */
+  startLlm: () => post<{ ok: true; alreadyRunning: boolean; modelsDir: string; models: string[] }>('/api/llm/start'),
   generateScript: (premise: string, opts: { characters?: number; targetSeconds?: number } = {}) =>
     post<{ source: string; characters: string[]; lineCount: number; attempts: number; model: string }>(
       '/api/llm/script',

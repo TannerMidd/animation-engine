@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { propJsonSchema, normalisePrimitive, type RawPrimitive } from '../src/llm/prop.ts';
+import { propJsonSchema, normalisePrimitive, humanLabel, type RawPrimitive } from '../src/llm/prop.ts';
 import { PALETTE_SLOTS, PropDocument, propFromDocument } from '../src/sets/props/index.ts';
 import { getPalette, PALETTE_NAMES } from '../src/sets/palettes.ts';
 import { geometryFor } from '../src/sets/schema.ts';
@@ -111,5 +111,27 @@ describe('what a model produces is an ordinary prop', () => {
       expect(svg, name).not.toContain('NaN');
       expect(svg, name).not.toContain('undefined');
     }
+  });
+});
+
+describe('the label a model gives back', () => {
+  it('reads as a name rather than an identifier', () => {
+    // Asked for a label, a model reliably answers with an identifier. This is
+    // the string somebody reads every time they open the prop palette.
+    expect(humanLabel('wasteBin')).toBe('Waste bin');
+    expect(humanLabel('waste_bin')).toBe('Waste bin');
+    expect(humanLabel('waste-bin')).toBe('Waste bin');
+    expect(humanLabel('WASTE BIN')).toBe('Waste bin');
+    expect(humanLabel('Filing Cabinet')).toBe('Filing cabinet');
+    expect(humanLabel('tallBookshelf2')).toBe('Tall bookshelf2');
+  });
+
+  it('leaves a name that was already one alone', () => {
+    expect(humanLabel('Waste bin')).toBe('Waste bin');
+  });
+
+  it('gives nothing back for nothing, so the caller can fall back', () => {
+    expect(humanLabel('')).toBe('');
+    expect(humanLabel(undefined)).toBe('');
   });
 });

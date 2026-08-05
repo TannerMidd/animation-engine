@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.ts';
 import type { LayerName, LlmStatus, ParamSpec, PropDefInfo, PropInstance, SetDescriptor, Vocab } from '../types.ts';
 import { GenerateDialog } from './GenerateDialog.tsx';
+import { useLlmStart } from './useLlmStart.ts';
 import { Button, Panel, Select, NumberInput, TextInput, Field, Empty, Badge } from './ui.tsx';
 import { ScaledFrame } from './ScaledFrame.tsx';
 import { StageOverlay } from './StageOverlay.tsx';
@@ -38,6 +39,7 @@ export function SetDesigner({ vocab, llm, open, onOpenProps }: {
   const [describing, setDescribing] = useState(false);
   const [genBusy, setGenBusy] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
+  const llmStart = useLlmStart(llm);
 
   useEffect(() => {
     void (async () => {
@@ -223,8 +225,12 @@ export function SetDesigner({ vocab, llm, open, onOpenProps }: {
           ]}
           busy={genBusy}
           error={genError}
-          disabled={llm ? !llm.ok : false}
-          disabledReason={llm?.reason ?? null}
+          disabled={llmStart.status ? !llmStart.status.ok : false}
+          disabledReason={llmStart.status?.reason ?? null}
+          startable={llmStart.startable}
+          starting={llmStart.starting}
+          startError={llmStart.startError}
+          onStart={() => void llmStart.start()}
           onGenerate={(t) => void runDescribe(t)}
           onClose={() => {
             setDescribing(false);

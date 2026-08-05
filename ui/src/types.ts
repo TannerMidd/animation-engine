@@ -210,6 +210,17 @@ export interface LlmStatus {
   reason?: string | null;
   models: string[];
   recommended: string | null;
+  /** Absent on an older server, so treat a missing daemon block as "cannot offer to start". */
+  daemon?: LlmDaemon;
+}
+
+/** Whether the local model daemon could simply be switched on. */
+export interface LlmDaemon {
+  running: boolean;
+  startable: boolean;
+  binary: string | null;
+  /** Where a daemon started from here keeps its weights. */
+  modelsDir: string;
 }
 
 /** The active identity profile and the alternatives on disk. */

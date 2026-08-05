@@ -13,6 +13,7 @@ import { Ollama, pickModel, SUGGESTED_MODELS } from '../../llm/ollama.ts';
 import { generateScript } from '../../llm/script.ts';
 import { generateSet } from '../../llm/set.ts';
 import { generateProp } from '../../llm/prop.ts';
+import { daemonStatus, startOllama } from '../../llm/daemon.ts';
 import { activeIdentity } from '../../show/context.ts';
 import { planMigration, applyMigration } from '../../show/migrate.ts';
 import { stampOf } from '../../schema/identity.ts';
@@ -178,13 +179,30 @@ export function registerSystemRoutes(router: Router): void {
 
   router.get('/api/llm', async ({ res }) => {
     const status = await new Ollama().available();
+    const daemon = await daemonStatus();
     json(res, {
       ok: status.ok,
       reason: status.ok ? null : status.reason,
       models: status.ok ? status.models : [],
       suggested: SUGGESTED_MODELS,
       recommended: status.ok ? pickModel(status.models) : null,
+      // Whether the thing can simply be switched on, so the UI can offer that
+      // rather than telling somebody to go and find a terminal.
+      daemon,
     });
+  });
+
+  /**
+   * Start the local model daemon.
+   *
+   * The engine starts it rather than pointing at instructions because it is the
+   * only launch path that sets OLLAMA_MODELS — a daemon started any other way
+   * writes weights to the system drive. See src/llm/daemon.ts.
+   */
+  router.post('/api/llm/start', async ({ res }) => {
+    const result = await startOllama();
+    if (!result.ok) throw new HttpError(503, result.reason ?? 'the local model daemon did not start');
+    json(res, result);
   });
 
   router.post('/api/llm/script', async ({ req, res }) => {

@@ -10,6 +10,7 @@ import { Button, Spinner } from './ui.tsx';
  */
 export function GenerateDialog({
   title, label, placeholder, hint, examples, busy, error, disabled, disabledReason, onGenerate, onClose,
+  startable, starting, startError, onStart,
 }: {
   title: string;
   label: string;
@@ -20,6 +21,11 @@ export function GenerateDialog({
   error: string | null;
   disabled?: boolean;
   disabledReason?: string | null;
+  /** The daemon is installed and merely switched off, so it can be offered. */
+  startable?: boolean;
+  starting?: boolean;
+  startError?: string | null;
+  onStart?: () => void;
   onGenerate: (text: string) => void;
   onClose: () => void;
 }) {
@@ -39,8 +45,28 @@ export function GenerateDialog({
         <div className="p-4">
           {disabled ? (
             <div className="text-[12px] text-ink-dim leading-relaxed">
-              <p className="mb-2 text-bad">Local model unavailable.</p>
-              <p className="whitespace-pre-wrap">{disabledReason}</p>
+              <p className="mb-2 text-bad">The local model is not running.</p>
+              {/*
+                * The remedy belongs where you hit the wall, not in a paragraph
+                * telling somebody to go and find a terminal. It is also the only
+                * safe way to start it: the daemon takes its model directory from
+                * the environment it was launched with, and this one sets it.
+                */}
+              {startable ? (
+                <>
+                  <p className="mb-3">
+                    It is installed and can be switched on. Weights stay in the project’s model
+                    directory rather than on the system drive.
+                  </p>
+                  <Button variant="primary" disabled={starting} onClick={onStart}>
+                    {starting ? 'Starting…' : 'Start the local model'}
+                  </Button>
+                  {starting && <span className="ml-2 inline-block align-middle"><Spinner /></span>}
+                  {startError && <p className="mt-2 text-[11px] text-bad whitespace-pre-wrap">{startError}</p>}
+                </>
+              ) : (
+                <p className="whitespace-pre-wrap">{disabledReason}</p>
+              )}
             </div>
           ) : (
             <>

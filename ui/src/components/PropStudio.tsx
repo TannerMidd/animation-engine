@@ -7,6 +7,7 @@ import { Badge, Button, Empty, Field, Panel, Select, Spinner, TextInput } from '
 import { PropCanvas, type Tool } from './PropCanvas.tsx';
 import { InteractionEditor, ParamControl, ParamEditor, PrimitiveInspector } from './PropInspector.tsx';
 import { GenerateDialog } from './GenerateDialog.tsx';
+import { useLlmStart } from './useLlmStart.ts';
 import { PropBakeDialog } from './PropBakeDialog.tsx';
 
 /**
@@ -161,6 +162,7 @@ export function PropStudio({ open, llm, onCatalogueChanged }: {
   const [baking, setBaking] = useState(false);
   const [genBusy, setGenBusy] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
+  const llmStart = useLlmStart(llm);
 
   const refreshCatalogue = useCallback(async () => {
     const { props, tags: t } = await api.props();
@@ -584,8 +586,12 @@ export function PropStudio({ open, llm, onCatalogueChanged }: {
           examples={['a dented metal waste bin', 'a tall filing cabinet with four drawers', 'a potted fern', 'a stack of pizza boxes']}
           busy={genBusy}
           error={genError}
-          disabled={!llm?.ok}
-          disabledReason={llm?.reason ?? null}
+          disabled={!llmStart.status?.ok}
+          disabledReason={llmStart.status?.reason ?? null}
+          startable={llmStart.startable}
+          starting={llmStart.starting}
+          startError={llmStart.startError}
+          onStart={() => void llmStart.start()}
           onGenerate={(text) => void describe(text)}
           onClose={() => setDescribing(false)}
         />
