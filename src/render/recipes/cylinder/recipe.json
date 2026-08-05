@@ -1,0 +1,19 @@
+{
+  "label": "Drum",
+  "blurb": "A barrel, a bin, a tank — a round body with an elliptical top.",
+  "tags": ["generic", "interior", "exterior", "baked"],
+  "fit": ["radius", "height"],
+  "params": [
+    { "key": "radius", "label": "Radius", "type": "number", "default": 0.36, "min": 0.05, "max": 2, "step": 0.02 },
+    { "key": "height", "label": "Height", "type": "number", "default": 0.9, "min": 0.1, "max": 3, "step": 0.05 },
+    { "key": "sides", "label": "Facets", "type": "number", "default": 12, "min": 6, "max": 24, "step": 1 },
+    { "key": "taper", "label": "Narrower at the base", "type": "number", "default": 0, "min": 0, "max": 0.6, "step": 0.02 },
+    { "key": "rim", "label": "Rim", "type": "boolean", "default": true },
+    { "key": "slot", "label": "Material", "type": "choice", "default": "metal", "choices": ["wood","woodDark","metal","metalDark","surface","surfaceDark","fabric","fabricDark","clay","glass","light","accent"] },
+    { "key": "topSlot", "label": "Top face", "type": "choice", "default": "metalDark", "choices": ["wood","woodDark","metal","metalDark","surface","surfaceDark","fabric","fabricDark","clay","glass","light","accent"] }
+  ],
+  "views": {
+    "three-quarter": { "dir": [-1.0, -1.6, 0.85], "aim": 0.5 },
+    "front": { "dir": [0, -1, 0.2], "aim": 0.5 }
+  }
+}

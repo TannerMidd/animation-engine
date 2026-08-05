@@ -7,6 +7,7 @@ import { Badge, Button, Empty, Field, Panel, Select, Spinner, TextInput } from '
 import { PropCanvas, type Tool } from './PropCanvas.tsx';
 import { InteractionEditor, ParamControl, ParamEditor, PrimitiveInspector } from './PropInspector.tsx';
 import { GenerateDialog } from './GenerateDialog.tsx';
+import { PropBakeDialog } from './PropBakeDialog.tsx';
 
 /**
  * Making a prop.
@@ -157,6 +158,7 @@ export function PropStudio({ open, llm, onCatalogueChanged }: {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: 'good' | 'bad'; text: string } | null>(null);
   const [describing, setDescribing] = useState(false);
+  const [baking, setBaking] = useState(false);
   const [genBusy, setGenBusy] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
 
@@ -369,6 +371,9 @@ export function PropStudio({ open, llm, onCatalogueChanged }: {
             <Button onClick={() => { setGenError(null); setDescribing(true); }} title="Describe it to the local model">
               Describe
             </Button>
+            <Button onClick={() => setBaking(true)} title="Bake a shape that needs real form">
+              Bake
+            </Button>
             <Button variant="primary" onClick={() => void create()}>New</Button>
           </>
         }
@@ -555,6 +560,20 @@ export function PropStudio({ open, llm, onCatalogueChanged }: {
           </>
         )}
       </Panel>
+
+      {baking && (
+        <PropBakeDialog
+          taken={catalogue.map((p) => p.key)}
+          onClose={() => setBaking(false)}
+          onBaked={(baked) => {
+            setBaking(false);
+            void refreshCatalogue();
+            onCatalogueChanged?.();
+            setKey(baked);
+            setMessage({ tone: 'good', text: 'Baked. It is in the catalogue now.' });
+          }}
+        />
+      )}
 
       {describing && (
         <GenerateDialog

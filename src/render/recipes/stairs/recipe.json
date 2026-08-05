@@ -1,0 +1,19 @@
+{
+  "label": "Staircase",
+  "blurb": "Solid steps with lit treads, so it reads as a solid rather than a zigzag.",
+  "tags": ["structure", "interior", "baked"],
+  "fit": ["width", "steps", "rise"],
+  "params": [
+    { "key": "steps", "label": "Steps", "type": "number", "default": 8, "min": 2, "max": 16, "step": 1 },
+    { "key": "rise", "label": "Step rise", "type": "number", "default": 0.3, "min": 0.1, "max": 0.6, "step": 0.02 },
+    { "key": "run", "label": "Step depth", "type": "number", "default": 0.34, "min": 0.15, "max": 0.8, "step": 0.02 },
+    { "key": "width", "label": "Width", "type": "number", "default": 1.6, "min": 0.5, "max": 4, "step": 0.1 },
+    { "key": "stringer", "label": "Side rail", "type": "boolean", "default": true },
+    { "key": "slot", "label": "Riser", "type": "choice", "default": "woodDark", "choices": ["wood","woodDark","metal","metalDark","surface","surfaceDark","fabric","fabricDark","clay","glass","light","accent"] },
+    { "key": "topSlot", "label": "Tread", "type": "choice", "default": "wood", "choices": ["wood","woodDark","metal","metalDark","surface","surfaceDark","fabric","fabricDark","clay","glass","light","accent"] }
+  ],
+  "views": {
+    "three-quarter": { "dir": [-1.0, -1.4, 1.0], "aim": 0.55 },
+    "side": { "dir": [-1.8, 0.35, 0.3], "aim": 0.55 }
+  }
+}

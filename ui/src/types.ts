@@ -401,6 +401,16 @@ export interface PropRender {
 
 export type Palette = Record<string, string>;
 
+/** A ready-made Blender source, and the form it wants filled in. */
+export interface Recipe {
+  name: string;
+  label: string;
+  blurb: string;
+  tags: string[];
+  params: ParamSpec[];
+  views: string[];
+}
+
 /** How much of the camera's travel a layer takes, per axis. 1 is locked to the stage. */
 export interface ParallaxFactor {
   x: number;

@@ -2,7 +2,7 @@ import type {
   AnimationDocument, BenchResult, CastSummary, CheckResult, ConversionCheckResult, DialogueCue, DialogueDocument,
   DoctorReport, FacePlate, Health, JobEvent, JobSummary, LlmStatus, Look, MigrationInfo, PreviewInfo, Outfit,
   ProductionPreflightReport, ProfileDiff, ProfileValidation, PropDefInfo, PropDetail, PropDocument, PropRender,
-  Palette, ParamValue, RecordedTake, RigCheckResult, RigDoc,
+  Palette, ParamValue, Recipe, RecordedTake, RigCheckResult, RigDoc,
   SceneDetail, SceneSoundInfo, SceneSummary, SetDescriptor, SetSummary, ShotList, ShowInfo, StemId, Vocab,
 } from './types.ts';
 
@@ -235,6 +235,12 @@ export const api = {
   }) => post<PropRender>('/api/props/render', body),
   checkProp: (body: { document?: PropDocument; key?: string }) =>
     post<{ ok: boolean; problems: string[] }>('/api/props/check', body),
+
+  propRecipes: () =>
+    call<{ blender: { ok: boolean; reason?: string }; recipes: Recipe[] }>('/api/props/recipes'),
+  /** Baking spawns Blender, so it comes back as a job to follow. */
+  bakeProp: (key: string, body: { recipe: string; params: Record<string, ParamValue>; label?: string; tags?: string[] }) =>
+    post<{ jobId: string; key: string }>(`/api/props/${key}/bake`, body),
 
   llm: () => call<LlmStatus & { suggested: string[] }>('/api/llm'),
   generateScript: (premise: string, opts: { characters?: number; targetSeconds?: number } = {}) =>

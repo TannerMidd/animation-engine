@@ -11,6 +11,10 @@ import type { PropDef } from '../../sets/props/types.ts';
 import { PALETTES, PALETTE_NAMES, getPalette } from '../../sets/palettes.ts';
 import { geometryFor, LAYERS, type ParamValue, type SetDescriptor } from '../../sets/schema.ts';
 import { listSets, loadSet, saveSet } from '../../sets/index.ts';
+import { startJob } from '../jobs.ts';
+import { bakeProp } from '../../pipeline/propbake.ts';
+import { blenderAvailable } from '../../render/blender.ts';
+import { listRecipes, getRecipe, resolveParams, bakeConfigFor } from '../../render/recipes/index.ts';
 
 /**
  * Authoring props over HTTP.
@@ -234,6 +238,22 @@ export function registerPropRoutes(router: Router): void {
   /** Full palettes, so the studio can offer slots as swatches rather than as names. */
   router.get('/api/palettes', ({ res }) => json(res, PALETTES));
 
+  /**
+   * The ready-made Blender sources, and the form each one wants filled in.
+   *
+   * Registered before `/api/props/:key`: both are three segments, so a literal
+   * path has to be matched first or "recipes" is read as a prop name.
+   */
+  router.get('/api/props/recipes', async ({ res }) => {
+    json(res, {
+      blender: await blenderAvailable(),
+      recipes: listRecipes().map((r) => ({
+        name: r.name, label: r.label, blurb: r.blurb, tags: r.tags, params: r.params,
+        views: Object.keys(r.views),
+      })),
+    });
+  });
+
   router.get('/api/props/:key', async ({ res, params }) => {
     const key = requireKey(params['key']!);
     const def = allProps()[key];
@@ -365,6 +385,66 @@ export function registerPropRoutes(router: Router): void {
     const body = await readJson<RenderRequest>(req);
     const problems = checkProp(subjectOf(body));
     json(res, { ok: problems.length === 0, problems });
+  });
+
+  /**
+   * Bake a prop from a recipe.
+   *
+   * Writes the recipe's `build.py` and a `bake.json` beside it, so what comes
+   * out is an ordinary foundry prop: it has a procedural source, `anim props`
+   * can tell you when it has gone stale, and re-baking it needs no memory of
+   * this request. Runs as a job because Blender takes seconds, not milliseconds.
+   */
+  router.post('/api/props/:key/bake', async ({ req, res, params }) => {
+    protectRunningRenderState('props');
+    const key = requireKey(params['key']!);
+    const body = await readJson<{
+      recipe: string;
+      params?: Record<string, unknown>;
+      label?: string;
+      tags?: string[];
+    }>(req);
+
+    const available = await blenderAvailable();
+    if (!available.ok) throw new HttpError(503, available.reason);
+
+    const recipe = getRecipe(body.recipe);
+    if (!recipe) throw new HttpError(404, `no recipe "${body.recipe}"`);
+
+    const existing = await readDocument(key);
+    if (!existing && allProps()[key]) {
+      throw new HttpError(409, `"${key}" is already a prop — pick another name`);
+    }
+
+    const resolved = resolveParams(recipe, body.params ?? {});
+    const config = bakeConfigFor(recipe, resolved, {
+      label: body.label?.trim() || recipe.label,
+      tags: body.tags?.length ? body.tags : recipe.tags,
+    });
+
+    const dir = path.join(PROPS_DIR, key);
+    await fs.mkdir(dir, { recursive: true });
+    await fs.copyFile(recipe.build, path.join(dir, 'build.py'));
+    await fs.writeFile(path.join(dir, 'bake.json'), JSON.stringify(config, null, 2) + '\n', 'utf8');
+
+    const source = {
+      key,
+      dir,
+      build: path.join(dir, 'build.py'),
+      config: path.join(dir, 'bake.json'),
+      out: documentPath(key),
+    };
+
+    const job = startJob('propbake', key, async (handle) => {
+      const result = await bakeProp(source, {
+        onProgress: (done: number, total: number) => handle.progress({ stage: 'baking', done, total }),
+        onLog: (message: string) => handle.log(message),
+      });
+      reloadProps();
+      return result;
+    });
+
+    json(res, { jobId: job.id, key });
   });
 
   /** Which sets would be affected by editing or deleting this prop. */
