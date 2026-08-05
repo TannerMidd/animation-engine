@@ -33,27 +33,24 @@
       "primitives": [
         {
           "k": "ellipse",
-          "f": "metalDark",
           "cx": 0,
           "cy": 0,
           "rx": 20,
-          "ry": 7
+          "ry": 7,
+          "f": "metalDark"
         },
         {
           "k": "rect",
-          "f": "metal",
           "x": -6,
           "y": "-height",
           "w": 12,
-          "h": "height"
+          "h": "height",
+          "f": "metal"
         },
         {
           "k": "poly",
-          "f": null,
-          "c": 0,
-          "sw": 10,
           "p": [
-            0.0,
+            0,
             "-height - 0.0",
             2.16,
             "-height - 12.24",
@@ -63,34 +60,33 @@
             "-height - 28.56",
             34.56,
             "-height - 32.64",
-            54.0,
+            54,
             "-height - 34.0"
-          ]
+          ],
+          "c": 0,
+          "f": null,
+          "sw": 10
         },
         {
           "k": "ellipse",
-          "f": "light",
           "cx": 56,
           "cy": "-height - 30",
           "rx": 24,
           "ry": 12,
+          "f": "light",
           "show": "lit"
         },
         {
           "k": "ellipse",
-          "f": "metalDark",
           "cx": 56,
           "cy": "-height - 30",
           "rx": 24,
           "ry": 12,
+          "f": "metalDark",
           "show": "!lit"
         },
         {
           "k": "poly",
-          "l": 0,
-          "f": "lightGlow",
-          "o": 0.16,
-          "show": "lit",
           "p": [
             34,
             "-height - 22",
@@ -100,7 +96,11 @@
             0,
             -18,
             0
-          ]
+          ],
+          "f": "lightGlow",
+          "l": 0,
+          "o": 0.16,
+          "show": "lit"
         }
       ]
     }

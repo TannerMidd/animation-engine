@@ -61,74 +61,74 @@
       "primitives": [
         {
           "k": "line",
-          "f": "metalDark",
-          "sw": 5,
           "x1": -34,
           "y1": 0,
           "x2": 34,
-          "y2": 0
+          "y2": 0,
+          "f": "metalDark",
+          "sw": 5
         },
         {
           "k": "rect",
-          "f": "metalDark",
           "x": -5,
           "y": "-height",
           "w": 10,
-          "h": "height"
+          "h": "height",
+          "f": "metalDark"
         },
         {
           "k": "rect",
-          "f": "fabric",
-          "rx": 6,
           "x": "-width/2",
           "y": "-height - 14",
           "w": "width",
-          "h": 16
+          "h": 16,
+          "rx": 6,
+          "f": "fabric"
         },
         {
           "k": "rect",
-          "f": "fabric",
-          "rx": 8,
           "x": "-width/2 + 10",
           "y": "-height - 90",
           "w": "width - 20",
-          "h": 78
+          "h": 78,
+          "rx": 8,
+          "f": "fabric"
         },
         {
           "k": "line",
-          "f": "metalDark",
-          "sw": 6,
           "x1": "-width/2 + 8",
           "y1": "-height - 48",
           "x2": "-width/2 + 8",
-          "y2": "-height - 16"
+          "y2": "-height - 16",
+          "f": "metalDark",
+          "sw": 6
         },
         {
           "k": "line",
-          "f": "metalDark",
-          "sw": 6,
           "x1": "-width/2 + 8",
           "y1": "-height - 48",
           "x2": "-width/2 + 31",
-          "y2": "-height - 48"
+          "y2": "-height - 48",
+          "f": "metalDark",
+          "sw": 6
         },
         {
           "k": "line",
-          "f": "metalDark",
-          "sw": 6,
           "x1": "width/2 - 8",
           "y1": "-height - 48",
           "x2": "width/2 - 8",
-          "y2": "-height - 16"
+          "y2": "-height - 16",
+          "f": "metalDark",
+          "sw": 6
         },
         {
           "k": "line",
-          "f": "metalDark",
-          "sw": 6,
           "x1": "width/2 - 31",
           "y1": "-height - 48",
           "x2": "width/2 - 8",
-          "y2": "-height - 48"
+          "y2": "-height - 48",
+          "f": "metalDark",
+          "sw": 6
         }
       ]
     }

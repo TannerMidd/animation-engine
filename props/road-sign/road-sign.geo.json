@@ -42,28 +42,28 @@
       "primitives": [
         {
           "k": "rect",
-          "f": "metalDark",
           "x": -5,
           "y": "-height",
           "w": 10,
-          "h": "height"
+          "h": "height",
+          "f": "metalDark"
         },
         {
           "k": "rect",
-          "f": "surface",
-          "rx": 4,
           "x": "-width/2",
           "y": "-height - width*0.55",
           "w": "width",
-          "h": "width*0.55"
+          "h": "width*0.55",
+          "rx": 4,
+          "f": "surface"
         },
         {
           "k": "text",
-          "f": "line",
           "x": 0,
           "y": "-height - width*0.55*0.32",
           "size": "width*0.55*0.42",
-          "value": "$text"
+          "value": "$text",
+          "f": "line"
         }
       ]
     }

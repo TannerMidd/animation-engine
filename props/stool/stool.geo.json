@@ -28,36 +28,36 @@
       "primitives": [
         {
           "k": "ellipse",
-          "f": "metalDark",
           "cx": 0,
           "cy": 0,
           "rx": 26,
-          "ry": 8
+          "ry": 8,
+          "f": "metalDark"
         },
         {
           "k": "rect",
-          "f": "metalDark",
           "x": -5,
           "y": "-height",
           "w": 10,
-          "h": "height"
+          "h": "height",
+          "f": "metalDark"
         },
         {
           "k": "line",
-          "f": "metalDark",
-          "sw": 4,
           "x1": -20,
           "y1": "-height*0.35",
           "x2": 20,
-          "y2": "-height*0.35"
+          "y2": "-height*0.35",
+          "f": "metalDark",
+          "sw": 4
         },
         {
           "k": "ellipse",
-          "f": "fabric",
           "cx": 0,
           "cy": "-height",
           "rx": 34,
-          "ry": 12
+          "ry": 12,
+          "f": "fabric"
         }
       ]
     }

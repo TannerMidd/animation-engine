@@ -53,19 +53,19 @@
       "primitives": [
         {
           "k": "rect",
-          "f": "accent",
           "x": "-width/2",
           "y": "-y - height",
           "w": "width",
-          "h": "height"
+          "h": "height",
+          "f": "accent"
         },
         {
           "k": "text",
-          "f": "line",
           "x": 0,
           "y": "-y - height + height*0.68",
           "size": "height*0.5",
-          "value": "$text"
+          "value": "$text",
+          "f": "line"
         }
       ]
     }

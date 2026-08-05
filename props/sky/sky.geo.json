@@ -28,21 +28,21 @@
       "primitives": [
         {
           "k": "rect",
-          "f": "ceiling",
-          "l": 0,
           "x": "setX0",
           "y": "setY0",
           "w": "setWidth",
-          "h": "setHorizonY - setY0"
+          "h": "setHorizonY - setY0",
+          "f": "ceiling",
+          "l": 0
         },
         {
           "k": "rect",
-          "f": "wall",
-          "l": 0,
           "x": "setX0",
           "y": "setHorizonY - bandHeight",
           "w": "setWidth",
           "h": "bandHeight",
+          "f": "wall",
+          "l": 0,
           "show": "bandHeight > 0"
         }
       ]

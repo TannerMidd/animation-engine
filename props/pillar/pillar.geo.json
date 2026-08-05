@@ -38,27 +38,27 @@
       "primitives": [
         {
           "k": "rect",
-          "f": "surface",
           "x": "-width/2",
           "y": "-height",
           "w": "width",
-          "h": "height"
+          "h": "height",
+          "f": "surface"
         },
         {
           "k": "rect",
-          "f": "surfaceDark",
           "x": "-width/2 - 8",
           "y": "-height",
           "w": "width + 16",
-          "h": 16
+          "h": 16,
+          "f": "surfaceDark"
         },
         {
           "k": "rect",
-          "f": "surfaceDark",
           "x": "-width/2 - 8",
           "y": -18,
           "w": "width + 16",
-          "h": 18
+          "h": 18,
+          "f": "surfaceDark"
         }
       ]
     }

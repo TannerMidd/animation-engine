@@ -43,20 +43,19 @@
           "of": [
             {
               "k": "ellipse",
-              "sm": 1,
-              "sw": 3,
-              "f": "foliage",
               "cx": "(leaves == 1 ? 0 : (i/(leaves - 1))*2 - 1)*(height - height*0.42)*0.22",
               "cy": "-height*0.42 - (height - height*0.42)*0.46",
               "rx": "(height - height*0.42)*0.17",
               "ry": "(height - height*0.42)*0.46",
+              "f": "foliage",
+              "sm": 1,
+              "sw": 3,
               "rot": "(leaves == 1 ? 0 : (i/(leaves - 1))*2 - 1)*30"
             }
           ]
         },
         {
           "k": "poly",
-          "f": "clay",
           "p": [
             "-height*0.24",
             "-height*0.42",
@@ -66,7 +65,8 @@
             0,
             "-height*0.18",
             0
-          ]
+          ],
+          "f": "clay"
         }
       ]
     }

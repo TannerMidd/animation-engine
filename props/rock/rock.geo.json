@@ -36,7 +36,6 @@
       "primitives": [
         {
           "k": "poly",
-          "f": "surface",
           "p": [
             "-width/2",
             0,
@@ -48,7 +47,8 @@
             "-height*0.6",
             "width/2",
             0
-          ]
+          ],
+          "f": "surface"
         }
       ]
     }

@@ -30,30 +30,30 @@
       "primitives": [
         {
           "k": "rect",
-          "f": "floor",
-          "l": 0,
           "x": "setX0",
           "y": "setHorizonY",
           "w": "setWidth",
-          "h": "setY0 + setHeight - setHorizonY"
+          "h": "setY0 + setHeight - setHorizonY",
+          "f": "floor",
+          "l": 0
         },
         {
           "k": "line",
-          "f": "line",
           "x1": "setX0",
           "y1": "setHorizonY",
           "x2": "setX0 + setWidth",
           "y2": "setHorizonY",
+          "f": "line",
           "sw": 4
         },
         {
           "k": "rect",
-          "f": "floorDark",
-          "l": 0,
           "x": "setX0",
           "y": "setHorizonY + bandOffset",
           "w": "setWidth",
           "h": "setY0 + setHeight - setHorizonY - bandOffset",
+          "f": "floorDark",
+          "l": 0,
           "show": "bandOffset > 0"
         }
       ]

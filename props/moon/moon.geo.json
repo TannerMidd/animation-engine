@@ -36,24 +36,24 @@
       "primitives": [
         {
           "k": "ellipse",
-          "l": 0,
-          "sm": 1,
-          "f": "lightGlow",
-          "o": 0.14,
           "cx": 0,
           "cy": "-y",
           "rx": "radius*1.5",
-          "ry": "radius*1.5"
+          "ry": "radius*1.5",
+          "f": "lightGlow",
+          "l": 0,
+          "sm": 1,
+          "o": 0.14
         },
         {
           "k": "ellipse",
-          "l": 0,
-          "sm": 1,
-          "f": "light",
           "cx": 0,
           "cy": "-y",
           "rx": "radius",
-          "ry": "radius"
+          "ry": "radius",
+          "f": "light",
+          "l": 0,
+          "sm": 1
         }
       ]
     }

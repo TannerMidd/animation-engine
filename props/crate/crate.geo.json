@@ -2,10 +2,22 @@
   "format": 2,
   "key": "crate",
   "label": "Crate",
-  "tags": ["generic", "exterior", "interior"],
+  "tags": [
+    "generic",
+    "exterior",
+    "interior"
+  ],
   "spanning": false,
   "params": [
-    { "key": "size", "label": "Size", "type": "number", "default": 90, "min": 30, "max": 250, "step": 5 }
+    {
+      "key": "size",
+      "label": "Size",
+      "type": "number",
+      "default": 90,
+      "min": 30,
+      "max": 250,
+      "step": 5
+    }
   ],
   "provenance": {
     "blender": "none (migrated from TypeScript)",
@@ -15,9 +27,32 @@
   "views": {
     "default": {
       "primitives": [
-        { "k": "rect", "f": "wood", "x": "-size / 2", "y": "-size", "w": "size", "h": "size" },
-        { "k": "line", "f": "woodDark", "x1": "-size / 2", "y1": "-size", "x2": "size / 2", "y2": 0, "sw": 4 },
-        { "k": "line", "f": "woodDark", "x1": "size / 2", "y1": "-size", "x2": "-size / 2", "y2": 0, "sw": 4 }
+        {
+          "k": "rect",
+          "x": "-size / 2",
+          "y": "-size",
+          "w": "size",
+          "h": "size",
+          "f": "wood"
+        },
+        {
+          "k": "line",
+          "x1": "-size / 2",
+          "y1": "-size",
+          "x2": "size / 2",
+          "y2": 0,
+          "f": "woodDark",
+          "sw": 4
+        },
+        {
+          "k": "line",
+          "x1": "size / 2",
+          "y1": "-size",
+          "x2": "-size / 2",
+          "y2": 0,
+          "f": "woodDark",
+          "sw": 4
+        }
       ]
     }
   }

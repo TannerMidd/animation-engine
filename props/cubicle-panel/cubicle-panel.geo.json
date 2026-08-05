@@ -37,27 +37,27 @@
       "primitives": [
         {
           "k": "rect",
-          "f": "surface",
           "x": "-width/2",
           "y": "-height",
           "w": "width",
-          "h": "height + 8"
+          "h": "height + 8",
+          "f": "surface"
         },
         {
           "k": "rect",
-          "f": "surfaceTrim",
           "x": "-width/2",
           "y": "-height",
           "w": "width",
-          "h": 14
+          "h": 14,
+          "f": "surfaceTrim"
         },
         {
           "k": "line",
-          "f": "surfaceDark",
           "x1": 0,
           "y1": "-height + 16",
           "x2": 0,
           "y2": 0,
+          "f": "surfaceDark",
           "sw": 4
         }
       ]

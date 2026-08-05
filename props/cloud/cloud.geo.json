@@ -36,30 +36,30 @@
       "primitives": [
         {
           "k": "ellipse",
-          "l": 0,
-          "f": "light",
           "cx": "-width*0.22",
           "cy": "-y",
           "rx": "width*0.3",
-          "ry": "width*0.34*0.7"
+          "ry": "width*0.34*0.7",
+          "f": "light",
+          "l": 0
         },
         {
           "k": "ellipse",
-          "l": 0,
-          "f": "light",
           "cx": "width*0.2",
           "cy": "-y + width*0.34*0.1",
           "rx": "width*0.26",
-          "ry": "width*0.34*0.58"
+          "ry": "width*0.34*0.58",
+          "f": "light",
+          "l": 0
         },
         {
           "k": "ellipse",
-          "l": 0,
-          "f": "light",
           "cx": 0,
           "cy": "-y - width*0.34*0.24",
           "rx": "width*0.28",
-          "ry": "width*0.34*0.8"
+          "ry": "width*0.34*0.8",
+          "f": "light",
+          "l": 0
         }
       ]
     }

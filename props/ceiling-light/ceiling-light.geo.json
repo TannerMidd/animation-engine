@@ -38,21 +38,21 @@
       "primitives": [
         {
           "k": "rect",
-          "f": "light",
           "x": "-width/2",
           "y": "ceilingLocalY - height - 6",
           "w": "width",
-          "h": "height"
+          "h": "height",
+          "f": "light"
         },
         {
           "k": "rect",
-          "f": "lightGlow",
-          "l": 0,
-          "o": 0.55,
           "x": "-width/2 + 8",
           "y": "ceilingLocalY - 6",
           "w": "width - 16",
-          "h": 10
+          "h": 10,
+          "f": "lightGlow",
+          "l": 0,
+          "o": 0.55
         }
       ]
     }

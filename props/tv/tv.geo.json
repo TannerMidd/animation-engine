@@ -53,40 +53,40 @@
       "primitives": [
         {
           "k": "rect",
-          "f": "metalDark",
           "x": -30,
           "y": -18,
           "w": 60,
           "h": 18,
+          "f": "metalDark",
           "show": "y <= 0"
         },
         {
           "k": "rect",
-          "f": "metal",
-          "rx": 4,
           "x": "-width/2",
           "y": "-y - height",
           "w": "width",
-          "h": "height"
+          "h": "height",
+          "rx": 4,
+          "f": "metal"
         },
         {
           "k": "rect",
-          "l": 0,
-          "f": "screen",
           "x": "-width/2 + 8",
           "y": "-y - height + 8",
           "w": "width - 16",
           "h": "height - 16",
+          "f": "screen",
+          "l": 0,
           "show": "on"
         },
         {
           "k": "rect",
-          "l": 0,
-          "f": "metalDark",
           "x": "-width/2 + 8",
           "y": "-y - height + 8",
           "w": "width - 16",
           "h": "height - 16",
+          "f": "metalDark",
+          "l": 0,
           "show": "!on"
         }
       ]

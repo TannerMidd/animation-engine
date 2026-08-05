@@ -65,7 +65,6 @@
       "primitives": [
         {
           "k": "poly",
-          "f": "surface",
           "p": [
             -20,
             -38,
@@ -75,24 +74,25 @@
             0,
             -15,
             0
-          ]
+          ],
+          "f": "surface"
         },
         {
           "k": "ellipse",
-          "f": "surfaceDark",
           "cx": 0,
           "cy": -38,
           "rx": 20,
-          "ry": 5
+          "ry": 5,
+          "f": "surfaceDark"
         },
         {
           "k": "ellipse",
-          "l": 0,
-          "f": "glass",
           "cx": 0,
           "cy": -38,
           "rx": 15,
-          "ry": 2.5
+          "ry": 2.5,
+          "f": "glass",
+          "l": 0
         }
       ]
     }

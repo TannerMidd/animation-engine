@@ -47,11 +47,11 @@
       "primitives": [
         {
           "k": "rect",
-          "f": "woodDark",
           "x": "-width/2",
           "y": "-height",
           "w": "width",
-          "h": "height"
+          "h": "height",
+          "f": "woodDark"
         },
         {
           "k": "repeat",
@@ -60,12 +60,12 @@
           "of": [
             {
               "k": "rect",
-              "l": 0,
-              "f": "wood",
               "x": "-width/2 + 6",
               "y": "-height + height/shelves - 10",
               "w": "width - 12",
-              "h": 8
+              "h": 8,
+              "f": "wood",
+              "l": 0
             },
             {
               "k": "repeat",
@@ -74,43 +74,43 @@
               "of": [
                 {
                   "k": "rect",
-                  "l": 0,
+                  "x": "-width/2 + 14",
+                  "y": "-height + height/shelves - 10 - height/shelves*(0.45 + ((i*3 + j) % 4)*0.08)",
+                  "w": "8 + ((i + j) % 3)*5",
+                  "h": "height/shelves*(0.45 + ((i*3 + j) % 4)*0.08)",
                   "f": "accent",
-                  "show": "(i + j) % 4 == 0",
-                  "x": "-width/2 + 14",
-                  "y": "-height + height/shelves - 10 - height/shelves*(0.45 + ((i*3 + j) % 4)*0.08)",
-                  "w": "8 + ((i + j) % 3)*5",
-                  "h": "height/shelves*(0.45 + ((i*3 + j) % 4)*0.08)"
+                  "l": 0,
+                  "show": "(i + j) % 4 == 0"
                 },
                 {
                   "k": "rect",
-                  "l": 0,
+                  "x": "-width/2 + 14",
+                  "y": "-height + height/shelves - 10 - height/shelves*(0.45 + ((i*3 + j) % 4)*0.08)",
+                  "w": "8 + ((i + j) % 3)*5",
+                  "h": "height/shelves*(0.45 + ((i*3 + j) % 4)*0.08)",
                   "f": "fabric",
-                  "show": "(i + j) % 4 == 1",
-                  "x": "-width/2 + 14",
-                  "y": "-height + height/shelves - 10 - height/shelves*(0.45 + ((i*3 + j) % 4)*0.08)",
-                  "w": "8 + ((i + j) % 3)*5",
-                  "h": "height/shelves*(0.45 + ((i*3 + j) % 4)*0.08)"
+                  "l": 0,
+                  "show": "(i + j) % 4 == 1"
                 },
                 {
                   "k": "rect",
-                  "l": 0,
+                  "x": "-width/2 + 14",
+                  "y": "-height + height/shelves - 10 - height/shelves*(0.45 + ((i*3 + j) % 4)*0.08)",
+                  "w": "8 + ((i + j) % 3)*5",
+                  "h": "height/shelves*(0.45 + ((i*3 + j) % 4)*0.08)",
                   "f": "foliage",
-                  "show": "(i + j) % 4 == 2",
-                  "x": "-width/2 + 14",
-                  "y": "-height + height/shelves - 10 - height/shelves*(0.45 + ((i*3 + j) % 4)*0.08)",
-                  "w": "8 + ((i + j) % 3)*5",
-                  "h": "height/shelves*(0.45 + ((i*3 + j) % 4)*0.08)"
+                  "l": 0,
+                  "show": "(i + j) % 4 == 2"
                 },
                 {
                   "k": "rect",
-                  "l": 0,
-                  "f": "clay",
-                  "show": "(i + j) % 4 == 3",
                   "x": "-width/2 + 14",
                   "y": "-height + height/shelves - 10 - height/shelves*(0.45 + ((i*3 + j) % 4)*0.08)",
                   "w": "8 + ((i + j) % 3)*5",
-                  "h": "height/shelves*(0.45 + ((i*3 + j) % 4)*0.08)"
+                  "h": "height/shelves*(0.45 + ((i*3 + j) % 4)*0.08)",
+                  "f": "clay",
+                  "l": 0,
+                  "show": "(i + j) % 4 == 3"
                 }
               ]
             }

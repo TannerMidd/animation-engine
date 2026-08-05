@@ -43,39 +43,39 @@
       "primitives": [
         {
           "k": "rect",
-          "f": "surfaceTrim",
           "x": "-width/2 - 12",
           "y": "-height - 12",
           "w": "width + 24",
-          "h": "height + 12"
+          "h": "height + 12",
+          "f": "surfaceTrim"
         },
         {
           "k": "rect",
-          "f": "floorDark",
           "x": "-width/2",
           "y": "-height",
           "w": "width",
           "h": "height",
+          "f": "floorDark",
           "show": "open"
         },
         {
           "k": "rect",
-          "f": "wood",
           "x": "-width/2",
           "y": "-height",
           "w": "width",
           "h": "height",
+          "f": "wood",
           "show": "!open"
         },
         {
           "k": "ellipse",
-          "f": "metal",
-          "sm": 1,
-          "sw": 2,
           "cx": "width/2 - 22",
           "cy": "-height/2",
           "rx": 6,
           "ry": 6,
+          "f": "metal",
+          "sm": 1,
+          "sw": 2,
           "show": "!open"
         }
       ]

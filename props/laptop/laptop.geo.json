@@ -91,36 +91,35 @@
       "primitives": [
         {
           "k": "rect",
-          "f": "metal",
-          "rx": 5,
           "x": -55,
           "y": -82,
           "w": 110,
-          "h": 72
+          "h": 72,
+          "rx": 5,
+          "f": "metal"
         },
         {
           "k": "rect",
-          "l": 0,
-          "f": "screen",
           "x": -48,
           "y": -75,
           "w": 96,
           "h": 58,
+          "f": "screen",
+          "l": 0,
           "show": "on"
         },
         {
           "k": "rect",
-          "l": 0,
-          "f": "metalDark",
           "x": -48,
           "y": -75,
           "w": 96,
           "h": 58,
+          "f": "metalDark",
+          "l": 0,
           "show": "!on"
         },
         {
           "k": "poly",
-          "f": "metal",
           "p": [
             -55,
             -10,
@@ -130,25 +129,26 @@
             0,
             -64,
             0
-          ]
+          ],
+          "f": "metal"
         },
         {
           "k": "line",
-          "f": "metalDark",
-          "sw": 2,
           "x1": -41,
           "y1": -7,
           "x2": 41,
-          "y2": -7
+          "y2": -7,
+          "f": "metalDark",
+          "sw": 2
         },
         {
           "k": "line",
-          "f": "metalDark",
-          "sw": 2,
           "x1": -34,
           "y1": -3,
           "x2": 34,
-          "y2": -3
+          "y2": -3,
+          "f": "metalDark",
+          "sw": 2
         }
       ]
     }

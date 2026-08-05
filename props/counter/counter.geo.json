@@ -37,19 +37,19 @@
       "primitives": [
         {
           "k": "rect",
-          "f": "surface",
           "x": "-width/2",
           "y": "-height",
           "w": "width",
-          "h": "height"
+          "h": "height",
+          "f": "surface"
         },
         {
           "k": "rect",
-          "f": "surfaceDark",
           "x": "-width/2 - 6",
           "y": "-height",
           "w": "width + 12",
-          "h": 16
+          "h": 16,
+          "f": "surfaceDark"
         },
         {
           "k": "repeat",
@@ -57,12 +57,12 @@
           "of": [
             {
               "k": "line",
-              "f": "surfaceDark",
-              "sw": 3,
               "x1": "-width/2 + (width/max(1, round(width/110)))*(i + 1)",
               "y1": "-height + 20",
               "x2": "-width/2 + (width/max(1, round(width/110)))*(i + 1)",
-              "y2": -6
+              "y2": -6,
+              "f": "surfaceDark",
+              "sw": 3
             }
           ]
         }

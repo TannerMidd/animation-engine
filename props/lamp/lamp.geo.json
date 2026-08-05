@@ -28,23 +28,22 @@
       "primitives": [
         {
           "k": "ellipse",
-          "f": "metalDark",
           "cx": 0,
           "cy": 0,
           "rx": 30,
-          "ry": 9
+          "ry": 9,
+          "f": "metalDark"
         },
         {
           "k": "rect",
-          "f": "metalDark",
           "x": -4,
           "y": "-height",
           "w": 8,
-          "h": "height"
+          "h": "height",
+          "f": "metalDark"
         },
         {
           "k": "poly",
-          "f": "light",
           "p": [
             -42,
             "-height",
@@ -54,7 +53,8 @@
             "-height - 60",
             -30,
             "-height - 60"
-          ]
+          ],
+          "f": "light"
         }
       ]
     }

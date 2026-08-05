@@ -18,29 +18,29 @@
       "primitives": [
         {
           "k": "rect",
-          "f": "surface",
           "x": -32,
           "y": -120,
           "w": 64,
-          "h": 120
+          "h": 120,
+          "f": "surface"
         },
         {
           "k": "rect",
-          "f": "glass",
-          "rx": 8,
           "x": -26,
           "y": -190,
           "w": 52,
-          "h": 72
+          "h": 72,
+          "rx": 8,
+          "f": "glass"
         },
         {
           "k": "rect",
-          "f": "metalDark",
-          "sw": 2,
           "x": -10,
           "y": -108,
           "w": 20,
-          "h": 14
+          "h": 14,
+          "f": "metalDark",
+          "sw": 2
         }
       ]
     }

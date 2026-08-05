@@ -50,32 +50,32 @@
           "of": [
             {
               "k": "rect",
-              "f": "wood",
-              "sw": 2,
               "x": "-width/2",
               "y": "-height",
               "w": 12,
-              "h": "height"
+              "h": "height",
+              "f": "wood",
+              "sw": 2
             }
           ]
         },
         {
           "k": "rect",
-          "f": "woodDark",
-          "sw": 2,
           "x": "-width/2",
           "y": "-height*0.72",
           "w": "width",
-          "h": 10
+          "h": 10,
+          "f": "woodDark",
+          "sw": 2
         },
         {
           "k": "rect",
-          "f": "woodDark",
-          "sw": 2,
           "x": "-width/2",
           "y": "-height*0.3",
           "w": "width",
-          "h": 10
+          "h": 10,
+          "f": "woodDark",
+          "sw": 2
         }
       ]
     }

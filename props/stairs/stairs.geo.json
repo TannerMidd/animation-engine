@@ -46,7 +46,6 @@
       "primitives": [
         {
           "k": "poly",
-          "f": "surface",
           "p": [
             "-steps*run/2",
             0,
@@ -61,7 +60,8 @@
             },
             "steps*run/2",
             0
-          ]
+          ],
+          "f": "surface"
         }
       ]
     }

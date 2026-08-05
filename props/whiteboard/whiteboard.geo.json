@@ -46,38 +46,38 @@
       "primitives": [
         {
           "k": "rect",
-          "f": "#e8e6df",
           "x": "-width/2",
           "y": "-y - height",
           "w": "width",
-          "h": "height"
+          "h": "height",
+          "f": "#e8e6df"
         },
         {
           "k": "line",
-          "f": "metalDark",
-          "sw": 4,
           "x1": "-width/2 + 30",
           "y1": "-y - height + 40",
           "x2": "-width/2 + width*0.55",
-          "y2": "-y - height + 40"
+          "y2": "-y - height + 40",
+          "f": "metalDark",
+          "sw": 4
         },
         {
           "k": "line",
-          "f": "metalDark",
-          "sw": 4,
           "x1": "-width/2 + 30",
           "y1": "-y - height + 70",
           "x2": "-width/2 + width*0.4",
-          "y2": "-y - height + 70"
+          "y2": "-y - height + 70",
+          "f": "metalDark",
+          "sw": 4
         },
         {
           "k": "line",
-          "f": "accent",
-          "sw": 4,
           "x1": "-width/2 + 30",
           "y1": "-y - height + 100",
           "x2": "-width/2 + width*0.62",
-          "y2": "-y - height + 100"
+          "y2": "-y - height + 100",
+          "f": "accent",
+          "sw": 4
         }
       ]
     }

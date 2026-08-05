@@ -46,11 +46,11 @@
       "primitives": [
         {
           "k": "rect",
-          "f": "metal",
           "x": "-width/2",
           "y": "-height",
           "w": "width",
-          "h": "height"
+          "h": "height",
+          "f": "metal"
         },
         {
           "k": "repeat",
@@ -59,21 +59,21 @@
           "of": [
             {
               "k": "rect",
-              "f": "metalDark",
-              "sw": 2,
               "x": "-width/2 + 8",
               "y": "-height + 6",
               "w": "width - 16",
-              "h": "height/drawers - 12"
+              "h": "height/drawers - 12",
+              "f": "metalDark",
+              "sw": 2
             },
             {
               "k": "line",
-              "f": "surface",
-              "sw": 4,
               "x1": -14,
               "y1": "-height + height/drawers/2",
               "x2": 14,
-              "y2": "-height + height/drawers/2"
+              "y2": "-height + height/drawers/2",
+              "f": "surface",
+              "sw": 4
             }
           ]
         }

@@ -44,31 +44,31 @@
       "primitives": [
         {
           "k": "rect",
-          "f": "metalDark",
-          "rx": 10,
           "x": "-(max(80, textLength*size*0.72 + 40))/2",
           "y": "-y - size",
           "w": "max(80, textLength*size*0.72 + 40)",
-          "h": "size*1.5"
+          "h": "size*1.5",
+          "rx": 10,
+          "f": "metalDark"
         },
         {
           "k": "text",
-          "f": null,
+          "x": 0,
+          "y": "-y + size*0.16",
+          "size": "size",
+          "value": "$text",
           "st": "accentGlow",
-          "sw": 9,
+          "f": null,
           "o": 0.45,
-          "x": 0,
-          "y": "-y + size*0.16",
-          "size": "size",
-          "value": "$text"
+          "sw": 9
         },
         {
           "k": "text",
-          "f": "accent",
           "x": 0,
           "y": "-y + size*0.16",
           "size": "size",
-          "value": "$text"
+          "value": "$text",
+          "f": "accent"
         }
       ]
     }

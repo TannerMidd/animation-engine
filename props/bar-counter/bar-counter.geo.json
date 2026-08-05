@@ -37,28 +37,28 @@
       "primitives": [
         {
           "k": "rect",
-          "f": "wood",
           "x": "-width/2",
           "y": "-height",
           "w": "width",
-          "h": "height"
+          "h": "height",
+          "f": "wood"
         },
         {
           "k": "rect",
-          "f": "woodDark",
           "x": "-width/2 - 10",
           "y": "-height",
           "w": "width + 20",
-          "h": 18
+          "h": 18,
+          "f": "woodDark"
         },
         {
           "k": "line",
-          "f": "woodDark",
-          "sw": 4,
           "x1": "-width/2",
           "y1": "-height*0.42",
           "x2": "width/2",
-          "y2": "-height*0.42"
+          "y2": "-height*0.42",
+          "f": "woodDark",
+          "sw": 4
         }
       ]
     }

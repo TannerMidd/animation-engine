@@ -55,11 +55,11 @@
       "primitives": [
         {
           "k": "rect",
-          "f": "glass",
           "x": "-width/2",
           "y": "-sillY - height",
           "w": "width",
-          "h": "height"
+          "h": "height",
+          "f": "glass"
         },
         {
           "k": "repeat",
@@ -67,22 +67,22 @@
           "of": [
             {
               "k": "line",
-              "f": "line",
-              "sw": 3,
               "x1": "-width/2 + (width/panes)*(i+1)",
               "y1": "-sillY - height",
               "x2": "-width/2 + (width/panes)*(i+1)",
-              "y2": "-sillY"
+              "y2": "-sillY",
+              "f": "line",
+              "sw": 3
             }
           ]
         },
         {
           "k": "rect",
-          "f": "surfaceTrim",
           "x": "-width/2 - 8",
           "y": "-sillY",
           "w": "width + 16",
-          "h": 10
+          "h": 10,
+          "f": "surfaceTrim"
         }
       ]
     }

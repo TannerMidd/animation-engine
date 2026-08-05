@@ -45,35 +45,35 @@
       "primitives": [
         {
           "k": "rect",
-          "f": "wood",
           "x": "-trunk/2",
           "y": "-height*0.55",
           "w": "trunk",
-          "h": "height*0.55"
+          "h": "height*0.55",
+          "f": "wood"
         },
         {
           "k": "ellipse",
-          "f": "foliage",
           "cx": 0,
           "cy": "-height + spread*0.55",
           "rx": "spread",
-          "ry": "spread*0.78"
+          "ry": "spread*0.78",
+          "f": "foliage"
         },
         {
           "k": "ellipse",
-          "f": "foliageDark",
           "cx": "-spread*0.55",
           "cy": "-height + spread*0.55 + spread*0.3",
           "rx": "spread*0.6",
-          "ry": "spread*0.5"
+          "ry": "spread*0.5",
+          "f": "foliageDark"
         },
         {
           "k": "ellipse",
-          "f": "foliageDark",
           "cx": "spread*0.55",
           "cy": "-height + spread*0.55 + spread*0.26",
           "rx": "spread*0.58",
-          "ry": "spread*0.48"
+          "ry": "spread*0.48",
+          "f": "foliageDark"
         }
       ]
     }

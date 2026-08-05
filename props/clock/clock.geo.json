@@ -38,30 +38,30 @@
       "primitives": [
         {
           "k": "ellipse",
-          "sm": 1,
-          "f": "surface",
           "cx": 0,
           "cy": "-y",
           "rx": "radius",
-          "ry": "radius"
+          "ry": "radius",
+          "f": "surface",
+          "sm": 1
         },
         {
           "k": "line",
-          "f": "line",
-          "sw": 4,
           "x1": 0,
           "y1": "-y",
           "x2": 0,
-          "y2": "-y - radius*0.6"
+          "y2": "-y - radius*0.6",
+          "f": "line",
+          "sw": 4
         },
         {
           "k": "line",
-          "f": "line",
-          "sw": 4,
           "x1": 0,
           "y1": "-y",
           "x2": "radius*0.42",
-          "y2": "-y + radius*0.24"
+          "y2": "-y + radius*0.24",
+          "f": "line",
+          "sw": 4
         }
       ]
     }
