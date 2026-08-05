@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { AnimationDocument, CastSummary, DialogueDocument, Health, SceneDetail, SceneSummary, SetSummary, ShotList } from '../types.ts';
+import type { AnimationDocument, CastSummary, DialogueDocument, Health, PropDefInfo, SceneDetail, SceneSummary, SetSummary, ShotList } from '../types.ts';
 import { Dot, SectionRule } from './chrome.tsx';
 import type { MenuTarget, OpenMenu } from './ContextMenu.tsx';
 import { cueUndecided, type Mode } from './lib.ts';
@@ -69,7 +69,7 @@ function TreeRow({ row, onContextMenu }: { row: Row; onContextMenu: OpenMenu }) 
  */
 export function Sidebar({
   scenes, scene, detail, shots, dialogue, animation, dirty, hasStaleRender, staleBeats,
-  cast, sets, health, mode, onScene, onMode, onNewScene, onOpenCast, onOpenSets, onOpenSystem,
+  cast, sets, props, health, mode, onScene, onMode, onNewScene, onOpenCast, onOpenSets, onOpenProps, onOpenSystem,
   onContextMenu,
 }: {
   scenes: SceneSummary[];
@@ -83,6 +83,7 @@ export function Sidebar({
   /** Beats by which the script has outrun the shot list; 0 when in sync. */
   staleBeats: number;
   cast: CastSummary[];
+  props: PropDefInfo[];
   sets: SetSummary[];
   health: Health | null;
   mode: Mode;
@@ -91,6 +92,7 @@ export function Sidebar({
   onNewScene: () => void;
   onOpenCast: (name: string | null) => void;
   onOpenSets: (name: string | null) => void;
+  onOpenProps: (key: string | null) => void;
   /** The health strip opens the full System report — doctor, in the place people already look. */
   onOpenSystem: () => void;
   onContextMenu: OpenMenu;
@@ -227,8 +229,27 @@ export function Sidebar({
       }
     }
 
+    // Props sit beside sets because that is the order you meet them in: you are
+    // dressing a room when you discover the catalogue is missing a waste bin.
+    section('props', 'Props', props.length);
+    if (open['props']) {
+      for (const prop of props.filter((prop) => match(prop.key) || match(prop.label))) {
+        rows.push({
+          key: `prop:${prop.key}`, label: prop.label, glyph: '◆', pad: 22, h: 21, fg: '#6b737d',
+          hint: `${prop.tags.join(' · ')} — open the prop studio`,
+          go: () => onOpenProps(prop.key),
+          menu: { kind: 'prop', propId: prop.key },
+        });
+      }
+      rows.push({
+        key: 'new-prop', label: '+ new prop', glyph: '', pad: 22, h: 21, fg: '#6b737d',
+        hint: 'Draw one, describe it to the local model, or bake it',
+        go: () => onOpenProps(null),
+      });
+    }
+
     return rows;
-  }, [scenes, cast, sets, open, scene, shots, filter, onScene, onNewScene, onOpenCast, onOpenSets]);
+  }, [scenes, cast, sets, props, open, scene, shots, filter, onScene, onNewScene, onOpenCast, onOpenSets, onOpenProps]);
 
   const healthRows = health
     ? [

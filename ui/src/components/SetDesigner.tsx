@@ -324,8 +324,8 @@ export function SetDesigner({ vocab, llm, open, onOpenProps }: {
               {/* The moment you realise the room needs something the catalogue
                   does not have is the moment you are looking at this list. */}
               {onOpenProps && (
-                <Button variant="ghost" onClick={() => onOpenProps(null)} title="Draw a new prop">
-                  + New
+                <Button variant="ghost" onClick={() => onOpenProps(null)} title="Draw, describe or bake a new prop">
+                  + New prop
                 </Button>
               )}
               <Select value={tag} options={['all', ...tags]} onChange={setTag} />

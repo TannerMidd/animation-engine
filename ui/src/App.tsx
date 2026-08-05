@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api.ts';
-import type { CastSummary, Health, SceneSummary, SetSummary, ShowInfo, Vocab } from './types.ts';
+import type { CastSummary, Health, PropDefInfo, SceneSummary, SetSummary, ShowInfo, Vocab } from './types.ts';
 import { EditorApp } from './editor/EditorApp.tsx';
 import { SetDesigner } from './components/SetDesigner.tsx';
 import { CastEditor } from './components/CastEditor.tsx';
@@ -38,6 +38,7 @@ export default function App() {
   const [scene, setScene] = useState<string | null>(null);
   const [cast, setCast] = useState<CastSummary[]>([]);
   const [sets, setSets] = useState<SetSummary[]>([]);
+  const [props, setProps] = useState<PropDefInfo[]>([]);
   const [vocab, setVocab] = useState<Vocab | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [show, setShow] = useState<ShowInfo | null>(null);
@@ -52,11 +53,14 @@ export default function App() {
 
   const refreshCast = useCallback(async () => setCast(await api.cast()), []);
   const refreshSets = useCallback(async () => setSets(await api.sets()), []);
+  const refreshProps = useCallback(async () => setProps((await api.props()).props), []);
 
   useEffect(() => {
     void (async () => {
       try {
-        const [v, s] = await Promise.all([api.vocab(), api.show(), refreshScenes(), refreshCast(), refreshSets()]);
+        const [v, s] = await Promise.all([
+          api.vocab(), api.show(), refreshScenes(), refreshCast(), refreshSets(), refreshProps(),
+        ]);
         setVocab(v);
         setShow(s);
       } finally {
@@ -65,7 +69,7 @@ export default function App() {
       // Health probes Python and can take a while; never block the app on it.
       void api.health().then(setHealth).catch(() => {});
     })();
-  }, [refreshScenes, refreshCast, refreshSets]);
+  }, [refreshScenes, refreshCast, refreshSets, refreshProps]);
 
   // The engine probe finishes in the background — poll briefly until it lands.
   useEffect(() => {
@@ -142,6 +146,7 @@ export default function App() {
         scenes={scenes}
         cast={cast}
         sets={sets}
+        props={props}
         vocab={vocab}
         health={health}
         show={show}
@@ -155,6 +160,7 @@ export default function App() {
         onNewScene={() => void newScene()}
         onOpenCast={(name) => setLegacy({ kind: 'cast', name })}
         onOpenSets={(name) => setLegacy({ kind: 'sets', name })}
+        onOpenProps={(key) => setLegacy({ kind: 'props', name: key })}
       />
 
       {legacy && (
@@ -166,6 +172,7 @@ export default function App() {
                 setLegacy(null);
                 void refreshCast();
                 void refreshSets();
+                void refreshProps();
               }}
               className="h-[23px] px-2 rounded-[3px] border border-edge bg-panel-2 text-ink-dim text-[11px] cursor-pointer hover:text-ink"
             >
@@ -192,7 +199,7 @@ export default function App() {
               <PropStudio
                 open={legacy.name}
                 llm={health?.llm ?? null}
-                onCatalogueChanged={() => void refreshSets()}
+                onCatalogueChanged={() => { void refreshSets(); void refreshProps(); }}
               />
             )}
           </div>

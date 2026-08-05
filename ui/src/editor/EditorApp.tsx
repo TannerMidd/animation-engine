@@ -3,7 +3,7 @@ import { api, followJob } from '../api.ts';
 import type {
   AnimationDocument, Beat, CastMember, CastSummary, CheckResult, DialogueCue, DialogueDocument, Health,
   JobEvent, LlmStatus, PreviewInfo, ProductionPreflightNote, ProductionPreflightReport, SceneDetail,
-  SceneSoundInfo, SceneSummary, SetDescriptor, SetSummary, ShotList, ShowInfo, Vocab,
+  SceneSoundInfo, SceneSummary, SetDescriptor, SetSummary, ShotList, ShowInfo, Vocab, PropDefInfo,
 } from '../types.ts';
 import { GenerateDialog } from '../components/GenerateDialog.tsx';
 import type { AnimationEditTarget, StagePropTarget } from '../components/AnimationOverlay.tsx';
@@ -35,13 +35,14 @@ type Quality = 'Draft' | 'Accurate' | 'Final';
  * time, and both are explicit jobs with progress.
  */
 export function EditorApp({
-  scene, scenes, cast, sets, vocab, health, show, llm, expressionsFor,
-  onScene, onSceneChanged, onNewScene, onOpenCast, onOpenSets,
+  scene, scenes, cast, sets, props, vocab, health, show, llm, expressionsFor,
+  onScene, onSceneChanged, onNewScene, onOpenCast, onOpenSets, onOpenProps,
 }: {
   scene: string;
   scenes: SceneSummary[];
   cast: CastSummary[];
   sets: SetSummary[];
+  props: PropDefInfo[];
   vocab: Vocab | null;
   health: Health | null;
   show: ShowInfo | null;
@@ -52,6 +53,7 @@ export function EditorApp({
   onNewScene: () => void;
   onOpenCast: (name: string | null) => void;
   onOpenSets: (name: string | null) => void;
+  onOpenProps: (key: string | null) => void;
 }) {
   const [mode, setModeRaw] = useState<Mode>('write');
   const [tab, setTab] = useState<InspectorTab>('beat');
@@ -1204,6 +1206,9 @@ export function EditorApp({
       out.push({ icon: '◍', label: `Open ${member.name} in the cast editor`, group: 'Project', run: () => onOpenCast(member.name) });
     }
     out.push({ icon: '▦', label: 'Open the set designer', group: 'Project', run: () => onOpenSets(null) });
+    // One entry, worded so it is found by either half of what people search for
+    // — the thing they want to make, or the name of the tool that makes it.
+    out.push({ icon: '◆', label: 'New prop — open the prop studio', group: 'Project', run: () => onOpenProps(null) });
     (shots?.beats ?? []).forEach((beat, i) => {
       const text = beat.kind === 'pause' ? `pause ${beat.ms}ms` : beat.text;
       out.push({
@@ -1218,7 +1223,7 @@ export function EditorApp({
   }, [
     prefs, scenes, cast, shots, show, engine, engines, setMode, selectTab, setEngine, runCheck, runDirect, runJob,
     refreshPreflight, askRenderMaster, askRenderDraft, askRenderReel, runCastCheck, runContactSheet, switchIdentity,
-    onScene, onOpenCast, onOpenSets, selectBeat,
+    onScene, onOpenCast, onOpenSets, onOpenProps, selectBeat,
   ]);
 
   // --- context menu ---
@@ -1377,6 +1382,7 @@ export function EditorApp({
         return [
           act({ label: 'Prop inspector', go: () => selectTab('prop') }),
           act({ label: 'Open the set designer', go: () => onOpenSets(setName) }),
+          act({ label: 'Edit this prop…', go: () => onOpenProps(target.propId.replace(/-\d+$/, '')) }),
         ];
       case 'stage':
         return [
@@ -1662,6 +1668,7 @@ export function EditorApp({
           staleBeats={staleBeats}
           cast={cast}
           sets={sets}
+          props={props}
           health={health}
           mode={mode}
           onScene={onScene}
@@ -1669,6 +1676,7 @@ export function EditorApp({
           onNewScene={onNewScene}
           onOpenCast={onOpenCast}
           onOpenSets={onOpenSets}
+          onOpenProps={onOpenProps}
           onOpenSystem={() => setSystemOpen(true)}
           onContextMenu={openMenu}
         />
