@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.ts';
 import type {
   AnimationDocument, AnimationKey, MotionSegment, MotionValue, RigDoc, ShotList, TimeAnchor,
@@ -26,7 +26,9 @@ function absoluteMs(anchor: TimeAnchor): number | null {
   return anchor.kind === 'absolute' ? anchor.ms : null;
 }
 
-function segmentFor(request: MotionAuthoringRequest, easing: Easing): MotionSegment {
+type Gait = NonNullable<Extract<MotionSegment, { channel: 'root.position' }>['gait']>;
+
+function segmentFor(request: MotionAuthoringRequest, easing: Easing, gait: Gait): MotionSegment {
   const target = request.channel === 'part.transform' ? `${request.channel}:${request.partId}` : request.channel;
   const id = safeId(`manual:${request.actorId}:${target}:${Math.round(request.startMs * 10)}`);
   const common = {
@@ -60,12 +62,17 @@ function segmentFor(request: MotionAuthoringRequest, easing: Easing): MotionSegm
     })),
   };
   return request.channel === 'root.position'
-    ? { ...common, channel: 'root.position' } as MotionSegment
+    ? { ...common, channel: 'root.position', gait } as MotionSegment
     : { ...common, channel: 'part.transform', partId: request.partId! } as MotionSegment;
 }
 
-function mergeMotion(document: AnimationDocument, request: MotionAuthoringRequest, easing: Easing): AnimationDocument {
-  const proposed = segmentFor(request, easing);
+function mergeMotion(
+  document: AnimationDocument,
+  request: MotionAuthoringRequest,
+  easing: Easing,
+  gait: Gait,
+): AnimationDocument {
+  const proposed = segmentFor(request, easing, gait);
   const existing = document.segments.find((segment) => segment.id === proposed.id);
   if (existing?.locked) throw new Error(`The ${existing.id} motion segment is locked.`);
 
@@ -148,6 +155,9 @@ export function AnimationPanel({
   const [partId, setPartId] = useState('body');
   const [durationFrames, setDurationFrames] = useState(12);
   const [easing, setEasing] = useState<Easing>('ease-in-out');
+  const [gait, setGait] = useState<Gait>('auto');
+  /** The phrase a gait change writes to; a ref because it is derived below. */
+  const gaitSegmentRef = useRef<MotionSegment | null>(null);
   const [pathShape, setPathShape] = useState<'linear' | 'smooth' | 'arc'>('smooth');
   const [curvature, setCurvature] = useState(0.2);
   const [anticipation, setAnticipation] = useState(0);
@@ -230,7 +240,7 @@ export function AnimationPanel({
     setError(null);
     try {
       const edited = (Array.isArray(request) ? request : [request])
-        .reduce((current, edit) => mergeMotion(current, edit, easing), document);
+        .reduce((current, edit) => mergeMotion(current, edit, easing, gait), document);
       const saved = await api.saveAnimation(scene, edited);
       setUndoStack((items) => [...items, document].slice(-50));
       setRedoStack([]);
@@ -242,7 +252,7 @@ export function AnimationPanel({
     } finally {
       setBusy(false);
     }
-  }, [busy, document, easing, onDocument, onSeek, scene]);
+  }, [busy, document, easing, gait, onDocument, onSeek, scene]);
 
   const restore = useCallback(async (direction: 'undo' | 'redo') => {
     if (!document || busy) return;
@@ -268,6 +278,39 @@ export function AnimationPanel({
     }
   }, [busy, document, onDocument, redoStack, scene, undoStack]);
 
+  /**
+   * Gait is a property of a move that already exists, not a setting for the
+   * next one.
+   *
+   * The other controls here arm the next drag and merely echo whatever is
+   * selected. That is the wrong contract for this one: reading "walk" on a move
+   * you just made and finding it changed nothing is indistinguishable from the
+   * feature being broken. So it writes through to the selected phrase, and
+   * arms the next drag as well.
+   */
+  const changeGait = useCallback(async (next: Gait) => {
+    setGait(next);
+    const segment = gaitSegmentRef.current;
+    if (!document || !segment || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const saved = await api.saveAnimation(scene, {
+        ...document,
+        segments: document.segments.map((item) => (
+          item.id === segment.id && item.channel === 'root.position' ? { ...item, gait: next } : item
+        )),
+      });
+      setUndoStack((items) => [...items, document].slice(-50));
+      setRedoStack([]);
+      onDocument(saved.document);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, document, onDocument, scene]);
+
   const selectedPartIds = partId === 'wrist_L'
     ? ['arm_L_upper', 'arm_L_fore']
     : partId === 'wrist_R'
@@ -288,9 +331,12 @@ export function AnimationPanel({
     return Math.abs(aStart - playheadMs) - Math.abs(bStart - playheadMs) || a.id.localeCompare(b.id);
   })[0] ?? null;
 
+  gaitSegmentRef.current = selectedSegment?.channel === 'root.position' ? selectedSegment : null;
+
   useEffect(() => {
     if (!selectedSegment) return;
     setEasing(selectedSegment.easing);
+    if (selectedSegment.channel === 'root.position') setGait(selectedSegment.gait ?? 'auto');
     setPathShape(selectedSegment.path.shape);
     setCurvature(selectedSegment.path.curvature);
     setAnticipation(selectedSegment.assist.anticipation);
@@ -588,6 +634,20 @@ export function AnimationPanel({
           />
         </Field>
       </div>
+
+      {partId === 'body' && (
+        <Field
+          label="Gait"
+          hint="Auto walks any move long enough to read as travel; none carries them there"
+        >
+          <Select
+            value={gait}
+            options={['auto', 'walk', 'none']}
+            onChange={(value) => { void changeGait(value as Gait); }}
+            className="w-full"
+          />
+        </Field>
+      )}
 
       <div className="grid grid-cols-2 gap-2">
         <Field label="Path shape">

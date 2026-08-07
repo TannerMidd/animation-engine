@@ -49,7 +49,12 @@ import { readWav, toInt16 } from '../../voice/wav.ts';
 import {
   compareConversionAudio, convertPerformances, checkConversionIdentity,
 } from '../../voice/conversion.ts';
-import { readAnimationOrDefault, retimeAnimationForDialogue, writeAnimation } from '../../pipeline/animation.ts';
+import {
+  readAnimation,
+  readAnimationOrDefault,
+  retimeAnimationForDialogue,
+  writeAnimation,
+} from '../../pipeline/animation.ts';
 import { AnimationDocument } from '../../schema/animation.ts';
 import { estimatedAnimationTimeline, runProductionPreflight, type SoundtrackState } from '../../pipeline/preflight.ts';
 import {
@@ -90,7 +95,11 @@ function startSoundtrackJob(
       onProgress: (stage, done, total) => handle.progress({ stage, done, total }),
     });
     const setDescriptor = shots.set ? await loadSet(shots.set) : null;
-    const compiled = compileShotList(shots, rigs, timings, null, setDescriptor);
+    // The authored animation belongs here as much as it does in a render: it is
+    // what decides where a puppet is standing, so leaving it out makes the
+    // soundtrack refuse interactions the render performs quite happily.
+    const animation = await readAnimation(scene);
+    const compiled = compileShotList(shots, rigs, timings, animation, setDescriptor);
     const dialogue = await readDialogueDocument(scene);
     handle.progress({ stage: 'audio', done: 0, total: 1 });
     await mixSceneAudio(scene, shots, compiled.audio, compiled.durationMs, {

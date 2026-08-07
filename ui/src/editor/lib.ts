@@ -310,6 +310,39 @@ export function cueForBeat(dialogue: DialogueDocument | null, beat: Beat | null)
   return dialogue.cues.find((cue) => cue.id === beat.id) ?? null;
 }
 
+/**
+ * The cues that belong to the script as it stands, in beat order.
+ *
+ * A dialogue document keeps cues whose beat no longer exists, deliberately: a
+ * rewrite that deletes a line must not destroy the takes recorded for it, and
+ * restoring the line restores the work. That retention is correct on disk and
+ * wrong on screen — showing them makes lines from a previous, unrelated script
+ * look like lines of this one, complete with whatever run-on text the old
+ * parse produced.
+ *
+ * So every surface that means "the lines of this scene" resolves through the
+ * shot list, exactly as the engine does when it renders.
+ */
+export function sceneCues(dialogue: DialogueDocument | null, shots: ShotList | null): DialogueCue[] {
+  if (!dialogue) return [];
+  if (!shots) return dialogue.cues;
+  const byId = new Map(dialogue.cues.map((cue) => [cue.id, cue]));
+  const out: DialogueCue[] = [];
+  for (const beat of shots.beats) {
+    if (beat.kind !== 'line') continue;
+    const cue = byId.get(beat.id);
+    if (cue) out.push(cue);
+  }
+  return out;
+}
+
+/** Cues the script has left behind: kept on disk for their takes, shown apart. */
+export function orphanedCues(dialogue: DialogueDocument | null, shots: ShotList | null): DialogueCue[] {
+  if (!dialogue || !shots) return [];
+  const live = new Set(shots.beats.flatMap((beat) => (beat.kind === 'line' ? [beat.id] : [])));
+  return dialogue.cues.filter((cue) => !live.has(cue.id));
+}
+
 /** Why a timeline motion clip cannot currently be deleted, or null when safe. */
 export function motionDeletionBlocker(document: AnimationDocument, segmentId: string): string | null {
   const segment = document.segments.find((item) => item.id === segmentId);

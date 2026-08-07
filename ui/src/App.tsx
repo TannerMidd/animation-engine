@@ -44,6 +44,15 @@ export default function App() {
   const [show, setShow] = useState<ShowInfo | null>(null);
   const [booting, setBooting] = useState(true);
   const [legacy, setLegacy] = useState<null | { kind: 'sets' | 'cast' | 'props'; name: string | null }>(null);
+  /**
+   * A set the designer asked to bind to the open scene.
+   *
+   * The editor owns that decision — it is the one holding the shot list and the
+   * confirm for anything the change would break — so the designer states the
+   * request and the editor answers it. The nonce lets the same set be asked for
+   * twice in a row.
+   */
+  const [setRequest, setSetRequest] = useState<{ name: string; nonce: number } | null>(null);
 
   const refreshScenes = useCallback(async () => {
     const list = await api.scenes();
@@ -161,6 +170,11 @@ export default function App() {
         onOpenCast={(name) => setLegacy({ kind: 'cast', name })}
         onOpenSets={(name) => setLegacy({ kind: 'sets', name })}
         onOpenProps={(key) => setLegacy({ kind: 'props', name: key })}
+        setRequest={setRequest}
+        onSetRequestHandled={() => {
+          setSetRequest(null);
+          void refreshScenes();
+        }}
       />
 
       {legacy && (
@@ -170,6 +184,7 @@ export default function App() {
               type="button"
               onClick={() => {
                 setLegacy(null);
+                void refreshScenes();
                 void refreshCast();
                 void refreshSets();
                 void refreshProps();
@@ -191,6 +206,14 @@ export default function App() {
                 vocab={vocab}
                 llm={health?.llm ?? null}
                 open={legacy.name}
+                scene={scene}
+                sceneSet={scenes.find((s) => s.name === scene)?.set?.replace(/\.(json|svg)$/, '') ?? null}
+                onUseInScene={(name) => {
+                  // Hand back to the editor: it owns the shot list, and any
+                  // confirm about what the change breaks belongs on the stage.
+                  setSetRequest({ name, nonce: Date.now() });
+                  setLegacy(null);
+                }}
                 onOpenProps={(name) => setLegacy({ kind: 'props', name })}
               />
             )}

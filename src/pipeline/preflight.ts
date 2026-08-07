@@ -1016,7 +1016,9 @@ function inspectAnimation(
   if (!timeline) return;
 
   try {
-    const resolved = resolveAnimation(animation, timeline);
+    // Paced, because preflight is a prediction of the render and the render
+    // walks at the engine's pace rather than at the drag's.
+    const resolved = resolveAnimation(animation, timeline, { paceWalks: true });
     inspectResolvedMotionQuality(resolved, input, notes);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -1122,8 +1124,16 @@ export function evaluateProductionPreflight(input: ProductionPreflightInput): Pr
       try {
         // The compiler is the continuity authority. Running it on conservative
         // estimated line timings catches the same missing/ambiguous target,
-        // hidden performer, reach and pickup/putdown errors as final render.
-        compileShotList(shots, input.rigs, estimatedCompilerTimings(shots), null, input.setDescriptor);
+        // hidden performer, reach and pickup/putdown errors as final render —
+        // which means it needs the authored animation too, since that is what
+        // says where a dragged puppet is standing when it reaches for something.
+        compileShotList(
+          shots,
+          input.rigs,
+          estimatedCompilerTimings(shots),
+          input.animation,
+          input.setDescriptor,
+        );
       } catch (error) {
         note(notes, 'error', 'prop-action-invalid', (error as Error).message);
       }

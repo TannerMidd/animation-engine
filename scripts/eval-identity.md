@@ -1,99 +1,136 @@
-# NORTH STAR
+# THE RERUN
 
-INT. CONFERENCE ROOM B - DAY
+INT. OPEN PLAN OFFICE - MORNING
 
-MEGAN
-(confused)
-What's our north star metric this quarter?
-
-[BEAT 1000]
-
-BRAD
-(pleased)
-Polaris.
-
-MEGAN
-(blank)
-Polaris is a star.
-
-BRAD
-(calm)
-It's *the* north star. Leadership wanted alignment.
-
-MEGAN
-(weary)
-Aligned with what?
-
-BRAD
-(satisfied)
-Polaris.
-
-[BEAT 800]
-
-MEGAN
-(suspicious)
-And how do we move it?
-
-BRAD
+BRENT
 (deadpan)
-We don't. That's the beauty of it. It's the first KPI in company history that cannot go down.
+Morning, Paul... Quick one.
 
-MEGAN
-(drained)
-It also cannot go up.
+[BEAT 600]
 
-BRAD
-(warm)
-Which is why we hit target every quarter for the next four hundred years.
+PAUL
+(flat)
+Morning.
+
+BRENT
+The build's red.
+
+PAUL
+(exhausted)
+It's the flaky test.
+
+[BEAT 1200]
+
+BRENT
+(confused)
+The what now.
+
+PAUL
+The flaky test. It's been flaky since March.
+
+[BEAT 1300]
+
+BRENT
+Which March.
+
+[BEAT 1400]
+
+PAUL
+(deadpan)
+That's a great question.
+
+[BEAT 1200]
+
+Paul taps the monitor twice.
+
+BRENT
+(exhausted)
+So can you just rerun it?
+
+[BEAT 600]
+
+PAUL
+(deadpan)
+I did. That was the rerun.
 
 [BEAT 1000]
 
-BRAD
+BRENT
+(confused)
+Can you rerun the rerun.
+
+Janice moves to the centre.
+
+JANICE
 (smug)
-Finance cried.
+There's a retry wrapper on it now.
+It retries three times.
 
-[BEAT 800]
+PAUL
+(confused)
+And then?
 
-MEGAN
-(puzzled)
-So what do I actually do?
+[BEAT 1250]
 
-BRAD
-(monotone)
-Face north.
+JANICE
+(flat)
+It's flaky three times.
 
-MEGAN
-(alarmed)
-That's all I do?
+[BEAT 1600]
 
-BRAD
-(pleased)
-That's the *role*. The job is documenting that you faced north.
+BRENT
+(deadpan)
+So what I'm hearing is it goes green eventually.
 
-[BEAT 1000]
+[BEAT 450]
 
-MEGAN
+PAUL
 (defeated)
-What happened to the roadmap?
+It has never once been green.
 
-BRAD
-(grinning)
-Sunset. We're a platform now.
+BRENT
+(smug)
+But eventually.
 
-MEGAN
-(doubtful)
-A platform for what?
+[BEAT 1800]
 
-BRAD
-(calm)
-For becoming a platform. It's recursive. Investors love recursive.
+PAUL
+(exhausted)
+I'll rerun it.
 
-MEGAN
-(weary)
-I have a one-on-one at four.
+BRENT
+Terrific.
 
-BRAD
-(satisfied)
-Bring a telescope.
+Brent exits.
 
-[BEAT 2000]
+[BEAT 900]
+
+Janice looks at Paul.
+
+JANICE
+(deadpan)
+I would file a ticket.
+
+PAUL
+(flat)
+There's already a ticket.
+
+[BEAT 1200]
+
+JANICE
+What's it say.
+
+PAUL
+(deadpan)
+"Investigate intermittent test failure."
+
+[BEAT 1500]
+
+JANICE
+Who's it assigned to.
+
+[BEAT 1800]
+
+PAUL
+(defeated)
+Me.

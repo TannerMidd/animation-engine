@@ -458,11 +458,47 @@ export interface SetDescriptor {
   layers: Record<LayerName, PropInstance[]>;
 }
 
+/** A prop in a candidate set that could take a reference that set cannot host. */
+export interface PropSubstitute {
+  /** What to write into the shot list, or null when it would need a stable id first. */
+  reference: string | null;
+  label: string;
+  prop: string;
+}
+
+/** One thing the scene asks of a set that the set cannot give it. */
+export interface PropReferenceIssue {
+  reference: string;
+  /** What the scene does with it — "tap", "sit on", "pick up". */
+  verb: string;
+  beatIndex: number | null;
+  /** Position in that beat's `stage` array, so a repair edits the right action. */
+  actionIndex: number | null;
+  actionType: string | null;
+  /** The field carrying the reference, on the action or on the cast member. */
+  field: 'target' | 'seat' | 'prop' | 'heldProp';
+  actorId: string | null;
+  /** Beat text, or the actor id — whatever names the problem on screen. */
+  label: string;
+  status: 'missing' | 'ambiguous' | 'unusable';
+  detail: string;
+  substitutes: PropSubstitute[];
+}
+
+/** How well a set can host what the open scene asks of it. Server-computed. */
+export interface SetFit {
+  /** Every prop reference the scene makes, so a bare stage costs exactly this many. */
+  references: number;
+  issues: PropReferenceIssue[];
+}
+
 export interface SetSummary {
   name: string;
   palette: string;
   builtin: boolean;
   propCount: number;
+  /** Present when the list was fetched for a scene. */
+  fit?: SetFit;
 }
 
 // --- cast ---
@@ -742,7 +778,11 @@ interface MotionSegmentBase<T extends MotionValue> {
 }
 
 export type MotionSegment =
-  | (MotionSegmentBase<[number, number]> & { channel: 'root.position' })
+  | (MotionSegmentBase<[number, number]> & {
+      channel: 'root.position';
+      /** Whether the puppet walks the distance. `auto` walks anything far enough to read as travel. */
+      gait?: 'auto' | 'walk' | 'none';
+    })
   | (MotionSegmentBase<number> & { channel: 'root.scale' })
   | (MotionSegmentBase<{ rot: number; x: number; y: number; scale: number }> & {
       channel: 'part.transform';

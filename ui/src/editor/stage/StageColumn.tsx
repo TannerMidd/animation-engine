@@ -87,12 +87,15 @@ export const StageColumn = forwardRef<StageHandle, {
   /** Reports a media failure the creator would otherwise experience as silence. */
   onAudioError?: (message: string) => void;
   toolbarExtra?: ReactNode;
+  /** Offered inside the blocked-preview panel when the cause is known and fixable. */
+  previewRepair?: ReactNode;
   bottomStrip?: ReactNode;
   onContextMenu: OpenMenu;
 }>(function StageColumn({
   mode, preview, audioUrl, shots, beatStarts, totalMs, selected, setDescriptor,
   prefs, onPrefs, onPlayhead, onSelectBeat, animationTarget, validArea, onCommitProp,
-  recording, draftMarked, previewError, onAudioError, bottomStrip, onContextMenu,
+  recording, draftMarked, previewError, onAudioError, toolbarExtra, previewRepair,
+  bottomStrip, onContextMenu,
 }, ref) {
   const host = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -373,6 +376,8 @@ export const StageColumn = forwardRef<StageHandle, {
     <div className="flex-1 min-w-0 flex flex-col min-h-0">
       {/* stage toolbar */}
       <div className="h-7 shrink-0 flex items-center gap-1 px-2 bg-stage border-b border-[#2f353d]">
+        {toolbarExtra}
+        {toolbarExtra && <span className="w-px h-[13px] bg-edge mx-0.5" />}
         {tools.map((tool) => (
           <button
             key={tool.label}
@@ -452,13 +457,24 @@ export const StageColumn = forwardRef<StageHandle, {
           ) : (
             <div className="absolute inset-0 grid place-items-center p-6">
               {shots && previewError ? (
-                <div className="max-w-[420px] border border-bad/45 bg-bad/10 rounded-[3px] px-3 py-2.5">
+                <div className="max-w-[440px] border border-bad/45 bg-bad/10 rounded-[3px] px-3 py-2.5">
                   <div className="flex items-center gap-1.5 mb-1.5">
                     <span className="text-[8.5px] tracking-[.07em] uppercase text-bad border border-bad rounded-[2px] px-1">preview blocked</span>
                   </div>
-                  <div className="text-[11px] text-[#d6c3c3] leading-[1.5] select-text">{previewError}</div>
-                  <div className="text-[10px] text-ink-faint leading-[1.5] mt-1.5">
-                    Fix the beat in the inspector — unstaged action beats carry a red ! in the shot list.
+                  {/*
+                    A known cause explains itself and offers its own repair; the
+                    raw compiler message stays underneath rather than being the
+                    only thing on offer.
+                  */}
+                  {previewRepair ?? (
+                    <div className="text-[10px] text-ink-faint leading-[1.5] mt-1.5">
+                      Fix the beat in the inspector — unstaged action beats carry a red ! in the shot list.
+                    </div>
+                  )}
+                  <div
+                    className={`text-[11px] leading-[1.5] select-text ${previewRepair ? 'mt-2 text-[10px] text-ink-faint' : 'text-[#d6c3c3]'}`}
+                  >
+                    {previewError}
                   </div>
                 </div>
               ) : (

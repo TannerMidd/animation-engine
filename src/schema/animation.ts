@@ -270,6 +270,15 @@ const PartMotionWaypoint = z.object({ ...MotionWaypointFields, value: PartTransf
 const RootPositionMotionSegment = z.object({
   ...MotionSegmentFields,
   channel: z.literal('root.position'),
+  /**
+   * Whether the puppet walks the distance or is simply carried it.
+   *
+   * `auto` walks anything far enough to read as travel, which is what moving a
+   * character across the stage means; `none` is for the times it does not — a
+   * slide, a lift, a nudge onto a mark. Defaulted so existing documents gain
+   * the gait rather than needing to be rewritten to ask for it.
+   */
+  gait: z.enum(['auto', 'walk', 'none']).default('auto'),
   from: PointMotionEndpoint,
   to: PointMotionEndpoint,
   waypoints: z.array(PointMotionWaypoint).default([]),

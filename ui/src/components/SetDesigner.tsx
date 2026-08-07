@@ -16,11 +16,16 @@ const LAYERS: LayerName[] = ['back', 'mid', 'fore'];
  * empty — the only question that matters is whether people read against it.
  * The layer tabs are depth: characters render between `mid` and `fore`.
  */
-export function SetDesigner({ vocab, llm, open, onOpenProps }: {
+export function SetDesigner({ vocab, llm, open, scene, sceneSet, onUseInScene, onOpenProps }: {
   vocab: Vocab | null;
   llm: LlmStatus | null;
   /** The set the caller asked for; without it the designer opens on whatever sorts first. */
   open?: string | null;
+  /** The scene waiting behind this panel, and the set it currently stages in. */
+  scene?: string | null;
+  sceneSet?: string | null;
+  /** Bind the open set to that scene without going back to hunt for a dropdown. */
+  onUseInScene?: (name: string) => void;
   /** Hand off to the prop studio, for when the room needs something that does not exist. */
   onOpenProps?: (key: string | null) => void;
 }) {
@@ -256,6 +261,18 @@ export function SetDesigner({ vocab, llm, open, onOpenProps }: {
             </Button>
             <Button onClick={() => void saveAs()}>Save as…</Button>
           </div>
+          {onUseInScene && scene && (
+            <Button
+              className="w-full mt-1"
+              disabled={name === sceneSet}
+              onClick={() => onUseInScene(name)}
+              title={name === sceneSet
+                ? `"${scene}" already stages in this set.`
+                : `Stage "${scene}" in this set. You confirm anything the change would break.`}
+            >
+              {name === sceneSet ? `In use by ${scene}` : `Use in ${scene}`}
+            </Button>
+          )}
           <Button
             className="w-full mt-1"
             onClick={() =>

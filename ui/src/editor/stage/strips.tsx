@@ -96,13 +96,15 @@ export function ShotStrip({
  * character; every mistake has a way back — discard, unselect, unapprove.
  */
 export function TakeStrip({
-  scene, cue, dialogue, speakerFg, castVoiceBound, recording, onRecordingChange, onReload, onSaveCue,
+  scene, cue, dialogue, sceneLines, speakerFg, castVoiceBound, recording, onRecordingChange, onReload, onSaveCue,
   onDiscardTake, onUseGenerated, onOpenVoiceTab, speakerRig, converting, onConvert, onScoreAcrossCast,
   onOpenCastEditor, conversionRuntime,
 }: {
   scene: string;
   cue: DialogueCue | null;
   dialogue: DialogueDocument | null;
+  /** The cues this script still has, so counts never include left-behind lines. */
+  sceneLines: DialogueCue[];
   speakerFg: string;
   castVoiceBound: boolean;
   recording: boolean;
@@ -139,8 +141,8 @@ export function TakeStrip({
         !t.revokedAt &&
         (t.cueId === cue.id || t.provenance.sceneRunSegments?.some((s) => s.cueId === cue.id)))
     : [];
-  const undecidedForSpeaker = cue && dialogue
-    ? dialogue.cues.filter((c) =>
+  const undecidedForSpeaker = cue
+    ? sceneLines.filter((c) =>
         c.speaker === cue.speaker && (c.voiceSource ?? 'performance') === 'performance'
         && !c.selectedTakeId && !c.selectedRenderId && !c.locked).length
     : 0;

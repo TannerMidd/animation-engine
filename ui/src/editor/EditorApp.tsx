@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, followJob } from '../api.ts';
 import type {
   AnimationDocument, Beat, CastMember, CastSummary, CheckResult, DialogueCue, DialogueDocument, Health,
-  JobEvent, LlmStatus, PreviewInfo, ProductionPreflightNote, ProductionPreflightReport, SceneDetail,
-  SceneSoundInfo, SceneSummary, SetDescriptor, SetSummary, ShotList, ShowInfo, Vocab, PropDefInfo,
+  JobEvent, LlmStatus, PreviewInfo, ProductionPreflightNote, ProductionPreflightReport, PropReferenceIssue,
+  SceneDetail, SceneSoundInfo, SceneSummary, SetDescriptor, SetSummary, ShotList, ShowInfo, Vocab, PropDefInfo,
 } from '../types.ts';
 import { GenerateDialog } from '../components/GenerateDialog.tsx';
 import { useLlmStart } from '../components/useLlmStart.ts';
@@ -19,10 +19,15 @@ import { LinesPane, MixerPane, ReadinessPane, ScriptPane, subPaneWidth } from '.
 import { CommandPalette, ConfirmDialog, PreflightPopover, type Command, type ConfirmSpec } from './overlays.tsx';
 import { ContextMenu, act, sep, section, type MenuItem, type MenuTarget, type OpenMenu } from './ContextMenu.tsx';
 import { AuditionOverlay, CompareOverlay, ConversionCheckOverlay, SystemReport } from './tools.tsx';
-import { Mono, Spinner } from './chrome.tsx';
+import { SetPicker } from './SetPicker.tsx';
+import {
+  applySetRepairs, planSetRepairs, retargetOne, unresolvedIssues, unresolvedText, usableSubstitutes,
+} from './setSwitch.ts';
+import { Btn, Mono, Spinner } from './chrome.tsx';
 import {
   beatSpine, beatStartsFor, cueForBeat, defaultTabFor, fmtTimecode, isTyping, motionDeletionBlocker,
-  MODE_DEFS, speakerColour, spineDrift, totalMsFor, withoutMotionSegment, type InspectorTab, type Mode,
+  MODE_DEFS, sceneCues, speakerColour, spineDrift, totalMsFor, withoutMotionSegment,
+  type InspectorTab, type Mode,
 } from './lib.ts';
 
 type Quality = 'Draft' | 'Accurate' | 'Final';
@@ -38,6 +43,7 @@ type Quality = 'Draft' | 'Accurate' | 'Final';
 export function EditorApp({
   scene, scenes, cast, sets, props, vocab, health, show, llm, expressionsFor,
   onScene, onSceneChanged, onNewScene, onOpenCast, onOpenSets, onOpenProps,
+  setRequest, onSetRequestHandled,
 }: {
   scene: string;
   scenes: SceneSummary[];
@@ -55,6 +61,9 @@ export function EditorApp({
   onOpenCast: (name: string | null) => void;
   onOpenSets: (name: string | null) => void;
   onOpenProps: (key: string | null) => void;
+  /** A set the designer asked to bind to this scene, answered on arrival. */
+  setRequest?: { name: string; nonce: number } | null;
+  onSetRequestHandled?: () => void;
 }) {
   const [mode, setModeRaw] = useState<Mode>('write');
   const [tab, setTab] = useState<InspectorTab>('beat');
@@ -82,6 +91,14 @@ export function EditorApp({
   const [selected, setSelected] = useState<number | null>(null);
   const [playheadMs, setPlayheadMs] = useState(0);
   const [setDescriptor, setSetDescriptor] = useState<SetDescriptor | null>(null);
+  /**
+   * Every set priced against this scene's staging.
+   *
+   * Refetched with the shot list rather than at boot, because what a set costs
+   * is a fact about the *current* beats: adding "he taps the desk" changes which
+   * rooms can host the scene, and the picker has to say so before it is opened.
+   */
+  const [pricedSets, setPricedSets] = useState<SetSummary[] | null>(null);
   const [animationTarget, setAnimationTarget] = useState<AnimationEditTarget | null>(null);
   const [selectedMotionId, setSelectedMotionId] = useState<string | null>(null);
   const [quality, setQuality] = useState<Quality>('Accurate');
@@ -238,6 +255,33 @@ export function EditorApp({
       .catch(() => {});
     return () => { cancelled = true; };
   }, [setName]);
+
+  // The set designer's "use in this scene", answered here so the confirm about
+  // what it breaks lands on the stage rather than over the designer.
+  const requestedSet = setRequest?.nonce ?? null;
+  useEffect(() => {
+    if (!setRequest || !shots) return;
+    chooseSet(setRequest.name);
+    onSetRequestHandled?.();
+    // Keyed on the nonce: the same set may be asked for twice in a row.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedSet, shots !== null]);
+
+  // What each set would cost this scene. Follows the shot list on the same
+  // debounce as the preview, so the picker and the stage never disagree.
+  useEffect(() => {
+    if (!shots) return;
+    let cancelled = false;
+    const t = setTimeout(() => {
+      void api.sets(scene)
+        .then((list) => { if (!cancelled) setPricedSets(list); })
+        .catch(() => {});
+    }, 120);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [scene, shots]);
 
   // --- preview rebuilds whenever its inputs change ---
   // Once the accurate (voice-engine) path fails, stop asking it on every edit;
@@ -450,6 +494,83 @@ export function EditorApp({
     }), false);
   }, [pushShots]);
 
+  /**
+   * Change the set, and deal with what that costs before it costs it.
+   *
+   * A set that cannot host the scene's staging used to be discovered by the
+   * compiler *after* the switch, which blanked the stage behind an exception.
+   * The same question is now asked first: if the new room breaks beats, the
+   * repairs are named and applied in the same write, so the scene that comes
+   * back is one that stages.
+   */
+  const chooseSet = useCallback((name: string | null) => {
+    const references = pricedSets?.find((item) => item.fit)?.fit?.references ?? 0;
+    const fit = name === null ? undefined : pricedSets?.find((item) => item.name === name)?.fit;
+    const repairs = planSetRepairs(fit);
+    const unresolved = unresolvedIssues(fit);
+
+    if (name === null && references > 0) {
+      setConfirm({
+        title: 'Play this scene on a bare stage?',
+        body: `${references} prop ${references === 1 ? 'move' : 'moves'} in this scene need something to touch. `
+          + 'A bare stage has nothing, so the preview will not build until the scene is staged somewhere again '
+          + 'or those beats are rewritten.',
+        ok: 'Use the bare stage',
+        okTone: 'bad',
+        onOk: () => editShots({ set: null }),
+      });
+      return;
+    }
+
+    if (!repairs.length && !unresolved.length) {
+      editShots({ set: name });
+      return;
+    }
+
+    const rows = [
+      ...repairs.map((repair) => ({
+        tag: repair.issue.beatIndex === null ? repair.issue.actorId ?? '—' : `beat ${repair.issue.beatIndex}`,
+        fg: '#6f9b5a',
+        text: `${repair.issue.label} — ${repair.text}`,
+      })),
+      ...unresolved.map((issue) => ({
+        tag: issue.beatIndex === null ? issue.actorId ?? '—' : `beat ${issue.beatIndex}`,
+        fg: '#c8834a',
+        text: `${issue.label} — ${unresolvedText(issue)}`,
+      })),
+    ];
+
+    // Nothing to apply: the set simply cannot host this scene as written, and
+    // saying so is more use than a button that pretends otherwise.
+    if (!repairs.length) {
+      setConfirm({
+        title: `"${name}" cannot host every beat`,
+        body: 'Every beat and its text stays exactly as written, but the staging below has nothing to work with '
+          + 'there. The stage stays blocked until each one is pointed at something this set has, the beat is '
+          + 'rewritten, or the scene moves to a set that can host it.',
+        list: rows,
+        ok: `Stage here anyway`,
+        okTone: 'bad',
+        onOk: () => editShots({ set: name }),
+      });
+      return;
+    }
+
+    setConfirm({
+      title: `"${name}" needs the staging repointed`,
+      body: `Every beat and its text stays as written. ${repairs.length === 1 ? 'One piece' : `${repairs.length} pieces`} `
+        + `of business can be repointed at what this set has${unresolved.length ? ', and the rest needs a decision from you' : ''}:`,
+      list: rows,
+      ok: `Switch and repoint ${repairs.length === 1 ? 'it' : 'them'}`,
+      okTone: 'accent',
+      onOk: () => pushShots((current) => ({ ...applySetRepairs(current, repairs), set: name }), false),
+      alt: {
+        label: 'Switch, leave the staging alone',
+        onPick: () => editShots({ set: name }),
+      },
+    });
+  }, [pricedSets, editShots, pushShots]);
+
   const saveDialogueCue = useCallback(async (cue: DialogueCue) => {
     setPreflight(null);
     const result = await api.saveDialogueCue(scene, cue, dialogueRevision.current);
@@ -457,6 +578,70 @@ export function EditorApp({
     await reloadDialogue();
     void rebuildPreview();
   }, [scene, reloadDialogue, rebuildPreview]);
+
+  /**
+   * Forget the cues the script has left behind.
+   *
+   * They are retained automatically so a restored line comes back with its
+   * work, which is right until a scene has been rewritten past recognition and
+   * is carrying dozens of lines from a script nobody remembers. Locked cues are
+   * left where they are: the engine refuses to drop them, and it is right to.
+   */
+  const discardOrphanCues = useCallback((orphans: DialogueCue[]) => {
+    if (!dialogue || !orphans.length) return;
+    const locked = orphans.filter((cue) => cue.locked);
+    const fieldLocked = orphans.filter((cue) => cue.lockedFields.length);
+    const dropIds = new Set(orphans.map((cue) => cue.id));
+
+    setConfirm({
+      title: `Discard ${orphans.length} left-behind ${orphans.length === 1 ? 'line' : 'lines'}?`,
+      body: 'These cues belong to lines that are no longer in the script. Discarding them removes their '
+        + 'editorial state — selections, trims and approvals — so restoring one of those lines later '
+        + 'would start it from scratch.',
+      list: [
+        { tag: 'KEEPS', fg: '#7a8fc0', text: 'Recorded audio stays on disk as an immutable audit record.' },
+        ...(locked.length ? [{
+          tag: 'UNLOCKS',
+          fg: '#a89050',
+          // The engine requires unlocking and removing to be separate revisions;
+          // this does both on one click rather than leaving a lock nobody can
+          // reach — the cue it protects belongs to a scene that no longer exists.
+          text: `${locked.length} approved ${locked.length === 1 ? 'cue is' : 'cues are'} unlocked first, in its own save.`,
+        }] : []),
+      ],
+      ok: `Discard ${orphans.length}`,
+      okTone: 'bad',
+      onOk: () => {
+        void (async () => {
+          try {
+            setPreflight(null);
+            // Each save bumps the document revision, and the next one has to
+            // present the revision it is editing — so carry it forward rather
+            // than replaying the stale one this closure started with.
+            let current = dialogue;
+            const save = async (cues: DialogueCue[]) => {
+              const saved = await api.saveDialogue(scene, { ...current, cues });
+              current = { ...current, cues, revision: saved.revision };
+              dialogueRevision.current = saved.revision;
+            };
+            // Locks come off one kind at a time: a full lock only ever permits
+            // the single transition to unlocked, so batching them with anything
+            // else is refused at the persistence boundary.
+            if (locked.length) {
+              await save(current.cues.map((cue) => (dropIds.has(cue.id) && cue.locked ? { ...cue, locked: false } : cue)));
+            }
+            if (fieldLocked.length) {
+              await save(current.cues.map((cue) => (dropIds.has(cue.id) ? { ...cue, lockedFields: [] } : cue)));
+            }
+            await save(current.cues.filter((cue) => !dropIds.has(cue.id)));
+            await reloadDialogue();
+          } catch (err) {
+            setError((err as Error).message);
+          }
+        })();
+      },
+    });
+  }, [dialogue, scene, reloadDialogue]);
 
   /**
    * Discard a recorded take, via the engine's revocation operation: the row
@@ -499,6 +684,15 @@ export function EditorApp({
     });
   }, [dialogue, scene, reloadDialogue, rebuildPreview]);
 
+  /**
+   * The scene's own lines.
+   *
+   * Everything that counts, lists or reasons about "the lines" reads this
+   * rather than the raw document, which also carries cues the script has left
+   * behind. See `sceneCues` for why those are kept at all.
+   */
+  const sceneLines = useMemo(() => sceneCues(dialogue, shots), [dialogue, shots]);
+
   /** Booth opens the Voice tab; the flash is the "something happened" signal. */
   const [voiceFlash, setVoiceFlash] = useState(0);
   const openBooth = useCallback(() => {
@@ -535,8 +729,12 @@ export function EditorApp({
           const result = await api.saveDialogueCue(scene, decide(cue), dialogueRevision.current);
           dialogueRevision.current = result.revision;
         } else {
+          // Only lines this script still has: approving a voice for a speaker
+          // must not silently approve one for a scene they were in two rewrites
+          // ago, which the retained cues would otherwise sweep in.
+          const live = new Set(sceneCues(dialogue, shots).map((c) => c.id));
           const eligible = (c: DialogueCue) =>
-            c.speaker === cue.speaker && (c.voiceSource ?? 'performance') === 'performance'
+            live.has(c.id) && c.speaker === cue.speaker && (c.voiceSource ?? 'performance') === 'performance'
             && !c.selectedTakeId && !c.selectedRenderId && !c.locked;
           await api.saveDialogue(scene, {
             ...dialogue,
@@ -549,7 +747,7 @@ export function EditorApp({
         setError((err as Error).message);
       }
     })();
-  }, [dialogue, scene, reloadDialogue, rebuildPreview]);
+  }, [dialogue, shots, scene, reloadDialogue, rebuildPreview]);
 
   /**
    * Speak a recorded take in the character's voice.
@@ -703,6 +901,68 @@ export function EditorApp({
       setBusy(null);
     }
   }, [animation, busy, rebuildPreview, scene]);
+
+  /**
+   * Blocking left behind by a cast that has since changed.
+   *
+   * Motion segments name the actor they move. Rewrite the script until that
+   * character is gone and the segments stay, pointing at nobody — which the
+   * compiler refuses outright, so the whole preview goes dark over blocking for
+   * someone who is not in the scene. Same shape as the retained dialogue cues,
+   * except this one stops the picture rather than only cluttering a list.
+   */
+  const strandedMotion = useMemo(() => {
+    if (!animation || !shots) return [];
+    const cast = new Set(shots.cast.map((member) => member.id));
+    return animation.segments.filter((segment) => !cast.has(segment.actorId));
+  }, [animation, shots]);
+
+  const dropStrandedMotion = useCallback(() => {
+    if (!animation || busy) return;
+    const removable = strandedMotion.filter((segment) => !motionDeletionBlocker(animation, segment.id));
+    const kept = strandedMotion.length - removable.length;
+    if (!removable.length) {
+      setError('Every stranded motion segment is locked. Unlock them in the Motion panel first.');
+      return;
+    }
+    const actors = [...new Set(removable.map((segment) => segment.actorId))].join(', ');
+    setConfirm({
+      title: `Remove blocking for ${actors}?`,
+      body: `${removable.length} motion segment${removable.length === 1 ? ' still moves' : 's still move'} ${actors}, `
+        + `who ${actors.includes(',') ? 'are' : 'is'} not in this scene's cast. The compiler refuses to render blocking `
+        + 'for an actor who is not there, so the preview stays blocked until these go.',
+      list: removable.slice(0, 6).map((segment) => ({
+        tag: segment.actorId,
+        fg: '#c8595a',
+        text: `${segment.channel === 'part.transform' ? segment.partId : 'root'} · ${segment.id}`,
+      })),
+      ...(kept ? { alt: { label: `Leave the ${kept} locked ${kept === 1 ? 'one' : 'ones'}`, onPick: () => {} } } : {}),
+      ok: `Remove ${removable.length}`,
+      okTone: 'bad',
+      onOk: () => {
+        void (async () => {
+          setBusy('delete-motion');
+          setError(null);
+          setPreflight(null);
+          try {
+            const ids = new Set(removable.map((segment) => segment.id));
+            const next = removable.reduce(
+              (document, segment) => withoutMotionSegment(document, segment.id),
+              animation,
+            );
+            const saved = await api.saveAnimation(scene, next);
+            setAnimation(saved.document);
+            if (selectedMotionId && ids.has(selectedMotionId)) setSelectedMotionId(null);
+            void rebuildPreview();
+          } catch (err) {
+            setError((err as Error).message);
+          } finally {
+            setBusy(null);
+          }
+        })();
+      },
+    });
+  }, [animation, busy, scene, selectedMotionId, strandedMotion, rebuildPreview]);
 
   const askDeleteMotion = useCallback((segmentId: string) => {
     const segment = animation?.segments.find((item) => item.id === segmentId);
@@ -1207,6 +1467,16 @@ export function EditorApp({
     for (const member of cast) {
       out.push({ icon: '◍', label: `Open ${member.name} in the cast editor`, group: 'Project', run: () => onOpenCast(member.name) });
     }
+    for (const item of sets) {
+      if (item.name === setName) continue;
+      out.push({
+        icon: '▦',
+        label: `Stage this scene in ${item.name}`,
+        group: 'Scene',
+        keywords: 'set room change',
+        run: () => chooseSet(item.name),
+      });
+    }
     out.push({ icon: '▦', label: 'Open the set designer', group: 'Project', run: () => onOpenSets(null) });
     // One entry, worded so it is found by either half of what people search for
     // — the thing they want to make, or the name of the tool that makes it.
@@ -1223,9 +1493,9 @@ export function EditorApp({
     });
     return out;
   }, [
-    prefs, scenes, cast, shots, show, engine, engines, setMode, selectTab, setEngine, runCheck, runDirect, runJob,
-    refreshPreflight, askRenderMaster, askRenderDraft, askRenderReel, runCastCheck, runContactSheet, switchIdentity,
-    onScene, onOpenCast, onOpenSets, onOpenProps, selectBeat,
+    prefs, scenes, cast, sets, setName, chooseSet, shots, show, engine, engines, setMode, selectTab, setEngine,
+    runCheck, runDirect, runJob, refreshPreflight, askRenderMaster, askRenderDraft, askRenderReel, runCastCheck,
+    runContactSheet, switchIdentity, onScene, onOpenCast, onOpenSets, onOpenProps, selectBeat,
   ]);
 
   // --- context menu ---
@@ -1410,8 +1680,19 @@ export function EditorApp({
           act({ label: 'Validate cast rigs', go: () => void runCastCheck() }),
           act({ label: 'Contact sheet — whole cast', go: () => void runContactSheet() }),
         ];
-      case 'set':
-        return [act({ label: `Open ${target.name} in the set designer`, go: () => onOpenSets(target.name) })];
+      case 'set': {
+        const inUse = target.name === setName;
+        return [
+          act({
+            label: `Use ${target.name} in this scene`,
+            disabled: inUse || !shots,
+            disabledReason: inUse ? 'This scene already stages here.' : 'Direct the scene first — the set lives on the shot list.',
+            go: () => chooseSet(target.name),
+          }),
+          sep,
+          act({ label: `Open ${target.name} in the set designer`, go: () => onOpenSets(target.name) }),
+        ];
+      }
       case 'sceneFile': {
         const open = (path: string) => window.open(`/api/scenes/${scene}/${path}`, '_blank');
         if (target.file === 'video') {
@@ -1536,7 +1817,14 @@ export function EditorApp({
         />
       )}
       {mode === 'perform' && (
-        <LinesPane dialogue={dialogue} shots={shots} selected={selected} onSelect={(i) => { selectBeat(i); setTab('voice'); }} speakerFilter={null} />
+        <LinesPane
+          dialogue={dialogue}
+          shots={shots}
+          selected={selected}
+          onSelect={(i) => { selectBeat(i); setTab('voice'); }}
+          speakerFilter={null}
+          onDiscardOrphans={discardOrphanCues}
+        />
       )}
       {mode === 'publish' && (
         <ReadinessPane report={preflight} onJump={jumpToNote} />
@@ -1553,6 +1841,88 @@ export function EditorApp({
     </div>
   );
 
+  /**
+   * The way out of a stage the set has blocked.
+   *
+   * The compiler stops at the first prop it cannot resolve, which reads as "the
+   * editor is broken" from the stage. The same fit that prices the picker
+   * explains it here in the creator's own words, and offers the repair from the
+   * place the problem is being experienced.
+   */
+  const currentSetFit = pricedSets?.find((item) => item.name === setName)?.fit ?? null;
+  const blockedMotionFix = !preview && strandedMotion.length ? (
+    <div className="mt-2 flex flex-col gap-1.5">
+      <div className="text-[10.5px] leading-[1.45]">
+        <span className="text-[#d6c3c3]">
+          {strandedMotion.length} motion segment{strandedMotion.length === 1 ? '' : 's'} still
+          {' '}move{strandedMotion.length === 1 ? 's' : ''}{' '}
+          {[...new Set(strandedMotion.map((segment) => segment.actorId))].join(', ')}
+        </span>
+        <span className="text-ink-faint"> — not in this scene's cast, left behind by an earlier draft.</span>
+      </div>
+      <div>
+        <Btn primary onClick={dropStrandedMotion} title="Remove blocking for actors this scene does not have.">
+          Remove {strandedMotion.length === 1 ? 'it' : `those ${strandedMotion.length}`}
+        </Btn>
+      </div>
+    </div>
+  ) : null;
+
+  const blockedSetFix = !preview && currentSetFit?.issues.length ? (
+    <div className="mt-2 flex flex-col gap-2">
+      {currentSetFit.issues.slice(0, 3).map((issue, i) => {
+        const options = usableSubstitutes(issue);
+        return (
+          <div key={i} className="flex flex-col gap-1">
+            <div className="text-[10.5px] leading-[1.45]">
+              <span className="text-[#d6c3c3]">{issue.detail}</span>
+              <span className="text-ink-faint"> — “{issue.label}”</span>
+            </div>
+            {options.length ? (
+              <div className="flex items-center gap-1 flex-wrap">
+                {options.map((option) => (
+                  <Btn
+                    key={option.reference}
+                    primary={options.length === 1}
+                    onClick={() => {
+                      pushShots((current) => retargetOne(current, issue, option.reference!), false);
+                      // There is no undo stack, so name the way back that exists:
+                      // the script still says exactly what it always said.
+                      setInfo(
+                        `“${issue.label}” now points at the ${option.label.toLowerCase()}. `
+                        + 'The script is untouched — Direct it again to get the original staging back.',
+                      );
+                    }}
+                    title={`Rewrite this beat's target to "${option.reference}" and keep everything else.`}
+                  >
+                    {issue.verb} the {option.label.toLowerCase()}
+                  </Btn>
+                ))}
+              </div>
+            ) : (
+              <div className="text-[10px] text-ink-faint leading-[1.45]">
+                Nothing in “{setName}” can take it. Rewrite the beat in Write, or stage the scene somewhere that can —
+                the picker below prices every set against this scene.
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {currentSetFit.issues.length > 3 && (
+        <div className="text-[10px] text-ink-faint">and {currentSetFit.issues.length - 3} more.</div>
+      )}
+      <div className="flex items-center gap-1.5">
+        <SetPicker
+          sets={pricedSets ?? sets}
+          current={setName}
+          onChoose={chooseSet}
+          onOpenDesigner={onOpenSets}
+        />
+        <span className="text-[10px] text-ink-faint">every set, priced against this scene</span>
+      </div>
+    </div>
+  ) : null;
+
   const bottomStrip = mode === 'write' || mode === 'direct'
     ? (shots ? <ShotStrip shots={shots} beatStarts={beatStarts} selected={selected} onSelect={selectBeat} /> : null)
     : mode === 'perform'
@@ -1561,6 +1931,7 @@ export function EditorApp({
             scene={scene}
             cue={selectedCue}
             dialogue={dialogue}
+            sceneLines={sceneLines}
             speakerFg={selectedCue ? speakerColour(shots?.cast.map((c) => c.id) ?? [], selectedCue.speaker) : '#6b737d'}
             castVoiceBound={speakerBound}
             recording={rec}
@@ -1678,6 +2049,7 @@ export function EditorApp({
           onNewScene={onNewScene}
           onOpenCast={onOpenCast}
           onOpenSets={onOpenSets}
+          onUseSet={chooseSet}
           onOpenProps={onOpenProps}
           onOpenSystem={() => setSystemOpen(true)}
           onContextMenu={openMenu}
@@ -1707,6 +2079,18 @@ export function EditorApp({
               recording={rec}
               draftMarked={Boolean(preflight?.productionBlocked)}
               previewError={preview ? null : error}
+              toolbarExtra={shots ? (
+                <SetPicker
+                  sets={pricedSets ?? sets}
+                  current={shots.set ? shots.set.replace(/\.(json|svg)$/, '') : null}
+                  onChoose={chooseSet}
+                  onOpenDesigner={onOpenSets}
+                  onDescribe={() => onOpenSets(null)}
+                />
+              ) : null}
+              previewRepair={blockedSetFix || blockedMotionFix ? (
+                <>{blockedSetFix}{blockedMotionFix}</>
+              ) : null}
               bottomStrip={bottomStrip}
               onContextMenu={openMenu}
             />
@@ -1725,7 +2109,7 @@ export function EditorApp({
           dialogue={dialogue}
           animation={animation}
           setDescriptor={setDescriptor}
-          sets={sets}
+          sets={pricedSets ?? sets}
           playheadMs={playheadMs}
           totalMs={totalMs}
           identityLabel={identityLabel}
@@ -1733,6 +2117,7 @@ export function EditorApp({
           onEditBeat={(i, next) => void editBeat(i, next)}
           onEditCast={(actorId, changes) => void editCastMember(actorId, changes)}
           onEditShots={(changes) => void editShots(changes)}
+          onChooseSet={chooseSet}
           onEditAllCast={(changes) => void editAllCast(changes)}
           onAnimationDocument={changeAnimationDocument}
           onAnimationTarget={setAnimationTarget}

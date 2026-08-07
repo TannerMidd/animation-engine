@@ -11,6 +11,7 @@ import {
 } from '../schema/animation.ts';
 import type { IRTransform } from '../schema/ir.ts';
 import type { PartTransform, Point } from '../schema/rig.ts';
+import { walkDurationMs, walks } from './walk.ts';
 
 /** A word's measured placement on the final scene timeline. */
 export interface AnimationTimelineWord {
@@ -247,6 +248,63 @@ function validateTrackConflicts(tracks: ResolvedAnimationTrack[]): void {
   }
 }
 
+/**
+ * Give every authored walk the same ground speed.
+ *
+ * A drag is committed with the duration of the gesture that made it, so the
+ * same puppet covering similar ground arrived at wildly different speeds
+ * depending on how fast the mouse moved — 191 px/s one time, 1071 px/s the
+ * next. Pace is a property of walking rather than of the gesture that asked for
+ * it, so it is decided here from the distance. Phrases already on disk are
+ * retimed without being rewritten: the document stays the authored record and
+ * this is the compiler reading it.
+ *
+ * A walk is only ever stretched into room that is genuinely free — the next
+ * phrase's start is the ceiling — so normalising the pace can never turn a
+ * document that used to compile into an overlap conflict. `gait: 'none'` opts a
+ * move out of walking, and thereby out of this.
+ */
+function paceAuthoredWalks(segments: ResolvedMotionSegment[], durationMs: number): void {
+  const groups = new Map<string, ResolvedMotionSegment[]>();
+  for (const resolved of segments) {
+    if (!resolved.layer.enabled || !resolved.segment.enabled) continue;
+    if (resolved.segment.channel !== 'root.position') continue;
+    const key = `${resolved.layer.id}|${animationTargetKey(resolved.segment)}`;
+    const group = groups.get(key) ?? [];
+    group.push(resolved);
+    groups.set(key, group);
+  }
+
+  for (const group of groups.values()) {
+    group.sort((a, b) => a.startMs - b.startMs || a.segment.id.localeCompare(b.segment.id));
+    group.forEach((resolved, position) => {
+      const segment = resolved.segment as Extract<MotionSegment, { channel: 'root.position' }>;
+      const [fromX, fromY] = segment.from.value;
+      const [toX, toY] = segment.to.value;
+      const distance = Math.hypot(toX - fromX, toY - fromY);
+      if (!walks(segment.gait, distance)) return;
+
+      // Slowing a walk down is the whole point; speeding one up is not. A
+      // phrase already at or under walking pace is someone's deliberate amble,
+      // and shrinking phrases would also quietly resolve an authored overlap
+      // that the conflict check exists to report.
+      const desired = walkDurationMs(distance);
+      if (desired <= resolved.endMs - resolved.startMs) return;
+
+      // Never stretch past the next phrase, and never past the end of the
+      // scene unless this phrase already ran over it.
+      const ceiling = Math.min(
+        group[position + 1]?.startMs ?? Number.POSITIVE_INFINITY,
+        Math.max(durationMs, resolved.endMs),
+      );
+      // All or nothing: a walk stretched into room too small to finish in
+      // freezes mid-stride at the far end, which looks worse than a brisk one.
+      if (desired > ceiling - resolved.startMs) return;
+      resolved.endMs = resolved.startMs + desired;
+    });
+  }
+}
+
 function validateSegmentConflicts(segments: ResolvedMotionSegment[]): void {
   const groups = new Map<string, ResolvedMotionSegment[]>();
   for (const resolved of segments) {
@@ -327,9 +385,22 @@ function validateEventConflicts(events: ResolvedAnimationEvent[]): void {
  * Validate and resolve an AnimationDocument once. Sampling the result has no
  * lookups into story structure and no frame-to-frame state.
  */
+export interface ResolveAnimationOptions {
+  /**
+   * Give authored walks the engine's walking pace.
+   *
+   * Off by default because resolving is about turning anchors into
+   * milliseconds, and a caller asking where a phrase sits on the timeline
+   * should get the answer the document gives. Rendering a scene is the case
+   * that wants the paced view, since pace is the engine's to decide.
+   */
+  paceWalks?: boolean;
+}
+
 export function resolveAnimation(
   input: AnimationDocument,
   timeline: AnimationTimeline,
+  options: ResolveAnimationOptions = {},
 ): ResolvedAnimation {
   // Public callers may construct a typed object without parsing it first.
   const document = AnimationDocument.parse(input);
@@ -379,6 +450,7 @@ export function resolveAnimation(
     a.startMs - b.startMs ||
     a.segment.id.localeCompare(b.segment.id)
   ));
+  if (options.paceWalks) paceAuthoredWalks(segments, index.timeline.durationMs);
   validateSegmentConflicts(segments);
   validateTrackSegmentConflicts(tracks, segments);
 
@@ -702,6 +774,60 @@ export function sampleAnimation(
     }
   }
   return sample;
+}
+
+/** A root-position phrase carrying one actor, and how far into it they are. */
+export interface ActiveRootMotion {
+  segment: Extract<MotionSegment, { channel: 'root.position' }>;
+  /** Where the phrase starts, where it ends, and where it has reached now. */
+  from: Point;
+  to: Point;
+  at: Point;
+}
+
+/**
+ * The root-position phrase moving one actor at a moment, if any.
+ *
+ * Sampling the animation says where an actor *is*. This says whether something
+ * is carrying them there and how much of the journey is behind them — which is
+ * what a gait needs, because feet cycle over ground covered rather than over
+ * time. Reading it from the phrase rather than from frame-to-frame differences
+ * keeps the compiler's promise that any frame can be built in any order.
+ *
+ * Precedence follows `sampleAnimation` exactly: later layers win, and within a
+ * layer the latest phrase to have started owns the actor's root.
+ */
+export function activeRootMotion(
+  animation: ResolvedAnimation,
+  actorId: string,
+  atMs: number,
+): ActiveRootMotion | null {
+  const layers = [...animation.document.layers].filter((layer) => layer.enabled).sort(compareLayers);
+  let owner: ResolvedMotionSegment | null = null;
+
+  for (const layer of layers) {
+    const active = new Map<string, ResolvedMotionSegment>();
+    for (const resolved of animation.segments) {
+      const segment = resolved.segment;
+      if (
+        resolved.layer.id !== layer.id ||
+        !segment.enabled ||
+        segment.channel !== 'root.position' ||
+        segment.actorId !== actorId ||
+        atMs < resolved.startMs
+      ) continue;
+      active.set(animationTargetKey(segment), resolved);
+    }
+    for (const resolved of [...active.values()].sort((a, b) => a.segment.id.localeCompare(b.segment.id))) {
+      owner = resolved;
+    }
+  }
+
+  if (!owner) return null;
+  const at = sampleMotionSegment(owner, atMs) as Point | undefined;
+  if (!at) return null;
+  const segment = owner.segment as Extract<MotionSegment, { channel: 'root.position' }>;
+  return { segment, from: segment.from.value, to: segment.to.value, at };
 }
 
 export type AnimationBaseSource =

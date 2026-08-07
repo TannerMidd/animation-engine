@@ -8,6 +8,7 @@ import { titleSting, endSting } from '../src/audio/stings.ts';
 import { deliveryFor, NEUTRAL_PERSONA } from '../src/voice/index.ts';
 import { encodeWav, decodeWav } from '../src/voice/wav.ts';
 import { assessProgrammeQuality, levelDialogueBySpeaker } from '../src/audio/quality.ts';
+import { AudioBible } from '../src/schema/identity.ts';
 
 const sine = (freq: number, ms: number, level = 0.5): Float64Array => {
   const out = new Float64Array(Math.round((ms / 1000) * BUS_RATE));
@@ -224,6 +225,19 @@ describe('ambience', () => {
     expect(acousticProfileFor('bar-night')).toBe('bar');
     expect(acousticProfileFor('never-heard-of-it')).toBe('silence');
     expect(acousticProfileFor(null)).toBe('silence');
+  });
+
+  /**
+   * Room tone shipped once at 11 LU under the dialogue, which is not a bed —
+   * it is a second character, and it read as a constant hum over every scene.
+   * The relationship to the programme target is asserted rather than the
+   * literal level, so retuning loudness cannot quietly reintroduce it.
+   */
+  it('sits far enough under the programme to go unnoticed', () => {
+    const audio = AudioBible.parse({});
+    expect(audio.mix.targetIntegratedLufs - audio.ambience.levelDb).toBeGreaterThanOrEqual(25);
+    // Nothing calling itself room tone may be authored up near the cast either.
+    expect(() => AudioBible.parse({ ambience: { levelDb: -12 } })).toThrow();
   });
 });
 

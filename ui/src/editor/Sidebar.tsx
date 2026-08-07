@@ -1,8 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type MouseEvent } from 'react';
 import type { AnimationDocument, CastSummary, DialogueDocument, Health, PropDefInfo, SceneDetail, SceneSummary, SetSummary, ShotList } from '../types.ts';
 import { Dot, SectionRule } from './chrome.tsx';
 import type { MenuTarget, OpenMenu } from './ContextMenu.tsx';
-import { cueUndecided, type Mode } from './lib.ts';
+import { cueUndecided, sceneCues, type Mode } from './lib.ts';
 
 interface Row {
   key: string;
@@ -19,44 +19,69 @@ interface Row {
   count?: string;
   hint: string;
   go?: () => void;
+  /** A verb the row carries in its own right — "use this set in the scene". */
+  action?: { label: string; hint: string; go: () => void };
   /** What a right-click on this row is about. */
   menu?: MenuTarget;
 }
 
+/**
+ * One tree row, and — where the row can be *applied* rather than only opened —
+ * its own verb.
+ *
+ * A set row used to paint an "in use by this scene" dot and then offer no way
+ * to change which one that was, which is a large part of why the set felt
+ * unchangeable. The action sits on the row itself so the answer is where the
+ * question is; it cannot nest inside the row button, hence the wrapper.
+ */
 function TreeRow({ row, onContextMenu }: { row: Row; onContextMenu: OpenMenu }) {
+  const menu = row.menu ? (e: MouseEvent<HTMLElement>) => onContextMenu(e, row.menu!) : undefined;
   return (
-    <button
-      type="button"
-      title={row.hint}
-      onClick={row.go}
-      onContextMenu={row.menu ? (e) => onContextMenu(e, row.menu!) : undefined}
-      className="w-full flex items-center gap-1.5 pr-2 border-0 text-left cursor-pointer hover:bg-panel-2"
+    <div
+      className="w-full flex items-center hover:bg-panel-2"
+      onContextMenu={menu}
       style={{
         height: row.h,
-        paddingLeft: row.pad,
         background: row.bg ?? 'transparent',
         borderLeft: `2px solid ${row.mark ?? 'transparent'}`,
-        color: row.fg ?? '#9aa1ab',
       }}
     >
-      <span className="w-[11px] text-center text-ink-faint text-[9px] shrink-0">{row.glyph}</span>
-      <span
-        className={`flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] ${row.serif ? 'font-serif' : ''}`}
+      <button
+        type="button"
+        title={row.hint}
+        onClick={row.go}
+        className="flex-1 min-w-0 h-full flex items-center gap-1.5 pr-1.5 border-0 bg-transparent text-left cursor-pointer"
+        style={{ paddingLeft: row.pad, color: row.fg ?? '#9aa1ab' }}
       >
-        {row.label}
-      </span>
-      {row.badge && (
+        <span className="w-[11px] text-center text-ink-faint text-[9px] shrink-0">{row.glyph}</span>
         <span
-          title={row.badge.hint}
-          className="text-[8px] tracking-[.05em] uppercase border rounded-[2px] px-[3px] leading-[11px] shrink-0"
-          style={{ color: row.badge.color, borderColor: row.badge.color }}
+          className={`flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] ${row.serif ? 'font-serif' : ''}`}
         >
-          {row.badge.text}
+          {row.label}
         </span>
+        {row.badge && (
+          <span
+            title={row.badge.hint}
+            className="text-[8px] tracking-[.05em] uppercase border rounded-[2px] px-[3px] leading-[11px] shrink-0"
+            style={{ color: row.badge.color, borderColor: row.badge.color }}
+          >
+            {row.badge.text}
+          </span>
+        )}
+        {row.count && <span className="font-mono text-[9px] text-ink-ghost shrink-0">{row.count}</span>}
+        {row.dot && <Dot color={row.dot.color} title={row.dot.hint} />}
+      </button>
+      {row.action && (
+        <button
+          type="button"
+          title={row.action.hint}
+          onClick={row.action.go}
+          className="shrink-0 mr-1.5 h-[15px] px-[5px] rounded-[2px] border border-edge bg-panel-2 text-[9px] tracking-[.05em] uppercase text-ink-ghost cursor-pointer hover:text-accent hover:border-accent/60"
+        >
+          {row.action.label}
+        </button>
       )}
-      {row.count && <span className="font-mono text-[9px] text-ink-ghost shrink-0">{row.count}</span>}
-      {row.dot && <Dot color={row.dot.color} title={row.dot.hint} />}
-    </button>
+    </div>
   );
 }
 
@@ -69,8 +94,8 @@ function TreeRow({ row, onContextMenu }: { row: Row; onContextMenu: OpenMenu }) 
  */
 export function Sidebar({
   scenes, scene, detail, shots, dialogue, animation, dirty, hasStaleRender, staleBeats,
-  cast, sets, props, health, mode, onScene, onMode, onNewScene, onOpenCast, onOpenSets, onOpenProps, onOpenSystem,
-  onContextMenu,
+  cast, sets, props, health, mode, onScene, onMode, onNewScene, onOpenCast, onOpenSets, onUseSet, onOpenProps,
+  onOpenSystem, onContextMenu,
 }: {
   scenes: SceneSummary[];
   scene: string | null;
@@ -92,6 +117,8 @@ export function Sidebar({
   onNewScene: () => void;
   onOpenCast: (name: string | null) => void;
   onOpenSets: (name: string | null) => void;
+  /** Stage the open scene in this set, repairs and all. */
+  onUseSet: (name: string) => void;
   onOpenProps: (key: string | null) => void;
   /** The health strip opens the full System report — doctor, in the place people already look. */
   onOpenSystem: () => void;
@@ -100,7 +127,7 @@ export function Sidebar({
   const [filter, setFilter] = useState('');
   const [open, setOpen] = useState<Record<string, boolean>>({ scripts: true, cast: true, sets: true });
 
-  const lineCues = dialogue?.cues ?? [];
+  const lineCues = sceneCues(dialogue, shots);
   const missing = lineCues.filter((cue) => cueUndecided(cue)).length;
   const lockedBeats = shots?.beats.filter((b) => b.locked).length ?? 0;
   const lockedSegments = animation?.segments.filter((s) => s.locked).length ?? 0;
@@ -223,7 +250,11 @@ export function Sidebar({
           key: `set:${s.name}`, label: s.name, glyph: '▦', pad: 22, h: 21,
           fg: inUse ? '#e6e3dc' : '#6b737d',
           dot: inUse ? { color: '#c8834a', hint: 'In use by this scene' } : undefined,
-          hint: `${s.propCount} props · palette ${s.palette}`, go: () => onOpenSets(s.name),
+          hint: `${s.propCount} props · palette ${s.palette} — click to edit this set`,
+          go: () => onOpenSets(s.name),
+          action: inUse || !shots
+            ? undefined
+            : { label: 'use', hint: `Stage this scene in ${s.name}`, go: () => onUseSet(s.name) },
           menu: { kind: 'set', name: s.name },
         });
       }
@@ -249,7 +280,7 @@ export function Sidebar({
     }
 
     return rows;
-  }, [scenes, cast, sets, props, open, scene, shots, filter, onScene, onNewScene, onOpenCast, onOpenSets, onOpenProps]);
+  }, [scenes, cast, sets, props, open, scene, shots, filter, onScene, onNewScene, onOpenCast, onOpenSets, onUseSet, onOpenProps]);
 
   const healthRows = health
     ? [

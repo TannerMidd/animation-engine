@@ -7,7 +7,7 @@ import { AnimationPanel } from '../components/AnimationPanel.tsx';
 import { PerformancePanel } from '../components/PerformancePanel.tsx';
 import type { AnimationEditTarget } from '../components/AnimationOverlay.tsx';
 import { FieldLabel, OptionChips, Tag } from './chrome.tsx';
-import { cueForBeat, speakerColour, type InspectorTab } from './lib.ts';
+import { cueForBeat, sceneCues, speakerColour, type InspectorTab } from './lib.ts';
 
 const TABS: Array<{ id: InspectorTab; label: string }> = [
   { id: 'beat', label: 'Beat' },
@@ -46,6 +46,8 @@ export interface InspectorProps {
   onEditCast: (actorId: string, changes: Partial<CastMember>) => void;
   /** Top-level shot-list fields — set, seed, frame rates, cards. Same debounced write path as beats. */
   onEditShots: (changes: Partial<Pick<ShotList, 'set' | 'seed' | 'fps' | 'characterFps' | 'cards' | 'title' | 'subtitle'>>) => void;
+  /** Binding a set goes through here, not `onEditShots`, so its cost is settled first. */
+  onChooseSet: (name: string | null) => void;
   /** One change applied to every cast member in a single write — the scene-wide resting default. */
   onEditAllCast: (changes: Partial<CastMember>) => void;
   onAnimationDocument: (doc: AnimationDocument) => void;
@@ -68,7 +70,7 @@ export function Inspector(p: InspectorProps) {
   const { tab, beat, selected, shots } = p;
   const castIds = shots?.cast.map((c) => c.id) ?? [];
   const cue = cueForBeat(p.dialogue, beat);
-  const missingVoice = (p.dialogue?.cues ?? []).some((c) => c.approval.state !== 'approved');
+  const missingVoice = sceneCues(p.dialogue, shots).some((c) => c.approval.state !== 'approved');
   const hasMotion = (p.animation?.segments.length ?? 0) > 0;
 
   // A short accent ring when something elsewhere hands off to this panel —
@@ -216,6 +218,7 @@ export function Inspector(p: InspectorProps) {
               scene={p.scene}
               cue={cue}
               document={p.dialogue}
+              sceneLines={sceneCues(p.dialogue, shots)}
               context={p.performContext}
               sceneRun={p.sceneRun}
               onReload={p.onReloadDialogue}
@@ -647,6 +650,7 @@ function SceneTab(p: InspectorProps) {
 
   const currentSet = shots.set ? shots.set.replace(/\.(json|svg)$/, '') : '';
   const setNames = [...new Set([...p.sets.map((s) => s.name), ...(currentSet ? [currentSet] : [])])].sort();
+  const setFit = p.sets.find((s) => s.name === currentSet)?.fit;
 
   return (
     <>
@@ -654,15 +658,22 @@ function SceneTab(p: InspectorProps) {
         <FieldLabel label="Set" hint="The room this scene stages in." />
         <select
           value={currentSet}
-          onChange={(e) => p.onEditShots({ set: e.target.value || null })}
+          onChange={(e) => p.onChooseSet(e.target.value || null)}
           className={`${selectCls} w-full`}
         >
           <option value="">(no set — bare stage)</option>
           {setNames.map((name) => <option key={name} value={name}>{name}</option>)}
         </select>
-        <span className="block text-[10px] text-[#5d656e] mt-1 leading-[1.4]">
-          The stage, walkable area and prop contacts all come from the set. Changing it redraws the preview immediately.
-        </span>
+        {setFit?.issues.length ? (
+          <span className="block text-[10px] text-[#c8834a] mt-1 leading-[1.4]">
+            {setFit.issues.length} {setFit.issues.length === 1 ? 'piece' : 'pieces'} of business cannot stage here —
+            {' '}{setFit.issues[0]!.detail}. The stage stays blocked until it is restaged or the set changes.
+          </span>
+        ) : (
+          <span className="block text-[10px] text-[#5d656e] mt-1 leading-[1.4]">
+            The stage, walkable area and prop contacts all come from the set. Changing it redraws the preview immediately.
+          </span>
+        )}
       </label>
 
       <label className="block">

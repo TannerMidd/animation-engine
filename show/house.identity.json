@@ -156,7 +156,7 @@
   "audio": {
     "ambience": {
       "enabled": true,
-      "levelDb": -30,
+      "levelDb": -48,
       "setProfiles": {}
     },
     "stings": {

@@ -3,6 +3,8 @@ import path from 'node:path';
 import { json, readJson, HttpError, type Router } from '../http.ts';
 import { STAGE, storePreview, protectRunningRenderState } from '../state.ts';
 import { listSets, loadSet, saveSet, validateSet, lintSet, tidySet, setPath, renderSet } from '../../sets/index.ts';
+import { setFit } from '../../sets/interaction.ts';
+import { readShotList } from '../../pipeline/scene.ts';
 import { SetDescriptor } from '../../sets/schema.ts';
 import { BUILTIN_SETS, BUILTIN_SET_NAMES } from '../../sets/builtins.ts';
 import { listRigs, loadRig, type LoadedRig } from '../../cast/store.ts';
@@ -11,7 +13,20 @@ import { compileScene, DEFAULT_PLAN } from '../../compile/index.ts';
 import { ROOT } from '../../core/paths.ts';
 
 export function registerSetRoutes(router: Router): void {
-  router.get('/api/sets', async ({ res }) => {
+  /**
+   * Every set, and — given `?scene=` — whether each one can host that scene.
+   *
+   * The fit travels with the list so the editor can say what a set change will
+   * cost *before* it is made. Computing it here rather than in the browser keeps
+   * one copy of the rule: the same `setFit` the compiler's own resolver backs.
+   *
+   * `fit.references` is the whole demand the scene makes on any set, so the
+   * editor can also price the bare stage — it breaks exactly that many — without
+   * a second shape for the same list.
+   */
+  router.get('/api/sets', async ({ res, query }) => {
+    const scene = query.get('scene');
+    const shots = scene ? await readShotList(scene) : null;
     const onDisk = await listSets();
     const names = [...new Set([...onDisk, ...BUILTIN_SET_NAMES])].sort();
     const out = [];
@@ -22,6 +37,7 @@ export function registerSetRoutes(router: Router): void {
         palette: desc.palette,
         builtin: !onDisk.includes(name),
         propCount: desc.layers.back.length + desc.layers.mid.length + desc.layers.fore.length,
+        ...(shots ? { fit: setFit(shots, desc) } : {}),
       });
     }
     json(res, out);

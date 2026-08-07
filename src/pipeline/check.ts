@@ -6,6 +6,7 @@ import { createRig } from '../cast/authoring.ts';
 import { loadRig, listRigs, type LoadedRig } from '../cast/store.ts';
 import type { Screenplay, ShotList } from '../schema/script.ts';
 import { loadSet } from '../sets/index.ts';
+import { readAnimation } from './animation.ts';
 import type { LineTiming } from '../voice/index.ts';
 
 /**
@@ -134,8 +135,12 @@ export async function validateCompiledStaging(
       cues: [],
     });
   });
+  // Compiled with the authored animation, because a drag decides where a
+  // puppet stands and staging is judged against that. Checking without it
+  // reports problems the render does not have.
+  const animation = await readAnimation(shots.scene).catch(() => null);
   try {
-    compileShotList(shots, rigs, timings, null, set);
+    compileShotList(shots, rigs, timings, animation, set);
     return [];
   } catch (error) {
     return [(error as Error).message];

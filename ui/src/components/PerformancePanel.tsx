@@ -23,11 +23,20 @@ function cuePlaybackDurationMs(cue: DialogueCue, document: DialogueDocument): nu
 }
 
 export function PerformancePanel({
-  scene, cue, document, context, sceneRun, onReload, onSaveCue, onDiscardTake, speakerVoiceBound,
+  scene, cue, document, sceneLines, context, sceneRun, onReload, onSaveCue, onDiscardTake, speakerVoiceBound,
 }: {
   scene: string;
   cue: DialogueCue | null;
   document: DialogueDocument | null;
+  /**
+   * The cues this script still has, in beat order.
+   *
+   * Ordering and neighbour questions — what the preceding line is, which lines
+   * a continuous run covers — must be asked of the current script only. The
+   * document also carries cues left behind by earlier drafts, whose beat
+   * indexes belong to a scene that no longer exists.
+   */
+  sceneLines: DialogueCue[];
   context?: { audioUrl: string; startMs: number; endMs: number } | null;
   sceneRun?: { audioUrl: string; beatStarts: number[]; durationMs: number } | null;
   onReload: () => Promise<void>;
@@ -166,7 +175,7 @@ export function PerformancePanel({
     : selectedTake
       ? `/api/scenes/${scene}/dialogue/takes/${selectedTake.id}/audio`
       : null;
-  const earlierDialogueCue = [...document.cues]
+  const earlierDialogueCue = [...sceneLines]
     .filter((item) => item.beatIndex < cue.beatIndex)
     .sort((a, b) => b.beatIndex - a.beatIndex)[0] ?? null;
   // The compiler requires the overlap target to be both the preceding dialogue
@@ -188,7 +197,7 @@ export function PerformancePanel({
         )
           ? `Interruption must be 1-${maxInterruptMs ?? '?'} ms inside the preceding cue, or 0 to let it continue underneath.`
           : null;
-  const runCues = document.cues
+  const runCues = sceneLines
     .filter((item) => item.speaker === cue.speaker && !item.locked)
     .sort((a, b) => a.beatIndex - b.beatIndex);
   const activeRunCue = runRecording

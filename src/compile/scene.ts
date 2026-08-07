@@ -44,12 +44,14 @@ import type { AnimationDocument } from '../schema/animation.ts';
 import {
   alignedWordAnchorId,
   canonicalWordAnchorId,
+  activeRootMotion,
   resolveAnimation,
   sampleAnimation,
   sampleMotionSegment,
   type AnimationTimeline,
   type ResolvedAnimation,
 } from './animation.ts';
+import { walkCycles, walks } from './walk.ts';
 import { geometryFor, type SetDescriptor } from '../sets/schema.ts';
 import {
   interactionHandle,
@@ -658,6 +660,34 @@ function applyAuthoredAnimation(
   return out;
 }
 
+/** The root placement the renderer will actually put on screen at one moment. */
+function effectiveActorPlacementAt(
+  animation: ResolvedAnimation | null,
+  actor: ActorRt,
+  state: StageState,
+  atMs: number,
+): ActorPlacement {
+  const base: ActorPlacement = {
+    visible: state.visible,
+    x: state.x,
+    y: state.y,
+    scale: scaledForDepth(actor, state),
+    flip: state.flip,
+  };
+  if (!animation) return base;
+
+  const sampled = sampleAnimation(animation, atMs, {
+    [actor.id]: { ...base, parts: {} },
+  })[actor.id]!;
+  return {
+    visible: sampled.visible ?? base.visible,
+    x: sampled.x ?? base.x,
+    y: sampled.y ?? base.y,
+    scale: sampled.scale ?? base.scale,
+    flip: sampled.flip ?? base.flip,
+  };
+}
+
 function prepareActor(shots: ShotList, member: ShotList['cast'][number], loaded: LoadedRig): ActorRt {
   const rig = loaded.rig;
   // Streams key off the rig's stable id when it has one, so renaming a
@@ -789,14 +819,13 @@ function propAtState(prop: ResolvedSetProp, state: PropContinuityState): Resolve
 
 function rigPointWorld(
   actor: ActorRt,
-  state: StageState,
+  placement: ActorPlacement,
   point: readonly [number, number],
 ): { x: number; y: number } {
-  const scale = scaledForDepth(actor, state);
-  const direction = state.flip ? -1 : 1;
+  const direction = placement.flip ? -1 : 1;
   return {
-    x: state.x + (point[0] - actor.rig.anchor[0]) * scale * direction,
-    y: state.y + (point[1] - actor.rig.anchor[1]) * scale,
+    x: placement.x + (point[0] - actor.rig.anchor[0]) * placement.scale * direction,
+    y: placement.y + (point[1] - actor.rig.anchor[1]) * placement.scale,
   };
 }
 
@@ -814,37 +843,40 @@ function armParts(actor: ActorRt, hand: 'left' | 'right', context: string) {
 
 function handForPoint(
   actor: ActorRt,
-  state: StageState,
+  placement: ActorPlacement,
   point: { x: number; y: number },
 ): 'left' | 'right' {
-  const scale = scaledForDepth(actor, state);
-  const direction = state.flip ? -1 : 1;
-  const localX = actor.rig.anchor[0] + ((point.x - state.x) / Math.max(0.001, scale)) * direction;
+  const direction = placement.flip ? -1 : 1;
+  const localX = actor.rig.anchor[0] + ((point.x - placement.x) / Math.max(0.001, placement.scale)) * direction;
   return localX >= actor.rig.canvas.width / 2 ? 'right' : 'left';
 }
 
 function validateReach(
   actor: ActorRt,
-  state: StageState,
+  placement: ActorPlacement,
   hand: 'left' | 'right',
   point: { x: number; y: number },
   radius: number,
   context: string,
 ): void {
   const { upper, fore } = armParts(actor, hand, context);
-  const shoulder = rigPointWorld(actor, state, upper.pivot);
-  const scale = scaledForDepth(actor, state);
+  const shoulder = rigPointWorld(actor, placement, upper.pivot);
   // Rigs do not yet declare wrist endpoints, so use the authored shoulder to
   // elbow length for both segments and allow bounded forearm extension.
   const upperLength = Math.max(1, Math.hypot(
     fore.pivot[0] - upper.pivot[0],
     fore.pivot[1] - upper.pivot[1],
   ));
-  const maxReach = (upperLength + upperLength * 1.08 * 1.6 + radius) * scale;
+  const maxReach = (upperLength + upperLength * 1.08 * 1.6 + radius) * placement.scale;
   const distance = Math.hypot(point.x - shoulder.x, point.y - shoulder.y);
   if (distance > maxReach + 1e-6) {
+    // The standing position is named because it is the thing to change, and
+    // because it is how someone tells whether the drag they just made was
+    // taken into account.
     throw new Error(
-      `${context} target is out of reach for "${actor.id}" (${Math.round(distance)} > ${Math.round(maxReach)} set units); move the actor or prop closer`,
+      `${context} target is out of reach for "${actor.id}" ` +
+        `(${Math.round(distance)} > ${Math.round(maxReach)} set units) ` +
+        `standing at ${Math.round(placement.x)},${Math.round(placement.y)}; move the actor or prop closer`,
     );
   }
 }
@@ -949,7 +981,24 @@ function buildStageTransitions(
   shots: ShotList,
   timeline: TimedBeat[],
   set: SetDescriptor | null,
+  authored: { animation: ResolvedAnimation | null; titleMs: number } = { animation: null, titleMs: 0 },
 ): StageBuild {
+  /**
+   * Where a puppet is standing at a moment, drags included.
+   *
+   * Staging says where the shot list put someone; an authored `root.position`
+   * phrase can have carried them somewhere else by the time an action lands,
+   * and that is what the audience sees. Anything judging whether an actor can
+   * touch something has to ask this rather than read the staged state, or it
+   * refuses a tap on a desk the character is visibly standing at.
+   *
+   * Stage times run without the title card; the animation timeline includes it,
+   * hence the offset.
+   */
+  const actorPlacementAtMs = (actor: ActorRt, state: StageState, ms: number): ActorPlacement => (
+    effectiveActorPlacementAt(authored.animation, actor, state, ms + authored.titleMs)
+  );
+
   const byId = new Map(actors.map((actor) => [actor.id, actor]));
   const current = new Map(actors.map((actor) => [actor.id, cloneStage(actor.initialStage)]));
   const compiled: CompiledStageAction[] = [];
@@ -1204,13 +1253,23 @@ function buildStageTransitions(
           }
           const handle = interactionHandle(prop, 'contact', context);
           const point = propHandlePoint(propAtState(prop, continuity), handle);
-          let hand = handForPoint(actor, state, point);
-          if (state.heldHand === hand) hand = hand === 'right' ? 'left' : 'right';
-          validateReach(actor, state, hand, point, handle.radius, context);
           const count = action.type === 'tap' ? action.count : 1;
           const contactProgresses = action.type === 'tap'
             ? Array.from({ length: count }, (_, index) => (index + 0.5) / count)
             : [0.5];
+          // Each contact is judged where the actor stands as it lands, rather
+          // than where the beat first found them — a tap can happen part-way
+          // through a phrase that is still carrying them.
+          const contactPlacements = contactProgresses.map((progress) => actorPlacementAtMs(
+            actor,
+            state,
+            window.startMs + progress * (window.endMs - window.startMs),
+          ));
+          let hand = handForPoint(actor, contactPlacements[0]!, point);
+          if (state.heldHand === hand) hand = hand === 'right' ? 'left' : 'right';
+          for (const contactPlacement of contactPlacements) {
+            validateReach(actor, contactPlacement, hand, point, handle.radius, context);
+          }
           interaction = { prop, handle, hand, point, contactProgresses };
           break;
         }
@@ -1229,9 +1288,14 @@ function buildStageTransitions(
           }
           const handle = interactionHandle(prop, 'grip', context);
           const point = propHandlePoint(propAtState(prop, continuity), handle);
-          const hand = handForPoint(actor, state, point);
-          validateReach(actor, state, hand, point, handle.radius, context);
           stateChangeProgress = 0.55;
+          const gripPlacement = actorPlacementAtMs(
+            actor,
+            state,
+            window.startMs + stateChangeProgress * (window.endMs - window.startMs),
+          );
+          const hand = handForPoint(actor, gripPlacement, point);
+          validateReach(actor, gripPlacement, hand, point, handle.radius, context);
           interaction = { prop, handle, hand, point, contactProgresses: [stateChangeProgress] };
           after.heldPropId = prop.id;
           after.heldHand = hand;
@@ -1270,13 +1334,25 @@ function buildStageTransitions(
           if (continuity.location !== 'held' || continuity.holder !== actor.id) {
             throw new Error(`${context} has invalid pickup/putdown continuity for prop "${held.id}"`);
           }
-          const placement = placementFor(action, actor, state, shots, set, resolvedProps, context);
+          stateChangeProgress = 0.72;
+          const releasePlacement = actorPlacementAtMs(
+            actor,
+            state,
+            window.startMs + stateChangeProgress * (window.endMs - window.startMs),
+          );
+          const releaseState = {
+            ...state,
+            visible: releasePlacement.visible,
+            x: releasePlacement.x,
+            y: releasePlacement.y,
+            flip: releasePlacement.flip,
+          };
+          const placement = placementFor(action, actor, releaseState, shots, set, resolvedProps, context);
           const handle = interactionHandle(held, 'grip', context);
           const placedProp = { ...held, x: placement.x, y: placement.y };
           const point = propHandlePoint(placedProp, handle);
           const hand = state.heldHand;
-          validateReach(actor, state, hand, point, handle.radius, context);
-          stateChangeProgress = 0.72;
+          validateReach(actor, releasePlacement, hand, point, handle.radius, context);
           interaction = {
             prop: held,
             handle,
@@ -1583,6 +1659,25 @@ function activeSeatingPose(
   return { parts, key: `seat-${transition.type}` };
 }
 
+/**
+ * One moment of a stride, as legs, arms and a torso.
+ *
+ * Shared so that a walk looks the same however it was asked for: the director
+ * staging "he crosses to the window" and a creator dragging the same character
+ * across the stage are the same event, and a puppet that walked differently
+ * depending on which route produced the move would just be a bug with two faces.
+ */
+function stridePose(wave: number, localDirection: number): Record<string, Partial<PartTransform>> {
+  const stride = wave * 13;
+  return {
+    torso: { rot: localDirection * 2.2, y: -Math.abs(wave) * 2.5, scale: 1 },
+    leg_L: { rot: stride, scale: 1 },
+    leg_R: { rot: -stride, scale: 1 },
+    arm_L_upper: { rot: -stride * 0.45, scale: 1 },
+    arm_R_upper: { rot: stride * 0.45, scale: 1 },
+  };
+}
+
 function locomotionPoseAt(
   actor: ActorRt,
   state: StageState,
@@ -1599,19 +1694,62 @@ function locomotionPoseAt(
   if (progress < 0 || progress >= 1) return null;
   const dx = transition.after.x - transition.before.x;
   const dy = transition.after.y - transition.before.y;
-  if (Math.hypot(dx, dy) < 0.5) return null;
-  const wave = Math.sin(progress * Math.PI * 4);
-  const stride = wave * 13;
+  const total = Math.hypot(dx, dy);
+  if (total < 0.5) return null;
   const localDirection = Math.sign(dx || 1) * (state.flip ? -1 : 1);
+  // Cadence comes from ground covered, exactly as it does for an authored
+  // phrase. A fixed two cycles per transition made a staged crossing and a
+  // dragged one step differently over identical ground, which is the bug the
+  // stridePose comment above warns about.
   return {
     key: `walk-${transition.type}`,
-    parts: {
-      torso: { rot: localDirection * 2.2, y: -Math.abs(wave) * 2.5, scale: 1 },
-      leg_L: { rot: stride, scale: 1 },
-      leg_R: { rot: -stride, scale: 1 },
-      arm_L_upper: { rot: -stride * 0.45, scale: 1 },
-      arm_R_upper: { rot: stride * 0.45, scale: 1 },
-    },
+    parts: stridePose(Math.sin(progress * walkCycles(total) * Math.PI * 2), localDirection),
+  };
+}
+
+/**
+ * Walk an actor whose root is being moved by an authored motion phrase.
+ *
+ * Dragging a character from one place to another is the ordinary way to block a
+ * scene, and it used to slide them there like furniture: the gait lived only on
+ * the director's staged actions, while a drag writes a `root.position` segment,
+ * which is applied after the puppet's pose has already been composed.
+ *
+ * Phase comes from ground covered rather than elapsed time, so the feet keep
+ * step with the easing instead of skating through the slow ends of the move,
+ * and so a long crossing takes more steps than a short one.
+ *
+ * The count is whole steps, though. A move shorter than one stride would
+ * otherwise swing the legs part-way out and leave them there — a lean, not a
+ * step — and the shortest useful move is exactly the one someone makes when
+ * they nudge a character over and expect to see them walk it.
+ */
+function authoredLocomotionPoseAt(
+  animation: ResolvedAnimation | null,
+  actor: ActorRt,
+  state: StageState,
+  ms: number,
+): { parts: Record<string, Partial<PartTransform>>; key: string } | null {
+  // Someone sitting down is not walking, whatever their root is doing.
+  if (!animation || state.seatedOn || state.pose === 'SIT') return null;
+  const moving = activeRootMotion(animation, actor.id, ms);
+  if (!moving) return null;
+
+  const dx = moving.to[0] - moving.from[0];
+  const dy = moving.to[1] - moving.from[1];
+  const total = Math.hypot(dx, dy);
+  // The same question the pacing pass asks, so a phrase can never be paced as
+  // a walk without the legs agreeing, or the reverse.
+  if (!walks(moving.segment.gait, total)) return null;
+
+  // Standing at either end of the phrase: the walk belongs to the journey.
+  const travelled = Math.hypot(moving.at[0] - moving.from[0], moving.at[1] - moving.from[1]);
+  if (travelled <= 0.5 || travelled >= total - 0.5) return null;
+
+  const localDirection = Math.sign(dx || 1) * (state.flip ? -1 : 1);
+  return {
+    key: 'walk-authored',
+    parts: stridePose(Math.sin((travelled / total) * walkCycles(total) * Math.PI * 2), localDirection),
   };
 }
 
@@ -1663,14 +1801,8 @@ function interactionPoseAt(
   actor: ActorRt,
   state: StageState,
   ms: number,
+  placement: ActorPlacement,
 ): { parts: Record<string, { rot: number; scale: number }>; key: string } | null {
-  const placement: ActorPlacement = {
-    visible: state.visible,
-    x: state.x,
-    y: state.y,
-    scale: scaledForDepth(actor, state),
-    flip: state.flip,
-  };
   const transition = activeInteraction(actor, ms);
   const hand = transition?.interaction?.hand ?? state.heldHand;
   if (!hand) return null;
@@ -2001,19 +2133,10 @@ export function compileShotList(
   });
   const actorsById = new Map(actors.map((actor) => [actor.id, actor]));
 
-  const stageBuild = buildStageTransitions(actors, shots, timeline, setDescriptor);
-  const bodyStageActions = stageBuild.actions;
-  const propRuntimes = stageBuild.props;
-  const stageActions = bodyStageActions.map((action) => ({
-    ...action,
-    startMs: action.startMs + cards.titleMs,
-    endMs: action.endMs + cards.titleMs,
-    contacts: action.contacts.map((contact) => ({
-      ...contact,
-      atMs: contact.atMs + cards.titleMs,
-    })),
-  }));
-
+  // Resolved before the stage is built, because staging has to be judged
+  // against where the puppets actually stand: a creator who drags someone to a
+  // desk has moved them there as far as the screen is concerned, and a reach
+  // check that only reads the shot list would call it out of reach anyway.
   let authoredAnimation: ResolvedAnimation | null = null;
   let hasAuthoredPictureTracks = false;
   if (animationDocument) {
@@ -2025,6 +2148,7 @@ export function compileShotList(
     authoredAnimation = resolveAnimation(
       animationDocument,
       buildAnimationTimeline(timeline, cards.titleMs, cards.endMs),
+      { paceWalks: true },
     );
     validateAnimationTargets(authoredAnimation, actors, shots);
     hasAuthoredPictureTracks = authoredAnimation.tracks.some(
@@ -2033,6 +2157,25 @@ export function compileShotList(
       (resolved) => resolved.layer.enabled && resolved.segment.enabled,
     );
   }
+
+  const stageBuild = buildStageTransitions(
+    actors,
+    shots,
+    timeline,
+    setDescriptor,
+    { animation: authoredAnimation, titleMs: cards.titleMs },
+  );
+  const bodyStageActions = stageBuild.actions;
+  const propRuntimes = stageBuild.props;
+  const stageActions = bodyStageActions.map((action) => ({
+    ...action,
+    startMs: action.startMs + cards.titleMs,
+    endMs: action.endMs + cards.titleMs,
+    contacts: action.contacts.map((contact) => ({
+      ...contact,
+      atMs: contact.atMs + cards.titleMs,
+    })),
+  }));
 
   const durationSec = durationMs / 1000;
   for (const actor of actors) {
@@ -2103,7 +2246,18 @@ export function compileShotList(
         const speechPoseName = speechPoseNameFor(actor, active, charMs);
         const exprName = valueAt(actor.exprSegments, charMs);
         const attention = attentionDirection(actorStage, stageStates);
-        const interactionPose = interactionPoseAt(actor, { ...actorStage, flip }, charMs);
+        const effectivePlacement = effectiveActorPlacementAt(
+          authoredAnimation,
+          actor,
+          { ...actorStage, flip },
+          charMs + cards.titleMs,
+        );
+        const interactionPose = interactionPoseAt(
+          actor,
+          { ...actorStage, flip },
+          charMs,
+          effectivePlacement,
+        );
         const poseKey =
           `${actorStage.pose}>${speechPoseName ?? '-'}|${exprName}|` +
           `${actorStage.lookTarget ?? actorStage.lookDirection ?? '-'}:${attention ?? '-'}|` +
@@ -2143,7 +2297,15 @@ export function compileShotList(
           }
         }
 
-        const locomotionPose = locomotionPoseAt(actor, { ...actorStage, flip }, charMs);
+        // A staged move wins: it already walks, and the authored phrase that
+        // usually accompanies one would otherwise stride over the top of it.
+        const locomotionPose = locomotionPoseAt(actor, { ...actorStage, flip }, charMs)
+          ?? authoredLocomotionPoseAt(
+            authoredAnimation,
+            actor,
+            { ...actorStage, flip },
+            charMs + cards.titleMs,
+          );
         if (locomotionPose) {
           for (const [id, transform] of Object.entries(locomotionPose.parts)) {
             target[id] = add(target[id] ?? IDENTITY, transform);

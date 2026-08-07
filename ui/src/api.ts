@@ -201,7 +201,9 @@ export const api = {
   discardVoices: (name: string) => post<{ ok: true }>(`/api/cast/${name}/voices/discard`),
   prepareVoices: (scene: string) => post<JobSummary>(`/api/scenes/${scene}/voices/prepare`),
 
-  sets: () => call<SetSummary[]>('/api/sets'),
+  /** With a scene, every set also reports whether it can host that scene's staging. */
+  sets: (scene?: string) =>
+    call<SetSummary[]>(scene ? `/api/sets?scene=${encodeURIComponent(scene)}` : '/api/sets'),
   set: (name: string) => call<SetDescriptor>(`/api/sets/${name}`),
   saveSet: (name: string, set: SetDescriptor) => put<{ ok: true }>(`/api/sets/${name}`, { set }),
   setPreview: (name: string, set?: SetDescriptor, cast?: string[]) =>

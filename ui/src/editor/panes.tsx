@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, fmtMs } from '../api.ts';
 import type {
-  CastSummary, CheckResult, DialogueDocument, ProductionPreflightNote, ProductionPreflightReport,
+  CastSummary, CheckResult, DialogueCue, DialogueDocument, ProductionPreflightNote, ProductionPreflightReport,
   SceneSoundInfo, ShotList, StemId, Vocab,
 } from '../types.ts';
 import { ScriptEditor } from '../components/ScriptEditor.tsx';
 import { ScriptComposer } from './compose/ScriptComposer.tsx';
 import { Dot, Spinner } from './chrome.tsx';
-import { cueApproval, cueUndecided, humanHint, speakerColour, type Mode } from './lib.ts';
+import { cueApproval, cueUndecided, humanHint, orphanedCues, sceneCues, speakerColour, type Mode } from './lib.ts';
 
 /** Sub-pane widths per mode, from the design. */
 export function subPaneWidth(mode: Mode): number {
@@ -93,26 +93,31 @@ export function ScriptPane({
 
 /** Perform: every line, its approval state, and where the takes are missing. */
 export function LinesPane({
-  dialogue, shots, selected, onSelect, speakerFilter,
+  dialogue, shots, selected, onSelect, speakerFilter, onDiscardOrphans,
 }: {
   dialogue: DialogueDocument | null;
   shots: ShotList | null;
   selected: number | null;
   onSelect: (beatIndex: number) => void;
   speakerFilter: string | null;
+  /** Forget the cues the script has left behind, takes and all. */
+  onDiscardOrphans?: (cues: DialogueCue[]) => void;
 }) {
   const castIds = shots?.cast.map((c) => c.id) ?? [];
+  const lines = useMemo(() => sceneCues(dialogue, shots), [dialogue, shots]);
   const cues = useMemo(
-    () => (dialogue?.cues ?? []).filter((cue) => !speakerFilter || cue.speaker === speakerFilter),
-    [dialogue, speakerFilter],
+    () => lines.filter((cue) => !speakerFilter || cue.speaker === speakerFilter),
+    [lines, speakerFilter],
   );
-  const decidedCount = (dialogue?.cues ?? []).filter((cue) => !cueUndecided(cue)).length;
+  const decidedCount = lines.filter((cue) => !cueUndecided(cue)).length;
+  const orphans = useMemo(() => orphanedCues(dialogue, shots), [dialogue, shots]);
+  const [orphansOpen, setOrphansOpen] = useState(false);
 
   return (
     <>
       <SubPaneHeader
         title={speakerFilter ? `Lines · ${speakerFilter}` : 'Lines'}
-        meta={dialogue ? `${decidedCount} of ${dialogue.cues.length} decided` : '—'}
+        meta={dialogue ? `${decidedCount} of ${lines.length} decided` : '—'}
       />
       <div className="flex-1 min-h-0 overflow-y-auto py-1 pb-3.5">
         {cues.map((cue, n) => {
@@ -160,6 +165,54 @@ export function LinesPane({
         {!cues.length && (
           <div className="px-3 py-5 text-center text-[11px] text-ink-ghost leading-relaxed">
             No dialogue cues yet.<br />Direct the scene first.
+          </div>
+        )}
+
+        {/*
+          Cues the script has moved past. They are kept so a restored line comes
+          back with its takes, but they are not lines of this scene and must not
+          read as if they were.
+        */}
+        {orphans.length > 0 && !speakerFilter && (
+          <div className="mt-2 border-t border-[#2f353d] pt-1.5">
+            <button
+              type="button"
+              onClick={() => setOrphansOpen((v) => !v)}
+              title="Cues whose line is no longer in the script. Their takes are kept in case the line comes back."
+              className="w-full flex items-center gap-1.5 px-[9px] py-1 text-left cursor-pointer hover:bg-[#25292f]"
+            >
+              <span className="text-ink-ghost text-[9px] w-2">{orphansOpen ? '▾' : '▸'}</span>
+              <span className="flex-1 text-[10px] tracking-[.07em] uppercase text-ink-faint">
+                Not in this script
+              </span>
+              <span className="font-mono text-[9px] text-ink-ghost">{orphans.length}</span>
+            </button>
+            {orphansOpen && (
+              <>
+                {orphans.map((cue) => (
+                  <div key={cue.id} className="flex gap-2 items-start px-[9px] py-1 opacity-55">
+                    <span className="text-[9px] tracking-[.07em] uppercase text-ink-ghost shrink-0 pt-[2px] w-[52px] truncate">
+                      {cue.speaker}
+                    </span>
+                    <span className="flex-1 min-w-0 text-[10.5px] text-ink-ghost leading-[1.35] line-clamp-2">
+                      {cue.displayText}
+                    </span>
+                    {cue.locked && <span title="Locked — unlock it before it can be discarded" className="text-[8px] text-lock">🔒</span>}
+                  </div>
+                ))}
+                {onDiscardOrphans && (
+                  <div className="px-[9px] py-1.5">
+                    <button
+                      type="button"
+                      onClick={() => onDiscardOrphans(orphans)}
+                      className="h-[19px] px-[7px] rounded-[2px] border border-edge bg-panel-2 text-[10px] text-ink-faint cursor-pointer hover:text-bad hover:border-bad/60"
+                    >
+                      Discard {orphans.length} left-behind {orphans.length === 1 ? 'line' : 'lines'}
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         )}
       </div>

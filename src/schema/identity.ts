@@ -174,8 +174,15 @@ export const AudioBible = z.object({
   ambience: z
     .object({
       enabled: z.boolean().default(true),
-      /** Bed loudness as RMS dBFS. Room tone that gets noticed has failed. */
-      levelDb: z.number().min(-60).max(-8).default(-30),
+      /**
+       * Bed loudness as RMS dBFS. Room tone that gets noticed has failed.
+       *
+       * The default sits about 30 dB under a -16 LUFS programme, which is where
+       * broadcast room tone lives: felt as a sense of place, never listened to.
+       * The ceiling is deliberately far below dialogue — a bed loud enough to
+       * compete with the cast is not room tone, it is a second character.
+       */
+      levelDb: z.number().min(-72).max(-24).default(-48),
       setProfiles: z.record(z.string(), z.string()).default({}),
     })
     .default({}),
