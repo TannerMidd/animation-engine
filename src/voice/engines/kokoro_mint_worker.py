@@ -21,6 +21,7 @@ directory first on sys.path, so a worker named after the package would shadow
 the installed package and break its own import.
 """
 import json
+import os
 import struct
 import sys
 import traceback
@@ -93,6 +94,31 @@ def render_items(pipelines, torch, items):
     return rendered, True
 
 
+def load_pipelines(KModel, KPipeline, torch, items, model_dir):
+    """Load the approved snapshot directly; never resolve Hugging Face refs."""
+    repository = "hexgrad/Kokoro-82M"
+    shared_model = KModel(
+        repo_id=repository,
+        config=os.path.join(model_dir, "config.json"),
+        model=os.path.join(model_dir, "kokoro-v1_0.pth"),
+    ).to("cpu").eval()
+    pipelines = {}
+    for item in items:
+        prefix = item["bankVoice"][0]
+        if prefix not in pipelines:
+            pipelines[prefix] = KPipeline(
+                lang_code=prefix,
+                repo_id=repository,
+                model=shared_model,
+                device="cpu",
+            )
+        voice = item["bankVoice"]
+        if voice not in pipelines[prefix].voices:
+            voice_file = os.path.join(model_dir, "voices", f"{voice}.pt")
+            pipelines[prefix].voices[voice] = torch.load(voice_file, weights_only=True)
+    return pipelines
+
+
 def main() -> int:
     # utf-8-sig: tolerate a BOM from Windows tooling; Node never writes one.
     with open(sys.argv[1], "r", encoding="utf-8-sig") as fh:
@@ -105,7 +131,7 @@ def main() -> int:
 
     try:
         import torch
-        from kokoro import KPipeline
+        from kokoro import KModel, KPipeline
     except Exception as exc:
         log(event="fatal", error=f"import failed: {exc}")
         return 1
@@ -115,18 +141,8 @@ def main() -> int:
     log(event="loading", device="cpu")
     try:
         # One pipeline per language prefix ('a' American, 'b' British), all
-        # sharing one 82M model. device is explicit: KPipeline auto-selects
-        # CUDA when left alone, and minting must not contend for VRAM.
-        pipelines = {}
-        shared_model = True
-        for item in items:
-            prefix = item["bankVoice"][0]
-            if prefix not in pipelines:
-                pipelines[prefix] = KPipeline(
-                    lang_code=prefix, repo_id="hexgrad/Kokoro-82M",
-                    model=shared_model, device="cpu",
-                )
-                shared_model = pipelines[prefix].model
+        # sharing one 82M model loaded from the manifest-selected snapshot.
+        pipelines = load_pipelines(KModel, KPipeline, torch, items, job["model_dir"])
     except Exception as exc:
         log(event="fatal", error=f"could not load model: {exc}")
         return 1

@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import { resolveApprovedModel } from '../core/model-manifest.ts';
 import { ROOT } from '../core/paths.ts';
 import { WHISPER_CACHE } from '../core/models.ts';
 import { pythonPath, chatterboxProcessEnv } from './engines/chatterbox.ts';
@@ -63,11 +64,7 @@ function levenshtein<T>(a: readonly T[], b: readonly T[]): number {
   for (let i = 1; i <= a.length; i++) {
     const row = [i];
     for (let j = 1; j <= b.length; j++) {
-      row.push(Math.min(
-        prev[j]! + 1,
-        row[j - 1]! + 1,
-        prev[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1),
-      ));
+      row.push(Math.min(prev[j]! + 1, row[j - 1]! + 1, prev[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1)));
     }
     prev = row;
   }
@@ -120,14 +117,16 @@ let memoAvailable: { ok: true } | { ok: false; reason: string } | undefined;
 export async function asrAvailable(): Promise<{ ok: true } | { ok: false; reason: string }> {
   if (memoAvailable) return memoAvailable;
 
-  const checkpoint = path.join(WHISPER_CACHE, `${WHISPER_MODEL}.pt`);
   try {
-    await fs.access(checkpoint);
-  } catch {
+    const model = await resolveApprovedModel('whisper-small-en');
+    if (!model.files[`whisper/${WHISPER_MODEL}.pt`]) {
+      throw new Error(`approved whisper-small-en manifest has no ${WHISPER_MODEL}.pt`);
+    }
+  } catch (error) {
     memoAvailable = {
       ok: false,
       reason:
-        `no Whisper checkpoint at ${checkpoint}. Install and prefetch:\n` +
+        `${error instanceof Error ? error.message : String(error)}. Install and prefetch:\n` +
         `  .venv\\Scripts\\python -m pip install openai-whisper\n` +
         `  .venv\\Scripts\\python -c "import whisper; whisper.load_model('${WHISPER_MODEL}', download_root='${WHISPER_CACHE.replace(/\\/g, '/')}')"`,
     };
@@ -138,6 +137,7 @@ export async function asrAvailable(): Promise<{ ok: true } | { ok: false; reason
     const proc = spawn(pythonPath(), ['-c', 'import whisper, librosa'], {
       stdio: ['ignore', 'ignore', 'pipe'],
       env: chatterboxProcessEnv(),
+      cwd: os.tmpdir(),
     });
     let stderr = '';
     proc.stderr.on('data', (d) => (stderr += String(d)));
@@ -145,9 +145,13 @@ export async function asrAvailable(): Promise<{ ok: true } | { ok: false; reason
     proc.on('close', (code) => resolve({ code: code ?? 1, stderr }));
   });
 
-  memoAvailable = probe.code === 0
-    ? { ok: true }
-    : { ok: false, reason: `whisper is not importable in ${pythonPath()}: ${probe.stderr.split('\n').slice(-2).join(' ')}` };
+  memoAvailable =
+    probe.code === 0
+      ? { ok: true }
+      : {
+          ok: false,
+          reason: `whisper is not importable in ${pythonPath()}: ${probe.stderr.split('\n').slice(-2).join(' ')}`,
+        };
   return memoAvailable;
 }
 
@@ -161,9 +165,12 @@ export async function transcribeBatch(
 
   const jobDir = await fs.mkdtemp(path.join(os.tmpdir(), 'anim-asr-'));
   const jobFile = path.join(jobDir, 'job.json');
+  const model = await resolveApprovedModel('whisper-small-en');
+  const modelPath = model.files[`whisper/${WHISPER_MODEL}.pt`];
+  if (!modelPath) throw new Error(`approved whisper-small-en manifest has no ${WHISPER_MODEL}.pt`);
   await fs.writeFile(
     jobFile,
-    JSON.stringify({ device: 'cuda', model: WHISPER_MODEL, model_root: WHISPER_CACHE, items }, null, 2),
+    JSON.stringify({ device: 'cuda', model_path: modelPath, items }, null, 2),
     'utf8',
   );
 
@@ -174,6 +181,7 @@ export async function transcribeBatch(
     const proc = spawn(pythonPath(), [SCRIPT, jobFile], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: chatterboxProcessEnv(),
+      cwd: os.tmpdir(),
     });
     let buffer = '';
     let stderr = '';

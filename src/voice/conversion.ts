@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { readModelManifest, resolveApprovedModel } from '../core/model-manifest.ts';
 import { ROOT } from '../core/paths.ts';
 import { modelEnv } from '../core/models.ts';
 import { pythonPath } from './engines/chatterbox.ts';
@@ -118,6 +119,7 @@ async function installedPackageRevision(): Promise<string> {
     const proc = spawn(pythonPath(), ['-c', code], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, ...modelEnv() },
+      cwd: os.tmpdir(),
     });
     let stdout = '';
     proc.stdout.on('data', (chunk) => (stdout += String(chunk)));
@@ -129,26 +131,14 @@ async function installedPackageRevision(): Promise<string> {
 }
 
 async function installedModelRevision(): Promise<string> {
-  const hub = modelEnv()['HUGGINGFACE_HUB_CACHE'];
-  if (!hub) return 'model-cache-unconfigured';
-  const modelDir = path.join(hub, 'models--ResembleAI--chatterbox');
   try {
-    const ref = (await fs.readFile(path.join(modelDir, 'refs', 'main'), 'utf8')).trim();
-    if (/^[a-f0-9]{7,64}$/i.test(ref)) return `ResembleAI/chatterbox@${ref}`;
+    const manifest = await readModelManifest();
+    const model = manifest.models.find((entry) => entry.id === 'chatterbox');
+    return model?.repository
+      ? `${model.repository}@${model.revision}`
+      : 'approved-model-unavailable';
   } catch {
-    // Older/local caches can omit refs; their snapshot directory still names
-    // the content-addressed Hugging Face commit.
-  }
-  try {
-    const snapshots = (await fs.readdir(path.join(modelDir, 'snapshots'), { withFileTypes: true }))
-      .filter((entry) => entry.isDirectory() && /^[a-f0-9]{7,64}$/i.test(entry.name))
-      .map((entry) => entry.name)
-      .sort();
-    return snapshots.length
-      ? `ResembleAI/chatterbox@${snapshots.join('+')}`
-      : 'model-snapshot-unavailable';
-  } catch {
-    return 'model-snapshot-unavailable';
+    return 'approved-model-unavailable';
   }
 }
 
@@ -291,22 +281,22 @@ export function checkConversionIdentity(result: {
 }): ConversionIdentityCheck {
   const failures: string[] = [];
   const voicedRetention = result.sourceVoicedRatio && result.outputVoicedRatio !== null
-    ? result.outputVoicedRatio / result.sourceVoicedRatio
-    : null;
+      ? result.outputVoicedRatio / result.sourceVoicedRatio
+      : null;
   const pitchErrorSemitones = result.outputMedianPitchHz && result.targetMedianPitchHz
-    ? 12 * Math.log2(result.outputMedianPitchHz / result.targetMedianPitchHz)
-    : null;
+      ? 12 * Math.log2(result.outputMedianPitchHz / result.targetMedianPitchHz)
+      : null;
 
   if (voicedRetention !== null && voicedRetention < CONVERSION_VOICED_RETENTION_FLOOR) {
     failures.push(
       `the conversion lost ${Math.round((1 - voicedRetention) * 100)}% of the performance's voiced speech; ` +
-      'it came out as noise rather than the character',
+        'it came out as noise rather than the character',
     );
   }
   if (pitchErrorSemitones !== null && Math.abs(pitchErrorSemitones) > CONVERSION_PITCH_ERROR_CEILING_SEMITONES) {
     failures.push(
       `the conversion landed ${Math.abs(pitchErrorSemitones).toFixed(1)} semitones from the character's own register; ` +
-      'the target voice reference is likely outside what conversion can reproduce',
+        'the target voice reference is likely outside what conversion can reproduce',
     );
   }
   return { voicedRetention, pitchErrorSemitones, failures };
@@ -336,19 +326,19 @@ export async function chatterboxVcAvailable(): Promise<{ ok: true } | { ok: fals
     return { ok: false, reason: `voice-conversion runtime is missing (${pythonPath()})` };
   }
 
+  try {
+    await resolveApprovedModel('chatterbox');
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+  }
+
   return new Promise((resolve) => {
-    const cacheProbe = [
-      'from chatterbox.vc import ChatterboxVC',
-      'from huggingface_hub import hf_hub_download',
-      "files=['s3gen.safetensors','conds.pt']",
-      "for name in files: hf_hub_download(repo_id='ResembleAI/chatterbox', filename=name, local_files_only=True)",
-      'print("ok")',
-    ].join('\n');
-    const proc = spawn(
-      pythonPath(),
-      ['-c', cacheProbe],
-      { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...modelEnv() } },
-    );
+    const cacheProbe = ['from chatterbox.vc import ChatterboxVC', 'print("ok")'].join('\n');
+    const proc = spawn(pythonPath(), ['-c', cacheProbe], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, ...modelEnv() },
+      cwd: os.tmpdir(),
+    });
     let stderr = '';
     proc.stderr.on('data', (d) => (stderr += String(d)));
     proc.on('error', (err) => resolve({ ok: false, reason: err.message }));
@@ -423,11 +413,13 @@ export async function convertPerformances(
   if (!misses.length) return out;
   const availability = await chatterboxVcAvailable();
   if (!availability.ok) throw new Error(`Chatterbox voice conversion is unavailable: ${availability.reason}`);
+  const model = await resolveApprovedModel('chatterbox');
 
   const jobDir = await fs.mkdtemp(path.join(os.tmpdir(), 'anim-vc-'));
   const jobFile = path.join(jobDir, 'job.json');
   await fs.writeFile(jobFile, JSON.stringify({
     device: 'cuda',
+    model_dir: model.root,
     items: misses.map((m) => ({
       id: m.id,
       source: m.source,
@@ -448,6 +440,7 @@ export async function convertPerformances(
       const proc = spawn(pythonPath(), [SCRIPT, jobFile], {
         stdio: ['ignore', 'pipe', 'pipe'],
         env: { ...process.env, ...modelEnv() },
+        cwd: os.tmpdir(),
       });
       proc.stdout.on('data', (chunk) => {
         buffer += String(chunk);

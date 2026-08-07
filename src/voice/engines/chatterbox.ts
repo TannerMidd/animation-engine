@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import { resolveApprovedModel } from '../../core/model-manifest.ts';
 import { ROOT } from '../../core/paths.ts';
 import { modelEnv } from '../../core/models.ts';
 import type { TtsEngine, SynthRequest, SynthResult, Availability } from '../types.ts';
@@ -13,9 +14,6 @@ const SCRIPT = path.join(ROOT, 'src', 'voice', 'engines', 'chatterbox_worker.py'
 const CACHE_PROBE = [
   'import torch',
   'from chatterbox.tts import ChatterboxTTS',
-  'from huggingface_hub import hf_hub_download',
-  "files=['ve.safetensors','t3_cfg.safetensors','s3gen.safetensors','tokenizer.json','conds.pt']",
-  "for name in files: hf_hub_download(repo_id='ResembleAI/chatterbox', filename=name, local_files_only=True)",
   'print(torch.cuda.is_available())',
 ].join('\n');
 
@@ -66,6 +64,12 @@ export class ChatterboxEngine implements TtsEngine {
       return { ok: false, reason: `no Python at ${py}. Create it with: python -m venv .venv` };
     }
 
+    try {
+      await resolveApprovedModel('chatterbox');
+    } catch (error) {
+      return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+    }
+
     const probe = await this.runPython(['-c', CACHE_PROBE]);
     if (probe.code !== 0) {
       return {
@@ -87,6 +91,7 @@ export class ChatterboxEngine implements TtsEngine {
 
     const jobDir = await fs.mkdtemp(path.join(os.tmpdir(), 'anim-cb-'));
     const jobFile = path.join(jobDir, 'job.json');
+    const model = await resolveApprovedModel('chatterbox');
 
     const items = requests.map((r) => ({
       id: r.id,
@@ -103,7 +108,11 @@ export class ChatterboxEngine implements TtsEngine {
       seed: r.seed,
     }));
 
-    await fs.writeFile(jobFile, JSON.stringify({ device: 'cuda', items }, null, 2), 'utf8');
+    await fs.writeFile(
+      jobFile,
+      JSON.stringify({ device: 'cuda', model_dir: model.root, items }, null, 2),
+      'utf8',
+    );
 
     let done = 0;
     let fatal: string | null = null;
@@ -112,6 +121,7 @@ export class ChatterboxEngine implements TtsEngine {
       const proc = spawn(pythonPath(), [SCRIPT, jobFile], {
         stdio: ['ignore', 'pipe', 'pipe'],
         env: chatterboxProcessEnv(),
+        cwd: os.tmpdir(),
       });
       let buffer = '';
       let stderr = '';
@@ -156,6 +166,7 @@ export class ChatterboxEngine implements TtsEngine {
         stdio: ['ignore', 'pipe', 'pipe'],
         // Keep model weights off the system drive; see src/core/models.ts.
         env: chatterboxProcessEnv(),
+        cwd: os.tmpdir(),
       });
       let stdout = '';
       let stderr = '';

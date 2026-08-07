@@ -76,7 +76,20 @@ class FakeModel:
         return FakeTensor()
 
 
+class FakeModelClass:
+    called = None
+
+    @classmethod
+    def from_local(cls, model_dir, device):
+        cls.called = (model_dir, device)
+        return "approved-model"
+
+
 def main() -> int:
+    loaded = chatterbox_worker.load_approved_model(FakeModelClass, "approved/snapshot", "cpu")
+    assert loaded == "approved-model"
+    assert FakeModelClass.called == ("approved/snapshot", "cpu")
+
     model = FakeModel()
     with tempfile.TemporaryDirectory() as tmp:
         items = [

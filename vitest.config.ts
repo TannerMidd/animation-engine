@@ -8,7 +8,10 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json-summary', 'html'],
-      reportsDirectory: 'coverage',
+      // Keep generated reports below an already-ignored directory. A root
+      // `coverage/` directory is importable as a Python namespace package and
+      // shadows the real coverage package while Numba imports Chatterbox.
+      reportsDirectory: '.cache/coverage',
       include: ['src/**/*.ts'],
       exclude: ['src/cli/**', 'src/server/**'],
       thresholds: {

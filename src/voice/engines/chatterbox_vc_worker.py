@@ -22,6 +22,11 @@ def log(**kw):
     print(json.dumps(kw), flush=True)
 
 
+def load_approved_model(model_class, model_dir, device):
+    """Load only the manifest-selected snapshot supplied by the orchestrator."""
+    return model_class.from_local(model_dir, device=device)
+
+
 def save_wav(path, tensor, sample_rate):
     audio = tensor.detach().cpu().flatten().clamp(-1.0, 1.0)
     pcm = (audio * 32767.0).short()
@@ -270,7 +275,7 @@ def main():
 
     log(event="loading", device=device)
     try:
-        model = ChatterboxVC.from_pretrained(device=device)
+        model = load_approved_model(ChatterboxVC, job["model_dir"], device)
     except Exception as exc:
         log(event="fatal", error=f"could not load voice-conversion model: {exc}")
         return 1

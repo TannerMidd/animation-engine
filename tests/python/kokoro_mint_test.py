@@ -79,10 +79,62 @@ class FakePipeline:
             yield FakeResult(None if seg is None else FakeTensor(seg))
 
 
+class FakeLoadedModel:
+    calls = []
+
+    def __init__(self, **kwargs):
+        self.calls.append(kwargs)
+
+    def to(self, device):
+        self.device = device
+        return self
+
+    def eval(self):
+        return self
+
+
+class FakeLoadPipeline:
+    calls = []
+
+    def __init__(self, **kwargs):
+        self.calls.append(kwargs)
+        self.voices = {}
+
+
+class FakeLoaderTorch:
+    calls = []
+
+    @staticmethod
+    def load(path, weights_only):
+        FakeLoaderTorch.calls.append((path, weights_only))
+        return f"loaded:{path}"
+
+
 def main() -> int:
     spacer = int(kokoro_mint_worker.SAMPLE_RATE * 0.12)
 
     with tempfile.TemporaryDirectory() as tmp:
+        model_dir = os.path.join(tmp, "approved-snapshot")
+        load_items = [
+            {"bankVoice": "af_test"},
+            {"bankVoice": "af_other"},
+            {"bankVoice": "bf_test"},
+        ]
+        loaded = kokoro_mint_worker.load_pipelines(
+            FakeLoadedModel, FakeLoadPipeline, FakeLoaderTorch, load_items, model_dir
+        )
+        assert set(loaded) == {"a", "b"}
+        assert FakeLoadedModel.calls == [{
+            "repo_id": "hexgrad/Kokoro-82M",
+            "config": os.path.join(model_dir, "config.json"),
+            "model": os.path.join(model_dir, "kokoro-v1_0.pth"),
+        }]
+        assert FakeLoaderTorch.calls == [
+            (os.path.join(model_dir, "voices", "af_test.pt"), True),
+            (os.path.join(model_dir, "voices", "af_other.pt"), True),
+            (os.path.join(model_dir, "voices", "bf_test.pt"), True),
+        ], "approved local voice files must be loaded directly"
+
         # Two segments -> one spacer between them; a None audio result is skipped.
         pipeline = FakePipeline([[0.5] * 240, None, [0.25] * 240])
         items = [

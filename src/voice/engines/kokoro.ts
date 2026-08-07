@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import { resolveApprovedModel } from '../../core/model-manifest.ts';
 import { ROOT } from '../../core/paths.ts';
 import type { Availability } from '../types.ts';
 import { pythonPath, chatterboxProcessEnv } from './chatterbox.ts';
@@ -60,19 +61,26 @@ export async function kokoroAvailable(voices: string[]): Promise<Availability> {
     return { ok: false, reason: `no Python at ${py}. Create it with: python -m venv .venv` };
   }
 
-  const files = ['kokoro-v1_0.pth', 'config.json', ...voices.map((v) => `voices/${v}.pt`)];
-  const probe = [
-    'import kokoro',
-    'from huggingface_hub import hf_hub_download',
-    `files=${JSON.stringify(files)}`,
-    "for name in files: hf_hub_download(repo_id='hexgrad/Kokoro-82M', filename=name, local_files_only=True)",
-  ].join('\n');
+  let model: Awaited<ReturnType<typeof resolveApprovedModel>>;
+  try {
+    model = await resolveApprovedModel('kokoro-82m');
+    for (const voice of voices) {
+      if (!model.files[`voices/${voice}.pt`]) {
+        throw new Error(`voice "${voice}" is not in the approved kokoro-82m manifest`);
+      }
+    }
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+  }
+
+  const probe = ['from kokoro import KModel, KPipeline', 'print("ok")'].join('\n');
 
   const result = await new Promise<{ code: number; stderr: string }>((resolve) => {
     const proc = spawn(py, ['-c', probe], {
       stdio: ['ignore', 'ignore', 'pipe'],
       // Keep model weights off the system drive; see src/core/models.ts.
       env: chatterboxProcessEnv(),
+      cwd: os.tmpdir(),
     });
     let stderr = '';
     proc.stderr.on('data', (d) => (stderr += String(d)));
@@ -87,7 +95,8 @@ export async function kokoroAvailable(voices: string[]): Promise<Availability> {
         `kokoro or its cached voices are unavailable in ${py}. Install and prefetch first:\n` +
         `  .venv\\Scripts\\python -m pip install kokoro\n` +
         `  .venv\\Scripts\\python -c "from huggingface_hub import snapshot_download; ` +
-        `snapshot_download(repo_id='hexgrad/Kokoro-82M', allow_patterns=['*.pth','config.json','voices/*.pt'])"\n` +
+        `snapshot_download(repo_id='hexgrad/Kokoro-82M', revision='${model.revision}', ` +
+        `allow_patterns=['*.pth','config.json','voices/*.pt'])"\n` +
         result.stderr.split('\n').slice(-3).join('\n'),
     };
   }
@@ -104,7 +113,17 @@ export async function kokoroMint(
 
   const jobDir = await fs.mkdtemp(path.join(os.tmpdir(), 'anim-kokoro-'));
   const jobFile = path.join(jobDir, 'job.json');
-  await fs.writeFile(jobFile, JSON.stringify({ device: 'cpu', items }, null, 2), 'utf8');
+  const model = await resolveApprovedModel('kokoro-82m');
+  for (const item of items) {
+    if (!model.files[`voices/${item.bankVoice}.pt`]) {
+      throw new Error(`voice "${item.bankVoice}" is not in the approved kokoro-82m manifest`);
+    }
+  }
+  await fs.writeFile(
+    jobFile,
+    JSON.stringify({ device: 'cpu', model_dir: model.root, items }, null, 2),
+    'utf8',
+  );
 
   let done = 0;
   let fatal: string | null = null;
@@ -113,6 +132,7 @@ export async function kokoroMint(
     const proc = spawn(pythonPath(), [SCRIPT, jobFile], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: chatterboxProcessEnv(),
+      cwd: os.tmpdir(),
     });
     let buffer = '';
     let stderr = '';

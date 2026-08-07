@@ -17,11 +17,12 @@
     "test:coverage": "vitest run --coverage",
     "test:python": "node tests/python/run.mjs",
     "test:python:hermetic": "node tests/python/run.mjs --hermetic",
+    "test:python:runtime": "node tests/python/run.mjs --runtime",
     "test:browser": "tsx tests/browser/editor-smoke.ts",
     "test:watch": "vitest",
     "lint": "eslint src tests ui/src --max-warnings=0",
     "format": "prettier --write src tests ui/src *.json *.md",
-    "format:check": "prettier --check .github/workflows/ci.yml .prettierrc.json eslint.config.js vitest.config.ts package.json ui/package.json README.md docs/ARCHITECTURE.md config/models.manifest.json src/core src/contracts src/cli/args.ts src/compile/timeline.ts src/pipeline/preflight/motion.ts src/server/http.ts src/server/routes/scene-media.ts src/server/routes/scene-soundtrack.ts ui/src/contracts.ts ui/src/editor/workspaceActions.ts tests/server_boundaries.test.ts tests/model_manifest.test.ts tests/browser/editor-smoke.ts tests/python/run.mjs",
+    "format:check": "prettier --check .github/workflows/ci.yml .prettierrc.json eslint.config.js vitest.config.ts package.json ui/package.json README.md docs/ARCHITECTURE.md config/models.manifest.json src/core src/contracts src/cli/args.ts src/compile/timeline.ts src/pipeline/preflight/motion.ts src/server/http.ts src/server/routes/scene-media.ts src/server/routes/scene-soundtrack.ts ui/src/contracts.ts ui/src/editor/workspaceActions.ts tests/server_boundaries.test.ts tests/model_manifest.test.ts tests/python_requirements.test.ts tests/browser/editor-smoke.ts tests/python/run.mjs",
     "typecheck": "tsc --noEmit",
     "verify:ci": "npm run format:check && npm run lint && npm run typecheck && npm run test:coverage && npm run ui:build && npm run test:browser",
     "verify": "npm run lint && npm run typecheck && npm test && npm run test:python && npm run ui:build && npm run test:browser && tsx src/cli/index.ts migrate && tsx src/cli/index.ts show validate"

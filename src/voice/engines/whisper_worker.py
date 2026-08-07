@@ -25,6 +25,11 @@ def log(**kw):
     print(json.dumps(kw), flush=True)
 
 
+def load_approved_model(whisper_module, model_path, device):
+    """Open the approved checkpoint path directly; never resolve a model name."""
+    return whisper_module.load_model(model_path, device=device)
+
+
 def transcribe_items(model, load_audio, items):
     rendered = 0
     for item in items:
@@ -68,7 +73,7 @@ def main() -> int:
 
     log(event="loading", device=device)
     try:
-        model = whisper.load_model(job.get("model", "small.en"), device=device, download_root=job["model_root"])
+        model = load_approved_model(whisper, job["model_path"], device)
     except Exception as exc:
         log(event="fatal", error=f"could not load model: {exc}")
         return 1

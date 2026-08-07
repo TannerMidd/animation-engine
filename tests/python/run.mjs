@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -20,10 +21,14 @@ const hermetic = [
   'whisper_worker_test.py',
   'prop_bake_test.py',
 ];
-const tests = process.argv.includes('--hermetic') ? hermetic : [...hermetic, 'vc_register_test.py'];
+const tests = process.argv.includes('--runtime')
+  ? ['runtime_environment_test.py']
+  : process.argv.includes('--hermetic')
+    ? hermetic
+    : [...hermetic, 'vc_register_test.py'];
 
 for (const test of tests) {
-  const result = spawnSync(python, [path.join(here, test)], { stdio: 'inherit' });
+  const result = spawnSync(python, [path.join(here, test)], { stdio: 'inherit', cwd: os.tmpdir() });
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 process.exit(0);

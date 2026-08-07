@@ -88,7 +88,8 @@ Optional neural workers run with offline environment flags and never fetch weigh
 `config/models.manifest.json` is the allow-list for production artifacts: model id, immutable
 revision, license, local files and SHA-256 checksums. `anim doctor` reports manifest status and the
 CLI verification path checks file hashes. Python dependencies are captured in
-`requirements-python.lock.txt`.
+`requirements-python.lock.txt`; Chatterbox's obsolete Torch requirement is isolated in
+`requirements-chatterbox.lock.txt` and installed with `--no-deps` after the compatible base lock.
 
 Changing a model requires a deliberate manifest update, license review, fresh independent hashes
 and the model-manifest tests. A mutable branch or tag is not an acceptable production revision.

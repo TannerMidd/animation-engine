@@ -230,42 +230,43 @@ cached.
 npm install && npx playwright install chromium
 ```
 
-For the default Chatterbox voices (GPU). Install torch **after** chatterbox — chatterbox
-pins `torch==2.6.0`, which has no sm_120 kernels and silently downgrades you to a CPU
-build on a Blackwell card:
+For the default Chatterbox voices (GPU), install the resolver-consistent Blackwell environment,
+then overlay Chatterbox without its obsolete Torch metadata. Chatterbox 0.1.7 declares
+`torch==2.6.0`, whose wheels cannot execute on Blackwell (sm_120); all of its actual dependencies
+are already pinned in the base lock:
 
 ```bash
-python -m venv .venv && .venv\Scripts\python -m pip install -r requirements-python.lock.txt
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements-python.lock.txt
+.venv\Scripts\python -m pip install --no-deps -r requirements-chatterbox.lock.txt
 ```
 
 ```bash
-.venv\Scripts\python -m pip install --force-reinstall torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+npm run test:python:runtime
 ```
 
-The package install does not guarantee the model weights are cached. Prefetch them explicitly
-while network access is intentional (the current integration does not yet pin a repository
-revision or record a weights checksum):
+The smoke test verifies the supported overlay and its imports. (`pip check` still repeats
+Chatterbox's incorrect 2.6 metadata, which is why the overlay is isolated.) The package install
+does not cache model weights. Prefetch the manifest-approved revision explicitly while network
+access is intentional:
 
 ```powershell
 $env:HF_HOME = 'F:\ai-models\huggingface'
 $env:HUGGINGFACE_HUB_CACHE = 'F:\ai-models\huggingface\hub'
-.venv\Scripts\python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='ResembleAI/chatterbox')"
+.venv\Scripts\python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='ResembleAI/chatterbox', revision='5bb1f6ee58e50c3b8d408bc82a6d3740c2db6e18')"
 ```
 
-After that, workers use only the local cache. Chatterbox runs fine on torch 2.11 despite the
-package pin.
+After that, workers load that snapshot directory directly, never `refs/main`, and run offline.
+`anim doctor` independently verifies every approved file against
+`config/models.manifest.json`.
 
 Auto-minted character references read through **Kokoro-82M** (natural voices, CPU, Apache-2.0),
-so an uncast character gets a human-sounding voice instead of a robotic one. Same pattern —
-install, then prefetch while network access is intentional:
-
-```bash
-.venv\Scripts\python -m pip install kokoro
-```
+so an uncast character gets a human-sounding voice instead of a robotic one. The base lock installs
+Kokoro; prefetch its approved snapshot while network access is intentional:
 
 ```powershell
 $env:HF_HOME = 'F:\ai-models\huggingface'
-.venv\Scripts\python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='hexgrad/Kokoro-82M', allow_patterns=['*.pth','config.json','voices/*.pt'])"
+.venv\Scripts\python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='hexgrad/Kokoro-82M', revision='f3ff3571791e39611d31c381e3a41a3af07b4987', allow_patterns=['*.pth','config.json','voices/*.pt'])"
 ```
 
 (The first mint also fetches spaCy's small English model for G2P, one time; run one mint —
@@ -273,17 +274,15 @@ or `.venv\Scripts\python -m spacy download en_core_web_sm` — while online.)
 
 Generated lines are **verified**: each fresh take is transcribed locally (Whisper) and scored
 against the script line; a take that doesn't say its line retries on a derived seed before it
-can enter the cache. Install once, same pattern:
-
-```bash
-.venv\Scripts\python -m pip install openai-whisper
-```
+can enter the cache. The base lock installs Whisper; prefetch the approved checkpoint once:
 
 ```powershell
 .venv\Scripts\python -c "import whisper; whisper.load_model('small.en', download_root='F:/ai-models/whisper')"
 ```
 
 Without it, synthesis still works — takes just ship unverified (`doctor` says which).
+The verifier opens `F:/ai-models/whisper/small.en.pt` directly after the manifest confirms it is
+the approved checkpoint; it never asks Whisper to resolve or download a model during a render.
 
 Every reference clip and master transcodes through ffmpeg. The PATH one is often an ancient
 build that shipped inside another product — drop a current

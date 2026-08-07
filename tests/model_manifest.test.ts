@@ -3,7 +3,12 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { ApprovedModelManifest, readModelManifest, verifyModelManifest } from '../src/core/model-manifest.ts';
+import {
+  ApprovedModelManifest,
+  readModelManifest,
+  resolveApprovedModel,
+  verifyModelManifest,
+} from '../src/core/model-manifest.ts';
 
 const tempDirs: string[] = [];
 
@@ -47,6 +52,14 @@ describe('approved model manifest', () => {
     expect((await readModelManifest(paths.manifestPath)).schemaVersion).toBe(1);
   });
 
+  it('resolves the exact approved files workers must load', async () => {
+    const paths = await fixture();
+    const runtime = await resolveApprovedModel('fixture', { ...paths, hashes: true });
+    expect(runtime).toMatchObject({ id: 'fixture', revision: 'fixture-v1', root: paths.modelsRoot });
+    expect(runtime.files['weights.bin']).toBe(path.join(paths.modelsRoot, 'weights.bin'));
+    await expect(resolveApprovedModel('unknown', paths)).rejects.toThrow(/not in the approved manifest/);
+  });
+
   it('distinguishes missing files from checksum mismatches', async () => {
     const paths = await fixture();
     await fs.writeFile(path.join(paths.modelsRoot, 'weights.bin'), 'changed');
@@ -75,5 +88,23 @@ describe('approved model manifest', () => {
         ],
       }),
     ).toThrow(/repository/);
+  });
+
+  it('rejects duplicate model ids and unsafe file paths', () => {
+    const model = {
+      id: 'duplicate',
+      kind: 'file' as const,
+      revision: 'v1',
+      license: 'MIT',
+      purpose: 'test',
+      files: { '../weights.bin': 'a'.repeat(64) },
+    };
+    expect(() =>
+      ApprovedModelManifest.parse({
+        schemaVersion: 1,
+        approvedAt: '2026-08-07',
+        models: [model, { ...model, files: { 'weights.bin': 'a'.repeat(64) } }],
+      }),
+    ).toThrow(/portable relative paths|duplicate model id/);
   });
 });

@@ -1,0 +1,8 @@
+# Install only after requirements-python.lock.txt, with --no-deps.
+#
+# chatterbox-tts 0.1.7 incorrectly requires torch/torchaudio 2.6.0 on Python
+# 3.12. Those wheels cannot execute on Blackwell (sm_120), while this project
+# deliberately runs the package on the compatible CUDA 12.8 build pinned in
+# requirements-python.lock.txt. All of Chatterbox's other dependencies are
+# locked in that base file.
+chatterbox-tts==0.1.7

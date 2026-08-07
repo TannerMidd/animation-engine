@@ -27,7 +27,20 @@ class FakeModel:
         return {"text": f"  transcript {len(self.calls)}  "}
 
 
+class FakeWhisper:
+    called = None
+
+    @staticmethod
+    def load_model(model_path, device):
+        FakeWhisper.called = (model_path, device)
+        return "approved-model"
+
+
 def main() -> int:
+    approved = whisper_worker.load_approved_model(FakeWhisper, "approved/small.en.pt", "cpu")
+    assert approved == "approved-model"
+    assert FakeWhisper.called == ("approved/small.en.pt", "cpu")
+
     model = FakeModel()
     loaded = []
 

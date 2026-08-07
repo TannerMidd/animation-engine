@@ -29,6 +29,15 @@ spec.loader.exec_module(vc)
 import librosa  # noqa: E402  (after the worker import, which is the unit under test)
 
 
+class FakeModelClass:
+    called = None
+
+    @classmethod
+    def from_local(cls, model_dir, device):
+        cls.called = (model_dir, device)
+        return "approved-model"
+
+
 def tone(path, hz, seconds=1.5, sample_rate=24000):
     """A buzzy harmonic tone — enough structure for pyin to track a pitch."""
     t = np.arange(int(seconds * sample_rate)) / sample_rate
@@ -146,6 +155,9 @@ def test_preserve_performer_never_shifts():
 
 
 def main():
+    loaded = vc.load_approved_model(FakeModelClass, "approved/snapshot", "cpu")
+    assert loaded == "approved-model"
+    assert FakeModelClass.called == ("approved/snapshot", "cpu")
     with tempfile.TemporaryDirectory() as work:
         test_low_reference_is_lifted_into_range(work)
         test_in_range_reference_is_used_untouched(work)
