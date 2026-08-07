@@ -1,6 +1,6 @@
 import { Rng, deriveSeed } from '../core/rng.ts';
 import { activeIdentity } from '../show/context.ts';
-import { stampOf } from '../schema/identity.ts';
+import { stampOf } from '../show/identity.ts';
 import type { LoadedRig } from '../cast/store.ts';
 import { expressionFor, supportable } from './emotions.ts';
 import {

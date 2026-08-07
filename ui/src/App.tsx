@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { api } from './api.ts';
 import type { CastSummary, Health, PropDefInfo, SceneSummary, SetSummary, ShowInfo, Vocab } from './types.ts';
 import { EditorApp } from './editor/EditorApp.tsx';
-import { SetDesigner } from './components/SetDesigner.tsx';
-import { CastEditor } from './components/CastEditor.tsx';
-import { PropStudio } from './components/PropStudio.tsx';
 import { Spinner } from './editor/chrome.tsx';
 import { isTyping } from './editor/lib.ts';
+
+const SetDesigner = lazy(() => import('./components/SetDesigner.tsx').then((module) => ({ default: module.SetDesigner })));
+const CastEditor = lazy(() => import('./components/CastEditor.tsx').then((module) => ({ default: module.CastEditor })));
+const PropStudio = lazy(() => import('./components/PropStudio.tsx').then((module) => ({ default: module.PropStudio })));
 
 const STARTER = `# NEW SCENE
 
@@ -201,30 +202,32 @@ export default function App() {
             <span className="text-[10px] text-ink-ghost">edits here land on disk and show up in the scene on the next preview</span>
           </div>
           <div className="flex-1 min-h-0">
-            {legacy.kind === 'sets' && (
-              <SetDesigner
-                vocab={vocab}
-                llm={health?.llm ?? null}
-                open={legacy.name}
-                scene={scene}
-                sceneSet={scenes.find((s) => s.name === scene)?.set?.replace(/\.(json|svg)$/, '') ?? null}
-                onUseInScene={(name) => {
-                  // Hand back to the editor: it owns the shot list, and any
-                  // confirm about what the change breaks belongs on the stage.
-                  setSetRequest({ name, nonce: Date.now() });
-                  setLegacy(null);
-                }}
-                onOpenProps={(name) => setLegacy({ kind: 'props', name })}
-              />
-            )}
-            {legacy.kind === 'cast' && <CastEditor health={health} vocab={vocab} open={legacy.name} />}
-            {legacy.kind === 'props' && (
-              <PropStudio
-                open={legacy.name}
-                llm={health?.llm ?? null}
-                onCatalogueChanged={() => { void refreshSets(); void refreshProps(); }}
-              />
-            )}
+            <Suspense fallback={<div className="h-full grid place-items-center"><Spinner size={14} /></div>}>
+              {legacy.kind === 'sets' && (
+                <SetDesigner
+                  vocab={vocab}
+                  llm={health?.llm ?? null}
+                  open={legacy.name}
+                  scene={scene}
+                  sceneSet={scenes.find((s) => s.name === scene)?.set?.replace(/\.(json|svg)$/, '') ?? null}
+                  onUseInScene={(name) => {
+                    // Hand back to the editor: it owns the shot list, and any
+                    // confirm about what the change breaks belongs on the stage.
+                    setSetRequest({ name, nonce: Date.now() });
+                    setLegacy(null);
+                  }}
+                  onOpenProps={(name) => setLegacy({ kind: 'props', name })}
+                />
+              )}
+              {legacy.kind === 'cast' && <CastEditor health={health} vocab={vocab} open={legacy.name} />}
+              {legacy.kind === 'props' && (
+                <PropStudio
+                  open={legacy.name}
+                  llm={health?.llm ?? null}
+                  onCatalogueChanged={() => { void refreshSets(); void refreshProps(); }}
+                />
+              )}
+            </Suspense>
           </div>
         </div>
       )}

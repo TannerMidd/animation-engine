@@ -1,7 +1,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { SCRIPTS_DIR, sceneDir } from '../core/paths.ts';
-import { ShotList } from '../schema/script.ts';
+import { atomicWriteFile } from '../core/files.ts';
+import { projectId, resolveWithin } from '../core/project.ts';
+import { SHOT_LIST_SCHEMA_VERSION, ShotList } from '../schema/script.ts';
 
 /**
  * Scene storage.
@@ -12,7 +14,7 @@ import { ShotList } from '../schema/script.ts';
  */
 
 export function scriptPath(scene: string): string {
-  return path.join(SCRIPTS_DIR, `${scene}.md`);
+  return resolveWithin(SCRIPTS_DIR, `${projectId(scene, 'scene name')}.md`);
 }
 
 export function shotlistPath(scene: string): string {
@@ -45,8 +47,7 @@ export async function readScript(scene: string): Promise<string> {
 }
 
 export async function writeScript(scene: string, source: string): Promise<void> {
-  await fs.mkdir(SCRIPTS_DIR, { recursive: true });
-  await fs.writeFile(scriptPath(scene), source, 'utf8');
+  await atomicWriteFile(scriptPath(scene), source);
 }
 
 export async function readShotList(scene: string): Promise<ShotList | null> {
@@ -56,9 +57,12 @@ export async function readShotList(scene: string): Promise<ShotList | null> {
 }
 
 export async function writeShotList(scene: string, shots: ShotList): Promise<void> {
+  if (shots.scene !== scene) {
+    throw new Error(`cannot save shot list for scene "${shots.scene}" as "${scene}"`);
+  }
+  const document = ShotList.parse({ ...shots, schemaVersion: SHOT_LIST_SCHEMA_VERSION });
   const file = shotlistPath(scene);
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  await fs.writeFile(file, JSON.stringify(shots, null, 2) + '\n', 'utf8');
+  await atomicWriteFile(file, JSON.stringify(document, null, 2) + '\n');
 }
 
 /** Where a recorded VO override for a given beat would live. */

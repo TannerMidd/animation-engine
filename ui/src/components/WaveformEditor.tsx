@@ -33,8 +33,11 @@ export function WaveformEditor({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { inMs, outMs, speechOnsetMs, speechEndMs } = trim;
 
-  useEffect(() => setDraft(clampTrim(trim, durationMs)), [durationMs, trim.inMs, trim.outMs, trim.speechOnsetMs, trim.speechEndMs]);
+  useEffect(() => {
+    setDraft(clampTrim({ inMs, outMs, speechOnsetMs, speechEndMs }, durationMs));
+  }, [durationMs, inMs, outMs, speechOnsetMs, speechEndMs]);
 
   useEffect(() => {
     let cancelled = false;

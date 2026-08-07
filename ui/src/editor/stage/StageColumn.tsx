@@ -8,7 +8,7 @@ import {
 } from '../../components/AnimationOverlay.tsx';
 import { Mono } from '../chrome.tsx';
 import type { OpenMenu } from '../ContextMenu.tsx';
-import { MARK_X, captionAt, fmtTimecode, isTyping, speakerColour, type Mode } from '../lib.ts';
+import { MARK_X, captionAt, fmtTimecode, isTyping, type Mode } from '../lib.ts';
 import { buildSnapCandidates, listPropTargets } from './interaction.ts';
 
 interface RuntimeWindow extends Window {
@@ -181,7 +181,7 @@ export const StageColumn = forwardRef<StageHandle, {
     let raf = 0;
     const tick = () => {
       const elapsed = (performance.now() - startWall) / 1000;
-      let next = startFrame + elapsed * fps;
+      const next = startFrame + elapsed * fps;
       if (loopBounds && next >= loopBounds.to) {
         apply(loopBounds.from);
         setPlaying(false);
@@ -337,7 +337,6 @@ export const StageColumn = forwardRef<StageHandle, {
   const showSelection = prefs.selection && (mode === 'write' || mode === 'direct' || mode === 'perform');
   const showCaptions = prefs.captions && mode === 'publish';
 
-  const castIds = shots?.cast.map((c) => c.id) ?? [];
   const selectedBeat = selected === null ? null : shots?.beats[selected] ?? null;
   const selectionMember: CastMember | null = (() => {
     if (!shots || !selectedBeat) return null;

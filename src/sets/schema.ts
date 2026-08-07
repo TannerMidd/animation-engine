@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { IdentityStamp } from '../schema/identity.ts';
 
+export const SET_SCHEMA_VERSION = 1 as const;
+
 /**
  * Set descriptors.
  *
@@ -176,6 +178,8 @@ export function defaultParallax(): SetLayout['parallax'] {
 
 export const SetDescriptor = z
   .object({
+    /** Missing only on legacy files; every writer stamps the current version. */
+    schemaVersion: z.literal(SET_SCHEMA_VERSION).optional(),
     name: z.string().min(1),
     /** Stable id, independent of the name. Assigned at creation or by migrate. */
     setId: z.string().optional(),

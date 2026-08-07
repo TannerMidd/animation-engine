@@ -2,14 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, followJob } from '../api.ts';
 import type {
   AnimationDocument, Beat, CastMember, CastSummary, CheckResult, DialogueCue, DialogueDocument, Health,
-  JobEvent, LlmStatus, PreviewInfo, ProductionPreflightNote, ProductionPreflightReport, PropReferenceIssue,
+  JobEvent, LlmStatus, PreviewInfo, ProductionPreflightNote, ProductionPreflightReport,
   SceneDetail, SceneSoundInfo, SceneSummary, SetDescriptor, SetSummary, ShotList, ShowInfo, Vocab, PropDefInfo,
 } from '../types.ts';
 import { GenerateDialog } from '../components/GenerateDialog.tsx';
 import { useLlmStart } from '../components/useLlmStart.ts';
 import type { AnimationEditTarget, StagePropTarget } from '../components/AnimationOverlay.tsx';
 import { propInstanceId } from './stage/interaction.ts';
-import { AppBar, StaleBar, type ContextTool, type EngineOption, type SaveState } from './AppBar.tsx';
+import { AppBar, StaleBar, type EngineOption, type SaveState } from './AppBar.tsx';
 import { Sidebar } from './Sidebar.tsx';
 import { Inspector } from './Inspector.tsx';
 import { Timeline } from './Timeline.tsx';
@@ -29,6 +29,7 @@ import {
   MODE_DEFS, sceneCues, speakerColour, spineDrift, totalMsFor, withoutMotionSegment,
   type InspectorTab, type Mode,
 } from './lib.ts';
+import { buildModeTools, useEditorKeyboard } from './workspaceActions.ts';
 
 type Quality = 'Draft' | 'Accurate' | 'Final';
 
@@ -140,7 +141,9 @@ export function EditorApp({
   const savedAt = useRef<number | null>(Date.now());
   const preflightAt = useRef<number | null>(null);
 
-  const setPrefs = (patch: Partial<OverlayPrefs>) => setPrefsState((p) => ({ ...p, ...patch }));
+  const setPrefs = useCallback((patch: Partial<OverlayPrefs>) => {
+    setPrefsState((current) => ({ ...current, ...patch }));
+  }, []);
 
   const withAudio = quality !== 'Draft' && Boolean(detail?.hasAudio);
   /**
@@ -243,7 +246,7 @@ export function EditorApp({
     return () => {
       cancelled = true;
     };
-  }, [scene]);
+  }, [scene, applyCheck]);
 
   // Set descriptor follows whatever set the shot list names.
   useEffect(() => {
@@ -350,7 +353,7 @@ export function EditorApp({
       })();
     }, 500);
     return () => clearTimeout(t);
-  }, [source, detail, scene, setName]);
+  }, [source, detail, scene, setName, applyCheck]);
 
   // Keep the "Saved Ns ago" label honest without re-rendering every frame.
   useEffect(() => {
@@ -705,7 +708,7 @@ export function EditorApp({
    * recording" is intentional. Approved and locked like any performance, so
    * it clears the production gate the same way.
    */
-  const useGenerated = useCallback((cue: DialogueCue | null, scope: 'line' | 'speaker') => {
+  const chooseGenerated = useCallback((cue: DialogueCue | null, scope: 'line' | 'speaker') => {
     if (!dialogue || !cue) return;
     const decide = (c: DialogueCue): DialogueCue => ({
       ...c,
@@ -1035,7 +1038,7 @@ export function EditorApp({
     } finally {
       setBusy(null);
     }
-  }, [scene, source, setName, shots, mode, setMode, onSceneChanged]);
+  }, [scene, source, setName, shots, mode, setMode, onSceneChanged, applyCheck]);
 
   const refreshPreflight = useCallback(async () => {
     setPreflightBusy(true);
@@ -1135,7 +1138,10 @@ export function EditorApp({
     }
   }, [scene, acceptPreflight]);
 
-  const blockers = preflight?.notes.filter((n) => n.level === 'error') ?? [];
+  const blockers = useMemo(
+    () => preflight?.notes.filter((note) => note.level === 'error') ?? [],
+    [preflight],
+  );
   const reviewPending = Boolean(preflight && !preflight.productionBlocked && preflight.warningReview.required && !preflight.warningReview.current);
 
   const askRenderDraft = useCallback(() => {
@@ -1209,7 +1215,7 @@ export function EditorApp({
     } finally {
       setBusy(null);
     }
-  }, [scene, source, setName]);
+  }, [scene, source, setName, applyCheck]);
 
   // --- identity + quality ---
   const switchIdentity = useCallback((id: string) => {
@@ -1318,110 +1324,53 @@ export function EditorApp({
     setQuality((q) => (q === 'Draft' ? 'Accurate' : q === 'Accurate' ? 'Final' : 'Draft'));
   }, []);
 
-  // --- keyboard ---
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        setCmd((v) => !v);
-        return;
-      }
-      if (e.key === 'Escape') {
-        // The context menu closes itself, in the capture phase. This is the
-        // backstop: without it, one Escape with a menu open over a dialog would
-        // dismiss both, and the menu's own guard depends on it holding focus.
-        if (menu) return;
-        setCmd(false);
-        setPreflightOpen(false);
-        setConfirm(null);
-        setSystemOpen(false);
-        setCompareOpen(false);
-        setAuditionOpen(false);
-        setScoreTake(null);
-        return;
-      }
-      if (isTyping(e.target)) return;
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedMotionId) {
-        e.preventDefault();
-        askDeleteMotion(selectedMotionId);
-        return;
-      }
-      if (e.key === ' ') {
-        e.preventDefault();
-        stageRef.current?.togglePlay();
-      }
-      if (e.shiftKey && e.key === 'ArrowLeft') selectBeat(Math.max(0, (selected ?? 1) - 1));
-      if (e.shiftKey && e.key === 'ArrowRight') selectBeat(Math.min((shots?.beats.length ?? 1) - 1, (selected ?? -1) + 1));
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [askDeleteMotion, selected, selectedMotionId, shots, selectBeat, menu]);
+  const toggleCommand = useCallback(() => setCmd((value) => !value), []);
+  const closeOverlays = useCallback(() => {
+    setCmd(false);
+    setPreflightOpen(false);
+    setConfirm(null);
+    setSystemOpen(false);
+    setCompareOpen(false);
+    setAuditionOpen(false);
+    setScoreTake(null);
+  }, []);
+  useEditorKeyboard({
+    menuOpen: Boolean(menu),
+    toggleCommand,
+    closeOverlays,
+    selectedMotionId,
+    askDeleteMotion,
+    stageRef,
+    selected,
+    beatCount: shots?.beats.length ?? 1,
+    selectBeat,
+  });
 
   // --- context tools per mode ---
-  const tools: ContextTool[] = useMemo(() => {
-    switch (mode) {
-      case 'write':
-        return [
-          {
-            label: 'Write from premise…', hint: llm?.ok === false ? `Local model unavailable: ${llm.reason ?? 'not running'}` : 'Generate a draft with the local model. It lands unsaved.',
-            disabled: llm ? !llm.ok : false, go: () => setWriting(true),
-          },
-          { label: 'Check', hint: 'Parse, direct and validate. Sub-second, renders nothing.', busy: busy === 'check', go: () => void runCheck() },
-          {
-            label: 'Direct the script →',
-            hint: 'Turn this draft into the shot list. The timeline, voices, animation, preview and render all read the shot list — this is what pushes your script into them. You confirm the diff first.',
-            primary: true, busy: busy === 'direct', go: () => void runDirect(),
-          },
-        ];
-      case 'direct':
-        return [
-          {
-            label: 'Re-direct…',
-            hint: 'Propose new direction from the current script and apply it to the timeline, voices, animation and preview. You confirm the diff before anything is written; locked beats survive.',
-            busy: busy === 'direct', go: () => void runDirect(),
-          },
-          { label: 'Voices', hint: 'Synthesize dialogue and derive Rhubarb mouth cues.', busy: busy === 'voices', disabled: !shots, go: () => void runJob('voices') },
-          { label: 'Preflight', hint: 'Check voices, staging, animation, continuity, soundtrack freshness.', go: () => { setPreflightOpen(true); void refreshPreflight(); } },
-        ];
-      case 'animate':
-        return [
-          { label: 'Onion', hint: 'Ghost the active controller either side of the playhead — count set in the Motion panel.', on: prefs.onion, go: () => setPrefs({ onion: !prefs.onion }) },
-          { label: 'Motion path', hint: 'Show the authored A→B path with waypoints.', on: prefs.path, go: () => setPrefs({ path: !prefs.path }) },
-          { label: 'Snap', hint: 'Snap body and prop drags to marks, seats and the walkable edges.', on: prefs.snap, go: () => setPrefs({ snap: !prefs.snap }) },
-        ];
-      case 'perform':
-        return [
-          { label: 'Line Booth', hint: 'Perform one line with context playback and count-in — in the Voice tab.', on: tab === 'voice', go: openBooth },
-          { label: 'Scene Run', hint: 'Perform every unlocked line for one character against the full guide track — in the Voice tab.', go: openBooth },
-          { label: 'Audition…', hint: 'The whole cast through the real synthesis path, side by side, with per-line verification verdicts.', go: () => setAuditionOpen(true) },
-          { label: 'Voices', hint: `Synthesize all lines with the ${engine} engine.`, busy: busy === 'voices', disabled: !shots, go: () => void runJob('voices') },
-        ];
-      case 'sound':
-        return [
-          {
-            label: 'Rebuild stems',
-            hint: 'Remix dialogue, Foley, room tone and stings from cached takes — the same assembly path as Voices, without asking for new synthesis.',
-            busy: busy === 'sound',
-            disabled: !shots,
-            go: () => void runJob('sound'),
-          },
-          { label: 'Voices', hint: `Synthesize any missing lines with ${engine} and remix.`, busy: busy === 'voices', disabled: !shots, go: () => void runJob('voices') },
-        ];
-      case 'publish':
-        return [
-          { label: '16:9', hint: 'Horizontal master.', on: layout === '16:9', go: () => setLayout('16:9') },
-          { label: '9:16', hint: 'Actor-aware portrait recompose.', on: layout === '9:16', go: () => setLayout('9:16') },
-          {
-            label: 'Captions', hint: detail?.hasExport ? 'WebVTT / SRT sidecars. Not burned in.' : 'Sidecars are written at export time.',
-            disabled: !detail?.hasExport, go: () => window.open(`/api/scenes/${scene}/captions.vtt`, '_blank'),
-          },
-          {
-            label: 'Export manifest', hint: detail?.hasExport ? 'Hashes, provenance and identity stamp.' : 'Written by the render.',
-            disabled: !detail?.hasExport, go: () => window.open(`/api/scenes/${scene}/export`, '_blank'),
-          },
-        ];
-    }
-  }, [mode, llm, busy, shots, prefs, tab, layout, detail, scene, engine, runCheck, runDirect, runJob, refreshPreflight, openBooth]);
+  const tools = useMemo(() => buildModeTools({
+    mode,
+    llm,
+    busy,
+    shots,
+    prefs,
+    tab,
+    layout,
+    detail,
+    scene,
+    engine,
+    setWriting,
+    runCheck,
+    runDirect,
+    runJob,
+    openPreflight: () => {
+      setPreflightOpen(true);
+      void refreshPreflight();
+    },
+    setPrefs,
+    openBooth,
+    openAudition: () => setAuditionOpen(true),
+    setLayout,
+  }), [mode, llm, busy, shots, prefs, tab, layout, detail, scene, engine, runCheck, runDirect, runJob, refreshPreflight, setPrefs, openBooth]);
 
   // --- command palette ---
   const commands: Command[] = useMemo(() => {
@@ -1493,7 +1442,7 @@ export function EditorApp({
     });
     return out;
   }, [
-    prefs, scenes, cast, sets, setName, chooseSet, shots, show, engine, engines, setMode, selectTab, setEngine,
+    prefs, setPrefs, scenes, cast, sets, setName, chooseSet, shots, show, engine, engines, setMode, selectTab, setEngine,
     runCheck, runDirect, runJob, refreshPreflight, askRenderMaster, askRenderDraft, askRenderReel, runCastCheck,
     runContactSheet, switchIdentity, onScene, onOpenCast, onOpenSets, onOpenProps, selectBeat,
   ]);
@@ -1568,7 +1517,7 @@ export function EditorApp({
           act({
             label: 'Use the character voice',
             hint: 'Approve the generated voice for this line — the explicit decision that no recording is intended.',
-            go: () => useGenerated(cue, 'line'),
+            go: () => chooseGenerated(cue, 'line'),
           }),
           act({
             label: 'Convert to the character voice',
@@ -1939,7 +1888,7 @@ export function EditorApp({
             onReload={reloadDialogue}
             onSaveCue={saveDialogueCue}
             onDiscardTake={discardTake}
-            onUseGenerated={(scope) => useGenerated(selectedCue, scope)}
+            onUseGenerated={(scope) => chooseGenerated(selectedCue, scope)}
             onOpenVoiceTab={openBooth}
             speakerRig={selectedCue ? shots?.cast.find((m) => m.id === selectedCue.speaker)?.rig ?? null : null}
             converting={busy === 'convert'}

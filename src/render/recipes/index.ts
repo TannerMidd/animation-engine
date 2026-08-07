@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import type { ParamSpec } from '../../sets/props/types.ts';
 
 /**
  * Ready-made Blender sources, so nobody has to write Python to bake a prop.

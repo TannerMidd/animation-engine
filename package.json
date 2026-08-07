@@ -14,18 +14,33 @@
     "ui:dev": "npm --prefix ui run dev",
     "ui:install": "npm --prefix ui install",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:python": "node tests/python/run.mjs",
+    "test:python:hermetic": "node tests/python/run.mjs --hermetic",
+    "test:browser": "tsx tests/browser/editor-smoke.ts",
     "test:watch": "vitest",
+    "lint": "eslint src tests ui/src --max-warnings=0",
+    "format": "prettier --write src tests ui/src *.json *.md",
+    "format:check": "prettier --check .github/workflows/ci.yml .prettierrc.json eslint.config.js vitest.config.ts package.json ui/package.json README.md docs/ARCHITECTURE.md config/models.manifest.json src/core src/contracts src/cli/args.ts src/compile/timeline.ts src/pipeline/preflight/motion.ts src/server/http.ts src/server/routes/scene-media.ts src/server/routes/scene-soundtrack.ts ui/src/contracts.ts ui/src/editor/workspaceActions.ts tests/server_boundaries.test.ts tests/model_manifest.test.ts tests/browser/editor-smoke.ts tests/python/run.mjs",
     "typecheck": "tsc --noEmit",
-    "verify": "npm run typecheck && npm test && node tests/python/run.mjs && npm run ui:build && tsx src/cli/index.ts migrate && tsx src/cli/index.ts show validate"
+    "verify:ci": "npm run format:check && npm run lint && npm run typecheck && npm run test:coverage && npm run ui:build && npm run test:browser",
+    "verify": "npm run lint && npm run typecheck && npm test && npm run test:python && npm run ui:build && npm run test:browser && tsx src/cli/index.ts migrate && tsx src/cli/index.ts show validate"
   },
   "dependencies": {
     "playwright": "^1.49.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@eslint/js": "9.39.5",
     "@types/node": "^22.10.2",
+    "@vitest/coverage-v8": "4.1.10",
+    "eslint": "9.39.5",
+    "eslint-plugin-react-hooks": "5.1.0",
+    "globals": "15.14.0",
+    "prettier": "3.4.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "typescript-eslint": "8.18.0",
+    "vitest": "4.1.10"
   }
 }

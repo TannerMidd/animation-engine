@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { CAST_DIR, OUT_DIR } from '../core/paths.ts';
+import { resolveWithin } from '../core/project.ts';
 import { HttpError } from './http.ts';
 import { activeJob } from './jobs.ts';
 import { readShotList } from '../pipeline/scene.ts';
@@ -193,9 +194,13 @@ export function protectRunningRenderState(label: string): void {
 
 /** Resolve a path under out/ or refuse — the only way route params reach the disk. */
 export function safeOutPath(...parts: string[]): string {
-  const file = path.resolve(OUT_DIR, ...parts);
-  if (!file.startsWith(path.resolve(OUT_DIR) + path.sep)) throw new HttpError(403, 'forbidden');
-  return file;
+  try {
+    const file = resolveWithin(OUT_DIR, ...parts);
+    if (file === path.resolve(OUT_DIR)) throw new Error('out root is not a file');
+    return file;
+  } catch {
+    throw new HttpError(403, 'forbidden');
+  }
 }
 
 /** A served URL for a file under out/, matching the /api/out routes. */

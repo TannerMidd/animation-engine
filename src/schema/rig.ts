@@ -3,6 +3,8 @@ import { Look } from './look.ts';
 import { Outfit } from './outfit.ts';
 import { IdentityStamp } from './identity.ts';
 
+export const RIG_SCHEMA_VERSION = 1 as const;
+
 /**
  * Rhubarb Lip Sync's mouth shape alphabet.
  *
@@ -105,6 +107,8 @@ export type IdleConfig = z.infer<typeof IdleConfig>;
  * "crude shapes now, real art later" path costs nothing to take.
  */
 const RigShape = z.object({
+  /** Missing only on legacy files; every writer stamps the current version. */
+  schemaVersion: z.literal(RIG_SCHEMA_VERSION).optional(),
   name: z.string().min(1),
   /**
    * Stable identity, independent of the name.

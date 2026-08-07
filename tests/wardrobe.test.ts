@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { DEFAULT_IDENTITY, ShowIdentity } from '../src/schema/identity.ts';
 import { Outfit, HATS, type OutfitFamily } from '../src/schema/outfit.ts';
-import { Look, HEAD_SHAPES, HAIR_STYLES } from '../src/schema/look.ts';
+import { Look, HEAD_SHAPES } from '../src/schema/look.ts';
 import { setActiveIdentity } from '../src/show/context.ts';
 import { assignEnsemble, outfitWithin, defaultOutfit } from '../src/cast/ensemble.ts';
 import { buildPlaceholderSvg, buildPlaceholderRig, faceBox } from '../src/cast/placeholder.ts';

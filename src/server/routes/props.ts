@@ -3,6 +3,7 @@ import path from 'node:path';
 import { json, readJson, HttpError, type Router } from '../http.ts';
 import { protectRunningRenderState } from '../state.ts';
 import { PROPS_DIR, ROOT } from '../../core/paths.ts';
+import { atomicWriteFile } from '../../core/files.ts';
 import {
   PropDocument, propFromDocument, propManifest, propTags, propKeys, allProps,
   getProp, reloadProps, BAKE_BUDGET, documentBoxes,
@@ -288,7 +289,7 @@ export function registerPropRoutes(router: Router): void {
     if (problems.length) throw new HttpError(400, problems.slice(0, 6).join('; '));
 
     await fs.mkdir(path.join(PROPS_DIR, key), { recursive: true });
-    await fs.writeFile(documentPath(key), JSON.stringify(doc, null, 2) + '\n', 'utf8');
+    await atomicWriteFile(documentPath(key), JSON.stringify(doc, null, 2) + '\n');
 
     try {
       reloadProps();
@@ -425,7 +426,7 @@ export function registerPropRoutes(router: Router): void {
     const dir = path.join(PROPS_DIR, key);
     await fs.mkdir(dir, { recursive: true });
     await fs.copyFile(recipe.build, path.join(dir, 'build.py'));
-    await fs.writeFile(path.join(dir, 'bake.json'), JSON.stringify(config, null, 2) + '\n', 'utf8');
+    await atomicWriteFile(path.join(dir, 'bake.json'), JSON.stringify(config, null, 2) + '\n');
 
     const source = {
       key,

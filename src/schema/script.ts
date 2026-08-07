@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { IdentityStamp } from './identity.ts';
 import { Outfit } from './outfit.ts';
 
+export const SHOT_LIST_SCHEMA_VERSION = 1 as const;
+
 /**
  * Screenplay and shot list schemas.
  *
@@ -261,6 +263,8 @@ export type ShotBeat = z.infer<typeof ShotBeat>;
 export type ShotBeatInput = z.input<typeof ShotBeat>;
 
 const ShotListShape = z.object({
+  /** Missing only on legacy files; every writer stamps the current version. */
+  schemaVersion: z.literal(SHOT_LIST_SCHEMA_VERSION).optional(),
   scene: z.string().min(1),
   /** Which identity profile directed this scene, for drift detection. */
   identity: IdentityStamp.optional(),

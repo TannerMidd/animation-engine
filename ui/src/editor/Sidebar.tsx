@@ -1,4 +1,4 @@
-import { useMemo, useState, type MouseEvent } from 'react';
+import { useCallback, useMemo, useState, type MouseEvent } from 'react';
 import type { AnimationDocument, CastSummary, DialogueDocument, Health, PropDefInfo, SceneDetail, SceneSummary, SetSummary, ShotList } from '../types.ts';
 import { Dot, SectionRule } from './chrome.tsx';
 import type { MenuTarget, OpenMenu } from './ContextMenu.tsx';
@@ -94,7 +94,7 @@ function TreeRow({ row, onContextMenu }: { row: Row; onContextMenu: OpenMenu }) 
  */
 export function Sidebar({
   scenes, scene, detail, shots, dialogue, animation, dirty, hasStaleRender, staleBeats,
-  cast, sets, props, health, mode, onScene, onMode, onNewScene, onOpenCast, onOpenSets, onUseSet, onOpenProps,
+  cast, sets, props, health, mode: _mode, onScene, onMode, onNewScene, onOpenCast, onOpenSets, onUseSet, onOpenProps,
   onOpenSystem, onContextMenu,
 }: {
   scenes: SceneSummary[];
@@ -138,7 +138,10 @@ export function Sidebar({
     { label: 'missing', dot: '#c8595a', hint: `${missing} of ${lineCues.length} dialogue lines still undecided (no approved take or generated-voice choice)` },
   ];
 
-  const match = (name: string) => !filter || name.toLowerCase().includes(filter.toLowerCase());
+  const match = useCallback(
+    (name: string) => !filter || name.toLowerCase().includes(filter.toLowerCase()),
+    [filter],
+  );
 
   const openSceneRows: Row[] = useMemo(() => {
     if (!scene) return [];
@@ -280,7 +283,7 @@ export function Sidebar({
     }
 
     return rows;
-  }, [scenes, cast, sets, props, open, scene, shots, filter, onScene, onNewScene, onOpenCast, onOpenSets, onUseSet, onOpenProps]);
+  }, [scenes, cast, sets, props, open, scene, shots, match, onScene, onNewScene, onOpenCast, onOpenSets, onUseSet, onOpenProps]);
 
   const healthRows = health
     ? [

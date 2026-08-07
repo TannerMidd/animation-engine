@@ -5,7 +5,7 @@ import { activeStyle } from '../../style/index.ts';
 import { drawShape, drawStroke, rectPoints, ellipsePoints } from '../../style/wobble.ts';
 import { compileField, compileExpr, truthy, type CompiledExpr, type Scope } from './expr.ts';
 import {
-  r, rect, ellipse, poly, line, STROKE_W,
+  r, rect, ellipse, STROKE_W,
   type PropDef, type PropContext, type ParamSpec, type PropInteractionGeometry,
 } from './types.ts';
 

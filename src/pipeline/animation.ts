@@ -1,8 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { sceneDir } from '../core/paths.ts';
+import { atomicWriteFile } from '../core/files.ts';
 import {
   ANIMATION_SCHEMA_VERSION,
   AnimationDocument,
@@ -328,15 +328,5 @@ export async function writeAnimation(scene: string, input: AnimationDocumentType
   const file = animationPath(scene);
   const existing = await readAnimation(scene);
   if (existing) assertAnimationLocks(existing, document);
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
-  try {
-    await fs.writeFile(temporary, JSON.stringify(document, null, 2) + '\n', {
-      encoding: 'utf8',
-      flag: 'wx',
-    });
-    await fs.rename(temporary, file);
-  } finally {
-    await fs.rm(temporary, { force: true }).catch(() => {});
-  }
+  await atomicWriteFile(file, JSON.stringify(document, null, 2) + '\n');
 }

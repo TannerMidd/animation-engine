@@ -1,7 +1,8 @@
-import crypto, { randomUUID } from 'node:crypto';
+import crypto from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { atomicWriteFile } from '../core/files.ts';
 import type { SceneIR } from '../schema/ir.ts';
 import type { CompiledCaptionCue, CompiledScene } from '../compile/scene.ts';
 import {
@@ -10,7 +11,8 @@ import {
   CAPTION_MAX_LINES,
   wrapCaptionLines,
 } from '../compile/captions.ts';
-import { stampOf, type ShowIdentity } from '../schema/identity.ts';
+import type { ShowIdentity } from '../schema/identity.ts';
+import { stampOf } from '../show/identity.ts';
 import type { DialogueDocument } from '../schema/dialogue.ts';
 import type { AnimationDocument } from '../schema/animation.ts';
 import { activeIdentity } from '../show/context.ts';
@@ -525,17 +527,6 @@ async function audioAsset(
   };
 }
 
-async function atomicText(file: string, body: string): Promise<void> {
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
-  try {
-    await fs.writeFile(temporary, body, { encoding: 'utf8', flag: 'wx' });
-    await fs.rename(temporary, file);
-  } finally {
-    await fs.rm(temporary, { force: true }).catch(() => {});
-  }
-}
-
 function safeStem(scene: string): string {
   if (!scene || /[/\\]/.test(scene)) throw new Error('scene may not contain path separators');
   return scene;
@@ -555,8 +546,8 @@ export async function writePublishingBundle(opts: PublishingOptions): Promise<Pu
   const vtt = path.join(opts.dir, `${stem}.captions.vtt`);
   const srt = path.join(opts.dir, `${stem}.captions.srt`);
   await Promise.all([
-    atomicText(vtt, webVtt(opts.compiled.captions)),
-    atomicText(srt, subRip(opts.compiled.captions)),
+    atomicWriteFile(vtt, webVtt(opts.compiled.captions)),
+    atomicWriteFile(srt, subRip(opts.compiled.captions)),
   ]);
 
   const selected = selectThumbnailCandidates(opts.compiled.ir, opts.thumbnailCount ?? 3);
@@ -664,7 +655,7 @@ export async function writePublishingBundle(opts: PublishingOptions): Promise<Pu
   };
 
   const manifestFile = path.join(opts.dir, `${stem}.export.json`);
-  await atomicText(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+  await atomicWriteFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
 
   // Only after the new manifest is durable may old generated candidates go.
   // A failed publish therefore never leaves the previous manifest dangling.

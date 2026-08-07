@@ -6,7 +6,8 @@ import {
   listProfiles, loadProfile, activeProfileId, setActiveProfileId, compareProfiles,
 } from '../../show/store.ts';
 import { setActiveIdentity, activeIdentity } from '../../show/context.ts';
-import { ShowIdentity, identityHash, stampOf } from '../../schema/identity.ts';
+import { ShowIdentity } from '../../schema/identity.ts';
+import { identityHash, stampOf } from '../../show/identity.ts';
 import { validateProfiles, renderIdentityReel } from '../../pipeline/identity-tools.ts';
 import { ROOT } from '../../core/paths.ts';
 

@@ -2,6 +2,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { atomicWriteFile } from '../core/files.ts';
 import { ROOT, OUT_DIR, CAST_DIR, SCRIPTS_DIR, sceneDir } from '../core/paths.ts';
 import { loadSet, saveSet, listSets, validateSet, setPath } from '../sets/index.ts';
 import { SetDescriptor } from '../sets/schema.ts';
@@ -19,7 +20,6 @@ import { checkScript, loadRigsForShotList, validateCompiledStaging } from '../pi
 import {
   runProductionPreflight,
   type ProductionPreflightNote,
-  type ProductionPreflightReport,
 } from '../pipeline/preflight.ts';
 import { renderScene } from '../pipeline/render.ts';
 import { readDialogueDocument } from '../pipeline/dialogue.ts';
@@ -45,7 +45,8 @@ import { renderIdentityReel, validateProfiles } from '../pipeline/identity-tools
 import { Ollama, pickModel } from '../llm/ollama.ts';
 import { initShow, loadProfile, listProfiles, activeProfileId, setActiveProfileId, compareProfiles } from '../show/store.ts';
 import { setActiveIdentity } from '../show/context.ts';
-import { identityHash, ShowIdentity } from '../schema/identity.ts';
+import { ShowIdentity } from '../schema/identity.ts';
+import { identityHash } from '../show/identity.ts';
 import { planMigration, applyMigration } from '../show/migrate.ts';
 import { generateScript } from '../llm/script.ts';
 import { generateSet } from '../llm/set.ts';
@@ -53,16 +54,11 @@ import { renderFrames } from '../render/capture.ts';
 import { parseScript } from '../parse/index.ts';
 import { autoDirect, buildCapabilityManifest, validateShotList } from '../direct/index.ts';
 import { listVoices } from '../voice/index.ts';
-import { ShotList } from '../schema/script.ts';
+import { parseArgs, numberFlag as num, optionalNumberFlag as optNum, type Args } from './args.ts';
 
 // The draft policy moved into the pipeline so the server can share it; the CLI
 // remains the historical import path for tests and tooling.
 export { markExportManifestDraft, productionRenderBlocked };
-
-interface Args {
-  _: string[];
-  flags: Record<string, string | boolean>;
-}
 
 async function optionalText(file: string): Promise<string | null> {
   try {
@@ -71,40 +67,6 @@ async function optionalText(file: string): Promise<string | null> {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw error;
   }
-}
-
-function parseArgs(argv: string[]): Args {
-  const _: string[] = [];
-  const flags: Record<string, string | boolean> = {};
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i]!;
-    if (a.startsWith('--')) {
-      const key = a.slice(2);
-      const next = argv[i + 1];
-      if (next !== undefined && !next.startsWith('--')) {
-        flags[key] = next;
-        i++;
-      } else {
-        flags[key] = true;
-      }
-    } else {
-      _.push(a);
-    }
-  }
-  return { _, flags };
-}
-
-function num(flags: Args['flags'], key: string, fallback: number): number {
-  const v = flags[key];
-  if (v === undefined || typeof v === 'boolean') return fallback;
-  const n = Number(v);
-  if (!Number.isFinite(n)) throw new Error(`--${key} must be a number, got "${v}"`);
-  return n;
-}
-
-/** A flag as a number, or undefined so the pipeline default applies. */
-function optNum(flags: Args['flags'], key: string): number | undefined {
-  return flags[key] === undefined ? undefined : num(flags, key, 0);
 }
 
 // --- commands -------------------------------------------------------------
@@ -300,7 +262,7 @@ async function cmdNew(args: Args) {
   if (await fileExists(file)) throw new Error(`${path.relative(process.cwd(), file)} already exists`);
 
   await fs.mkdir(SCRIPTS_DIR, { recursive: true });
-  await fs.writeFile(file, SCRIPT_TEMPLATE, 'utf8');
+  await atomicWriteFile(file, SCRIPT_TEMPLATE);
 
   console.log(`Created ${path.relative(process.cwd(), file)}`);
   console.log(`\nWrite it, then:`);
@@ -961,7 +923,7 @@ async function cmdVoicesBench(args: Args) {
 }
 
 async function cmdDoctor() {
-  const report = await runDoctor();
+  const report = await runDoctor({ verifyModelHashes: true });
 
   const { ffmpeg } = report;
   console.log(`ffmpeg     ${ffmpeg.version ? `${ffmpeg.version}  (${ffmpeg.path})` : 'NOT FOUND'}`);
@@ -988,6 +950,11 @@ async function cmdDoctor() {
     console.log(`         fix: ${stray.fix}`);
   }
   if (!report.models.strays.length) console.log(`  (nothing on the system drive)`);
+  console.log(`  manifest     ${report.models.manifest.ok ? 'ok' : 'FAILED'} (${report.models.manifest.path}; hashes checked)`);
+  for (const model of report.models.manifest.models.filter((item) => !item.ok)) {
+    if (model.missing.length) console.log(`    ${model.id}: missing ${model.missing.join(', ')}`);
+    if (model.mismatched.length) console.log(`    ${model.id}: checksum mismatch ${model.mismatched.join(', ')}`);
+  }
 
   console.log(`llm        ${report.llm.ok
     ? `ok (${report.llm.models.join(', ')})`

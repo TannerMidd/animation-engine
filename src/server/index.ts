@@ -1,6 +1,7 @@
 import http from 'node:http';
 import path from 'node:path';
 import { ROOT } from '../core/paths.ts';
+import { InvalidProjectIdError, resolveWithin } from '../core/project.ts';
 import { Router, json, text, sendFile, HttpError, type Ctx } from './http.ts';
 import { getPreview, probeEngines } from './state.ts';
 import { registerSystemRoutes } from './routes/system.ts';
@@ -47,8 +48,12 @@ async function serveUi(ctx: Ctx): Promise<void> {
   const pathname = new URL(ctx.req.url ?? '/', 'http://localhost').pathname;
   const rel = pathname === '/' ? 'index.html' : pathname.slice(1);
   // Contain path traversal: everything must resolve inside the build folder.
-  const file = path.resolve(UI_DIST, rel);
-  if (!file.startsWith(path.resolve(UI_DIST))) throw new HttpError(403, 'forbidden');
+  let file: string;
+  try {
+    file = resolveWithin(UI_DIST, decodeURIComponent(rel));
+  } catch {
+    throw new HttpError(403, 'forbidden');
+  }
 
   if (await exists(file)) return sendFile(ctx.res, file, ctx.req);
 
@@ -79,7 +84,11 @@ export function createServer(): http.Server {
       }
       await serveUi(ctx);
     } catch (err) {
-      const status = err instanceof HttpError ? err.status : 500;
+      const status = err instanceof HttpError
+        ? err.status
+        : err instanceof InvalidProjectIdError || err instanceof URIError
+          ? 400
+          : 500;
       const message = err instanceof Error ? err.message : String(err);
       if (status >= 500) console.error(`[server] ${req.method} ${url.pathname}:`, err);
       if (!res.headersSent) json(res, { error: message }, status);

@@ -37,7 +37,7 @@ export function ScaledFrame({
 
   // The iframe is owned here (so we can seek it), but callers that drive
   // playback need a handle to it too.
-  useImperativeHandle(iframeRef, () => own.current as HTMLIFrameElement, [src]);
+  useImperativeHandle(iframeRef, () => own.current as HTMLIFrameElement, []);
 
   useEffect(() => {
     if (!src || !seekOnReady) return;

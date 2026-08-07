@@ -1,0 +1,10 @@
+.cache/
+coverage/
+node_modules/
+out/
+tools/
+ui/dist/
+ui/node_modules/
+cast/*.rig.json
+sets/*.set.json
+shows/

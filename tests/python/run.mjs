@@ -10,15 +10,19 @@ import { fileURLToPath } from 'node:url';
  */
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..', '..');
-const python = process.env.ANIM_PYTHON ?? path.join(root, '.venv', 'Scripts', 'python.exe');
+const python =
+  process.env.ANIM_PYTHON ??
+  (process.platform === 'win32' ? path.join(root, '.venv', 'Scripts', 'python.exe') : 'python3');
 
-for (const test of [
+const hermetic = [
   'worker_conditioning_test.py',
-  'vc_register_test.py',
   'kokoro_mint_test.py',
   'whisper_worker_test.py',
   'prop_bake_test.py',
-]) {
+];
+const tests = process.argv.includes('--hermetic') ? hermetic : [...hermetic, 'vc_register_test.py'];
+
+for (const test of tests) {
   const result = spawnSync(python, [path.join(here, test)], { stdio: 'inherit' });
   if (result.status !== 0) process.exit(result.status ?? 1);
 }

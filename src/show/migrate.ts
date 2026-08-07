@@ -1,10 +1,14 @@
 import fs from 'node:fs/promises';
 import { SHOW_DIR } from '../core/paths.ts';
-import { DEFAULT_IDENTITY, stampOf, type ShowIdentity } from '../schema/identity.ts';
+import { DEFAULT_IDENTITY, type ShowIdentity } from '../schema/identity.ts';
+import { stampOf } from './identity.ts';
 import { listRigs, loadRig, saveRig } from '../cast/store.ts';
+import { RIG_SCHEMA_VERSION } from '../schema/rig.ts';
 import { rollLook } from '../cast/look.ts';
 import { listSets, loadSet, saveSet } from '../sets/index.ts';
+import { SET_SCHEMA_VERSION } from '../sets/schema.ts';
 import { listScenes, readShotList, writeShotList } from '../pipeline/scene.ts';
+import { SHOT_LIST_SCHEMA_VERSION } from '../schema/script.ts';
 import { activeProfileId, saveProfile, setActiveProfileId, loadProfile } from './store.ts';
 
 /**
@@ -53,6 +57,7 @@ export async function planMigration(): Promise<MigrationPlan> {
   for (const name of await listRigs()) {
     const { rig } = await loadRig(name);
     const actions: string[] = [];
+    if (rig.schemaVersion !== RIG_SCHEMA_VERSION) actions.push(`stamp rig schema v${RIG_SCHEMA_VERSION}`);
     if (!rig.charId) actions.push(`assign charId "${name}" (current name, so every existing seed stays put)`);
     if (!rig.look) actions.push('materialise the name-rolled look into the file');
     if (!rig.identity || rig.identity.hash !== stamp.hash) actions.push(`stamp identity ${stamp.id}@${stamp.hash}`);
@@ -62,6 +67,7 @@ export async function planMigration(): Promise<MigrationPlan> {
   for (const name of await listSets()) {
     const desc = await loadSet(name);
     const actions: string[] = [];
+    if (desc.schemaVersion !== SET_SCHEMA_VERSION) actions.push(`stamp set schema v${SET_SCHEMA_VERSION}`);
     if (!desc.setId) actions.push(`assign setId "${name}"`);
     if (!desc.identity || desc.identity.hash !== stamp.hash) actions.push(`stamp identity ${stamp.id}@${stamp.hash}`);
     if (actions.length) changes.push({ kind: 'set', target: name, actions });
@@ -70,9 +76,10 @@ export async function planMigration(): Promise<MigrationPlan> {
   for (const scene of await listScenes()) {
     const shots = await readShotList(scene).catch(() => null);
     if (!shots) continue;
-    if (!shots.identity || shots.identity.hash !== stamp.hash) {
-      changes.push({ kind: 'shotlist', target: scene, actions: [`stamp identity ${stamp.id}@${stamp.hash}`] });
-    }
+    const actions: string[] = [];
+    if (shots.schemaVersion !== SHOT_LIST_SCHEMA_VERSION) actions.push(`stamp shot-list schema v${SHOT_LIST_SCHEMA_VERSION}`);
+    if (!shots.identity || shots.identity.hash !== stamp.hash) actions.push(`stamp identity ${stamp.id}@${stamp.hash}`);
+    if (actions.length) changes.push({ kind: 'shotlist', target: scene, actions });
   }
 
   return { identity, createProfile, changes };
@@ -90,18 +97,21 @@ export async function applyMigration(plan: MigrationPlan): Promise<void> {
   for (const change of plan.changes) {
     if (change.kind === 'rig') {
       const { rig, svg } = await loadRig(change.target);
+      rig.schemaVersion = RIG_SCHEMA_VERSION;
       rig.charId ??= change.target;
       rig.look ??= rollLook(change.target);
       rig.identity = stamp;
       await saveRig(rig, svg);
     } else if (change.kind === 'set') {
       const desc = await loadSet(change.target);
+      desc.schemaVersion = SET_SCHEMA_VERSION;
       desc.setId ??= change.target;
       desc.identity = stamp;
       await saveSet(desc);
     } else if (change.kind === 'shotlist') {
       const shots = await readShotList(change.target).catch(() => null);
       if (!shots) continue;
+      shots.schemaVersion = SHOT_LIST_SCHEMA_VERSION;
       shots.identity = stamp;
       await writeShotList(change.target, shots);
     }

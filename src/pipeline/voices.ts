@@ -4,7 +4,7 @@ import path from 'node:path';
 import { CAST_DIR, OUT_DIR, sceneDir } from '../core/paths.ts';
 import { deriveSeed } from '../core/rng.ts';
 import { activeIdentity } from '../show/context.ts';
-import { stampOf } from '../schema/identity.ts';
+import { stampOf } from '../show/identity.ts';
 import {
   synthesizeLines, loadRecordedVo, estimateMouthCues, lineCacheKey, readCachedLineMeta,
   type LineTiming, type VoiceLine,

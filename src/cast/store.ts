@@ -1,7 +1,8 @@
 import fs from 'node:fs/promises';
-import path from 'node:path';
 import { CAST_DIR } from '../core/paths.ts';
-import { Rig } from '../schema/index.ts';
+import { atomicWriteFile } from '../core/files.ts';
+import { projectId, resolveWithin } from '../core/project.ts';
+import { RIG_SCHEMA_VERSION, Rig } from '../schema/rig.ts';
 
 export interface LoadedRig {
   rig: Rig;
@@ -9,13 +10,14 @@ export interface LoadedRig {
 }
 
 export function rigPath(name: string): string {
-  return path.join(CAST_DIR, `${name}.rig.json`);
+  return resolveWithin(CAST_DIR, `${projectId(name, 'character name')}.rig.json`);
 }
 
 export async function saveRig(rig: Rig, svg: string): Promise<void> {
-  await fs.mkdir(CAST_DIR, { recursive: true });
-  await fs.writeFile(rigPath(rig.name), JSON.stringify(rig, null, 2) + '\n', 'utf8');
-  await fs.writeFile(path.join(CAST_DIR, rig.svg), svg, 'utf8');
+  const document = Rig.parse({ ...rig, schemaVersion: RIG_SCHEMA_VERSION });
+  const svgFile = resolveWithin(CAST_DIR, projectId(document.svg, 'rig SVG filename'));
+  await atomicWriteFile(svgFile, svg);
+  await atomicWriteFile(rigPath(document.name), JSON.stringify(document, null, 2) + '\n');
 }
 
 export async function loadRig(name: string): Promise<LoadedRig> {
@@ -27,7 +29,7 @@ export async function loadRig(name: string): Promise<LoadedRig> {
     throw new Error(`No rig named "${name}". Expected ${file}. Create one with: anim cast new ${name}`);
   }
   const rig = Rig.parse(JSON.parse(raw));
-  const svg = await fs.readFile(path.join(CAST_DIR, rig.svg), 'utf8');
+  const svg = await fs.readFile(resolveWithin(CAST_DIR, projectId(rig.svg, 'rig SVG filename')), 'utf8');
   return { rig, svg };
 }
 

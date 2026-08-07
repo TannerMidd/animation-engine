@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import type { AnimationDocument, Beat, DialogueDocument, ShotList } from '../types.ts';
 import { Mono } from './chrome.tsx';
 import type { MenuTarget, OpenMenu } from './ContextMenu.tsx';
@@ -92,21 +92,21 @@ export function Timeline({
 }) {
   const scroller = useRef<HTMLDivElement>(null);
 
-  const beats = shots?.beats ?? [];
-  const castIds = shots?.cast.map((c) => c.id) ?? [];
+  const beats = useMemo(() => shots?.beats ?? [], [shots?.beats]);
+  const castIds = useMemo(() => shots?.cast.map((c) => c.id) ?? [], [shots?.cast]);
   const total = Math.max(1, totalMs);
 
-  const pos = (i: number) => {
+  const pos = useCallback((i: number) => {
     const start = beatStarts[i] ?? 0;
     const end = i + 1 < beatStarts.length ? beatStarts[i + 1]! : total;
     return { leftPct: (start / total) * 100, widthPct: Math.max(0.4, ((end - start) / total) * 100) };
-  };
+  }, [beatStarts, total]);
 
-  const durationOf = (i: number) => {
+  const durationOf = useCallback((i: number) => {
     const start = beatStarts[i] ?? 0;
     const end = i + 1 < beatStarts.length ? beatStarts[i + 1]! : total;
     return Math.max(0, end - start) || estimateBeatMs(beats[i]!);
-  };
+  }, [beatStarts, beats, total]);
 
   const lanes: Lane[] = useMemo(() => {
     if (!beats.length) return [];
@@ -241,7 +241,7 @@ export function Timeline({
       if (beat.kind !== 'action' || !beat.stage) return;
       for (const action of beat.stage) {
         if (action.type === 'tap') {
-          propEntries.push({ i, label: `${action.prop ?? action.target ?? 'surface'} · tap${action.count ? ` ×${action.count}` : ''}` });
+          propEntries.push({ i, label: `${action.target || 'surface'} · tap${action.count ? ` ×${action.count}` : ''}` });
           sfxEntries.push({ i, label: `taps`, hint: 'Deterministic Foley — regenerates identically from the same seed' });
         }
         if (action.type === 'pick_up' || action.type === 'put_down') {
@@ -283,8 +283,7 @@ export function Timeline({
       { id: 'sfx', h: 20, clips: simple(sfxEntries, '#5e8f8a', '#8fc0ba'), keys: [] },
       { id: 'caption', h: 18, clips: captionClips, keys: [] },
     ];
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [beats, castIds.join('|'), dialogue, animation, beatStarts, total, selected, selectedMotionId]);
+  }, [beats, castIds, dialogue, animation, beatStarts, total, selected, selectedMotionId, durationOf, onSelect, onSelectMotion, onSelectVoice, pos, shots?.cast]);
 
   /** Entrances and the button beat, derived straight from the shot list. */
   const markers = useMemo(() => {
@@ -306,7 +305,6 @@ export function Timeline({
       }
     });
     return out;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [beats, beatStarts, total]);
 
   const ticks = useMemo(() => {

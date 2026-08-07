@@ -16,7 +16,7 @@ import { generateProp } from '../../llm/prop.ts';
 import { daemonStatus, startOllama } from '../../llm/daemon.ts';
 import { activeIdentity } from '../../show/context.ts';
 import { planMigration, applyMigration } from '../../show/migrate.ts';
-import { stampOf } from '../../schema/identity.ts';
+import { stampOf } from '../../show/identity.ts';
 import { SHOTS, SHOT_PURPOSES, CAMERA_MOVES, MARKS } from '../../schema/script.ts';
 import { EMOTION_WORDS, CANONICAL_EMOTION_KEYWORDS, EXPRESSION_FALLBACKS } from '../../direct/emotions.ts';
 import {

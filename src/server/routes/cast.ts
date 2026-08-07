@@ -131,6 +131,7 @@ export function registerCastRoutes(router: Router): void {
   router.put('/api/cast/:name', async ({ req, res, params }) => {
     const body = await readJson<{ rig: unknown; svg?: string }>(req);
     const rig = Rig.parse(body.rig);
+    if (rig.name !== params['name']) throw new HttpError(400, 'rig name must match the URL');
     const svg = body.svg ?? (await loadRig(params['name']!)).svg;
 
     const errors = validateRig({ rig, svg });

@@ -97,7 +97,8 @@ describe('applySetRepairs', () => {
       { type: 'look', actor: 'paul', direction: 'left' },
     ]);
     // The original is untouched — this is an ordinary shot-list edit.
-    expect(shots.beats[0]!.kind === 'action' && shots.beats[0]!.stage![0]!.target).toBe('desk');
+    const originalAction = shots.beats[0]!.kind === 'action' ? shots.beats[0]!.stage![0] : null;
+    expect(originalAction?.type === 'tap' ? originalAction.target : null).toBe('desk');
   });
 
   it('repoints a cast member\'s initial seat without touching anyone else', () => {
@@ -115,7 +116,8 @@ describe('applySetRepairs', () => {
 
   it('retargets one reference at a time for the per-issue buttons', () => {
     const next = retargetOne(shots, issue(), 'monitor');
-    expect(next.beats[0]!.kind === 'action' && next.beats[0]!.stage![0]!.target).toBe('monitor');
+    const repairedAction = next.beats[0]!.kind === 'action' ? next.beats[0]!.stage![0] : null;
+    expect(repairedAction?.type === 'tap' ? repairedAction.target : null).toBe('monitor');
   });
 
   it('is a no-op with nothing to repair', () => {

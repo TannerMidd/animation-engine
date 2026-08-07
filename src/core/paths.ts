@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { projectId, resolveWithin } from './project.ts';
 
 /** Project root, resolved from this module's location rather than cwd. */
 export const ROOT = path.resolve(fileURLToPath(new URL('../../', import.meta.url)));
@@ -14,5 +15,5 @@ export const PROPS_DIR = path.join(ROOT, 'props');
 
 /** Per-scene working directory. Holds audio, timing, IR, frames and the final MP4. */
 export function sceneDir(scene: string): string {
-  return path.join(OUT_DIR, scene);
+  return resolveWithin(OUT_DIR, projectId(scene, 'scene name'));
 }

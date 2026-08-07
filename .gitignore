@@ -5,6 +5,7 @@ out/
 tools/
 ui/dist/
 ui/node_modules/
+coverage/
 *.log
 scratch-*.ts
 __pycache__/

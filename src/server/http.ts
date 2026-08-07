@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -32,10 +33,18 @@ export class Router {
     return this;
   }
 
-  get(p: string, h: Handler) { return this.add('GET', p, h); }
-  post(p: string, h: Handler) { return this.add('POST', p, h); }
-  put(p: string, h: Handler) { return this.add('PUT', p, h); }
-  del(p: string, h: Handler) { return this.add('DELETE', p, h); }
+  get(p: string, h: Handler) {
+    return this.add('GET', p, h);
+  }
+  post(p: string, h: Handler) {
+    return this.add('POST', p, h);
+  }
+  put(p: string, h: Handler) {
+    return this.add('PUT', p, h);
+  }
+  del(p: string, h: Handler) {
+    return this.add('DELETE', p, h);
+  }
 
   match(method: string, pathname: string): { handler: Handler; params: Record<string, string> } | null {
     const parts = pathname.split('/').filter(Boolean);
@@ -74,9 +83,17 @@ export function text(res: ServerResponse, body: string, status = 200, type = 'te
   res.end(body);
 }
 
-export async function readBody(req: IncomingMessage): Promise<string> {
+export const MAX_REQUEST_BODY_BYTES = 64 * 1024 * 1024;
+
+export async function readBody(req: IncomingMessage, limit = MAX_REQUEST_BODY_BYTES): Promise<string> {
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
+  let size = 0;
+  for await (const value of req) {
+    const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
+    size += chunk.length;
+    if (size > limit) throw new HttpError(413, `request body exceeds ${limit} bytes`);
+    chunks.push(chunk);
+  }
   return Buffer.concat(chunks).toString('utf8');
 }
 
@@ -91,7 +108,10 @@ export async function readJson<T>(req: IncomingMessage): Promise<T> {
 }
 
 export class HttpError extends Error {
-  constructor(readonly status: number, message: string) {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
     super(message);
   }
 }
@@ -128,36 +148,58 @@ export async function sendFile(res: ServerResponse, file: string, req?: Incoming
   const type = mimeFor(file);
   const range = req?.headers.range;
 
+  const stream = async (start: number, end: number, status: 200 | 206): Promise<void> => {
+    const length = end - start + 1;
+    res.writeHead(status, {
+      'content-type': type,
+      'content-length': length,
+      'accept-ranges': 'bytes',
+      'cache-control': 'no-store',
+      ...(status === 206 ? { 'content-range': `bytes ${start}-${end}/${stat.size}` } : {}),
+    });
+    await new Promise<void>((resolve, reject) => {
+      const input = createReadStream(file, { start, end });
+      input.on('error', reject);
+      res.on('finish', resolve);
+      res.on('close', resolve);
+      input.pipe(res);
+    });
+  };
+
   if (range) {
-    const m = /bytes=(\d*)-(\d*)/.exec(range);
+    const m = /^bytes=(\d*)-(\d*)$/.exec(range.trim());
     if (m) {
-      const start = m[1] ? Number(m[1]) : 0;
-      const end = m[2] ? Number(m[2]) : stat.size - 1;
-      const handle = await fs.open(file, 'r');
-      try {
-        const length = end - start + 1;
-        const buf = Buffer.alloc(length);
-        await handle.read(buf, 0, length, start);
-        res.writeHead(206, {
-          'content-type': type,
-          'content-range': `bytes ${start}-${end}/${stat.size}`,
-          'accept-ranges': 'bytes',
-          'content-length': length,
-        });
-        res.end(buf);
-        return;
-      } finally {
-        await handle.close();
+      let start: number;
+      let end: number;
+      if (!m[1] && m[2]) {
+        const suffix = Number(m[2]);
+        start = Math.max(0, stat.size - suffix);
+        end = stat.size - 1;
+      } else {
+        start = Number(m[1]);
+        end = m[2] ? Math.min(Number(m[2]), stat.size - 1) : stat.size - 1;
       }
+      if (
+        stat.size === 0 ||
+        !Number.isSafeInteger(start) ||
+        !Number.isSafeInteger(end) ||
+        start < 0 ||
+        end < start ||
+        start >= stat.size
+      ) {
+        res.writeHead(416, { 'content-range': `bytes */${stat.size}`, 'accept-ranges': 'bytes' });
+        res.end();
+        return;
+      }
+      await stream(start, end, 206);
+      return;
     }
   }
 
-  const data = await fs.readFile(file);
-  res.writeHead(200, {
-    'content-type': type,
-    'content-length': data.length,
-    'accept-ranges': 'bytes',
-    'cache-control': 'no-store',
-  });
-  res.end(data);
+  if (stat.size === 0) {
+    res.writeHead(200, { 'content-type': type, 'content-length': 0, 'accept-ranges': 'bytes' });
+    res.end();
+    return;
+  }
+  await stream(0, stat.size - 1, 200);
 }

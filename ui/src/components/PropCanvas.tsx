@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Primitive, PrimitiveBox, PrimitiveKind, PropRender } from '../types.ts';
+import type { Primitive, PrimitiveBox, PropRender } from '../types.ts';
 
 /**
  * The drawing surface.

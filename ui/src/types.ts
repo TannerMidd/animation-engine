@@ -1,73 +1,53 @@
-/** Types mirroring the engine's schemas, narrowed to what the UI touches. */
+/** UI view models plus exact authored-domain contracts from the engine. */
+import type {
+  AnimationDocument,
+  AnimationKey,
+  AnimationTrack,
+  Beat,
+  CameraMove,
+  CastMember,
+  DialogueCue,
+  DialogueDocument,
+  Mark,
+  MotionSegment,
+  MotionValue,
+  PropReferenceIssue,
+  PropSubstitute,
+  RecordedTake,
+  SetDescriptor,
+  SetFit,
+  Shot,
+  ShotList,
+  ShotPurpose,
+  StageAction,
+  TimeAnchor,
+  VoiceRender,
+} from '../../src/contracts/domain.ts';
 
-export type Shot = 'WIDE' | 'MID' | 'CU' | 'ECU' | 'OTS' | 'TWO_SHOT';
-export type CameraMove = 'HOLD' | 'PUSH_IN' | 'PULL_OUT' | 'PAN_L' | 'PAN_R' | 'SHAKE' | 'SNAP_IN';
-export type ShotPurpose = 'coverage' | 'establishing' | 'reaction' | 'action' | 'emphasis' | 'button';
-export type Mark = 'FAR_L' | 'SL' | 'CENTER' | 'SR' | 'FAR_R';
-
-export interface CastMember {
-  id: string;
-  rig: string;
-  mark: Mark;
-  flip: boolean;
-  scale: number;
-  visible?: boolean;
-  position?: { x: number; y: number } | null;
-  depth?: number;
-  pose?: string;
-  seat?: string | null;
-  heldProp?: string | null;
-  heldHand?: 'left' | 'right' | null;
-  resting: string;
-}
-
-interface BeatCommon {
-  id: string;
-  purpose: ShotPurpose;
-  shot: Shot;
-  focus: string[];
-  camera: CameraMove;
-  reactions: Record<string, string>;
-  locked?: boolean;
-}
-
-export type Beat =
-  | (BeatCommon & { kind: 'line'; speaker: string; text: string; expression: string; gesture: string })
-  | (BeatCommon & { kind: 'pause'; ms: number })
-  | (BeatCommon & { kind: 'action'; text: string; ms: number; stage?: StageAction[]; unsupported?: string[] });
-
-export interface StageAction {
-  type: 'enter' | 'exit' | 'move' | 'sit' | 'stand' | 'look' | 'turn' | 'reach' | 'pick_up' | 'put_down' | 'tap';
-  actor: string;
-  durationFrames?: number;
-  from?: { mark?: Mark; x?: number; y?: number; depth?: number };
-  to?: { mark?: Mark; x?: number; y?: number; depth?: number };
-  target?: string;
-  /** Addressable set prop with a semantic seat handle. */
-  seat?: string;
-  /** Explicit intentional floor-seating. */
-  floor?: boolean;
-  direction?: 'left' | 'right' | 'front';
-  prop?: string;
-  count?: number;
-  [key: string]: unknown;
-}
-
-export interface ShotList {
-  scene: string;
-  set: string | null;
-  /** Title and end cards around the scene; wording below, treatment from the identity. */
-  cards: boolean;
-  title: string | null;
-  subtitle: string | null;
-  fps: number;
-  characterFps: number;
-  seed: number;
-  width: number;
-  height: number;
-  cast: CastMember[];
-  beats: Beat[];
-}
+export type {
+  AnimationDocument,
+  AnimationKey,
+  AnimationTrack,
+  Beat,
+  CameraMove,
+  CastMember,
+  DialogueCue,
+  DialogueDocument,
+  Mark,
+  MotionSegment,
+  MotionValue,
+  PropReferenceIssue,
+  PropSubstitute,
+  RecordedTake,
+  SetDescriptor,
+  SetFit,
+  Shot,
+  ShotList,
+  ShotPurpose,
+  StageAction,
+  TimeAnchor,
+  VoiceRender,
+};
 
 export interface SceneSummary {
   name: string;
@@ -443,55 +423,6 @@ export interface PropInstance {
 
 export type LayerName = 'back' | 'mid' | 'fore';
 
-export interface SetDescriptor {
-  name: string;
-  palette: string;
-  layout: {
-    horizonY: number;
-    ceilingY: number;
-    marginX: number;
-    marginY: number;
-    /** Set-authored valid area for visible actor root motion. */
-    walkable: { x: number; y: number; width: number; height: number };
-    parallax: Record<LayerName, ParallaxFactor>;
-  };
-  layers: Record<LayerName, PropInstance[]>;
-}
-
-/** A prop in a candidate set that could take a reference that set cannot host. */
-export interface PropSubstitute {
-  /** What to write into the shot list, or null when it would need a stable id first. */
-  reference: string | null;
-  label: string;
-  prop: string;
-}
-
-/** One thing the scene asks of a set that the set cannot give it. */
-export interface PropReferenceIssue {
-  reference: string;
-  /** What the scene does with it — "tap", "sit on", "pick up". */
-  verb: string;
-  beatIndex: number | null;
-  /** Position in that beat's `stage` array, so a repair edits the right action. */
-  actionIndex: number | null;
-  actionType: string | null;
-  /** The field carrying the reference, on the action or on the cast member. */
-  field: 'target' | 'seat' | 'prop' | 'heldProp';
-  actorId: string | null;
-  /** Beat text, or the actor id — whatever names the problem on screen. */
-  label: string;
-  status: 'missing' | 'ambiguous' | 'unusable';
-  detail: string;
-  substitutes: PropSubstitute[];
-}
-
-/** How well a set can host what the open scene asks of it. Server-computed. */
-export interface SetFit {
-  /** Every prop reference the scene makes, so a bare stage costs exactly this many. */
-  references: number;
-  issues: PropReferenceIssue[];
-}
-
 export interface SetSummary {
   name: string;
   palette: string;
@@ -514,6 +445,7 @@ export interface CastSummary {
 }
 
 export interface RigDoc {
+  schemaVersion?: 1;
   name: string;
   voice: string;
   voiceRate: number;
@@ -526,163 +458,6 @@ export interface RigDoc {
   anchor?: [number, number];
   parts?: Array<{ id: string; parent: string | null; pivot: [number, number]; z: number }>;
   [key: string]: unknown;
-}
-
-// --- dialogue performance -------------------------------------------------
-
-export interface AudioAsset {
-  file: string;
-  checksum: string;
-  byteLength: number;
-  mediaType: string;
-  sampleRate: number;
-  channels: number;
-  sampleCount: number;
-  durationMs: number;
-}
-
-export interface RecordedTake {
-  id: string;
-  cueId: string | null;
-  speaker: string;
-  displayText: string;
-  spokenText: string;
-  audio: AudioAsset;
-  quality?: {
-    verdict: 'pass' | 'warn' | 'reject';
-    peakDb: number | null;
-    rmsDb: number | null;
-    speechRatio: number;
-    flags: string[];
-  } | null;
-  capture: {
-    mode: 'line-booth' | 'scene-run' | 'imported';
-    recordedAt: string;
-    performerId: string | null;
-    latencyCompensationMs: number;
-    consentId: string | null;
-  };
-  provenance: {
-    notes: string[];
-    sceneRunSegments?: Array<{
-      cueId: string;
-      scriptTextHash: string;
-      inMs: number;
-      outMs: number;
-      speechOnsetMs: number;
-      speechEndMs: number;
-      quality: {
-        verdict: 'pass' | 'warn' | 'reject';
-        peakDb: number | null;
-        rmsDb: number | null;
-        speechRatio: number;
-        flags: string[];
-      } | null;
-    }>;
-  };
-  /** Set once by revocation; a revoked take is audit evidence, not a choice. */
-  revokedAt: string | null;
-}
-
-export interface VoiceRender {
-  id: string;
-  /** Conversion sources additionally name the cue the performance was recorded for. */
-  source: { kind: string; takeId?: string; targetVoiceId?: string; sourceCueId?: string };
-  state: 'ready' | 'failed' | 'stale' | 'rejected';
-  audio: AudioAsset | null;
-  model: {
-    engine: string;
-    model: string;
-    revision: string;
-    settings: Record<string, unknown>;
-    generatedAt: string;
-  };
-  alignment: {
-    sourceToOutput: Array<{ sourceMs: number; outputMs: number }>;
-    words: Array<{ text: string; startMs: number; endMs: number; confidence: number | null }>;
-    phonemes: Array<{ text: string; startMs: number; endMs: number; confidence: number | null }>;
-  };
-  quality: {
-    verdict: 'pass' | 'warn' | 'reject';
-    transcriptMatch: number | null;
-    speechRatio: number | null;
-    clippedSampleRatio: number | null;
-    stretchRatio: number | null;
-    speakerSimilarity: number | null;
-    cadenceSimilarity: number | null;
-    flags: string[];
-  };
-}
-
-export interface CueOverlap {
-  withCueId: string;
-  mode: 'pickup' | 'overlap' | 'interruption';
-  ms: number;
-  interruptAtMs: number | null;
-}
-
-export interface CueDelivery {
-  expression: string;
-  intent: string;
-  energy: number;
-  pace: number;
-  notes: string[];
-  emphasis: Array<{ startChar: number; endChar: number; level: 'light' | 'strong' }>;
-  pronunciations: Array<{ written: string; spoken: string }>;
-}
-
-export interface DialogueCue {
-  id: string;
-  beatIndex: number;
-  speaker: string;
-  displayText: string;
-  spokenText: string;
-  selectedTakeId: string | null;
-  selectedRenderId: string | null;
-  /** 'generated' is the explicit decision that the character's seeded synthesis carries this line. */
-  voiceSource: 'performance' | 'generated';
-  trim: { inMs: number; outMs: number; speechOnsetMs: number; speechEndMs: number } | null;
-  startFrame: number;
-  durationFrames: number | null;
-  pickupMs: number;
-  turnGapMs: number;
-  pauseAfterMs: number;
-  overlap: CueOverlap | null;
-  durationPolicy: {
-    mode: 'follow-performance' | 'fit-locked-window' | 'rerecord-to-picture';
-    targetFrames: number | null;
-    warnVoicedStretchRatio: number;
-    maxVoicedStretchRatio: number;
-    downstream: 'ripple' | 'retime-attached-motion' | 'preserve-absolute';
-  };
-  delivery: CueDelivery;
-  approval: { state: 'draft' | 'candidate' | 'approved' | 'rejected' | 'stale' | 'unresolved'; notes: string[]; by: string | null; at: string | null };
-  locked: boolean;
-  lockedFields: string[];
-  provenance: Record<string, unknown>;
-}
-
-export interface DialogueDocument {
-  schemaVersion: 1;
-  scene: string;
-  revision: number;
-  fps: number;
-  scriptHash: string | null;
-  consents: Array<{
-    id: string;
-    subject: string;
-    basis: 'self-owned' | 'written-license' | 'performer-contract' | 'synthetic-owned';
-    scope: 'target-voice' | 'performance' | 'both';
-    referenceChecksum: string | null;
-    permits: { voiceConversion: boolean; distribution: boolean; training: boolean };
-    createdAt: string;
-    expiresAt: string | null;
-    revokedAt: string | null;
-    notes: string[];
-  }>;
-  recordedTakes: RecordedTake[];
-  voiceRenders: VoiceRender[];
-  cues: DialogueCue[];
 }
 
 export interface PreflightWarningAcknowledgement {
@@ -722,83 +497,6 @@ export interface ProductionPreflightReport {
   };
 }
 
-// --- editable animation ---------------------------------------------------
-
-export type TimeAnchor =
-  | { kind: 'absolute'; ms: number }
-  | { kind: 'beat'; beatId: string; edge: 'start' | 'end'; offsetMs: number }
-  | { kind: 'speech'; beatId: string; edge: 'start' | 'end'; offsetMs: number }
-  | { kind: 'word'; beatId: string; wordId: string; edge: 'start' | 'end'; offsetMs: number };
-
-export type AnimationValue = [number, number] | number | boolean | { rot: number; x: number; y: number; scale: number };
-export interface AnimationKey {
-  id: string;
-  time: TimeAnchor;
-  value: AnimationValue;
-  interpolation: 'hold' | 'linear';
-  easing: 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out';
-  locked: boolean;
-}
-
-export interface AnimationTrack {
-  id: string;
-  layerId: string;
-  actorId: string;
-  channel: 'root.position' | 'root.scale' | 'root.flip' | 'visibility' | 'part.transform';
-  partId?: string;
-  blend: 'override' | 'additive';
-  enabled: boolean;
-  locked: boolean;
-  keys: AnimationKey[];
-}
-
-export type MotionValue = [number, number] | number | { rot: number; x: number; y: number; scale: number };
-export interface MotionControl<T extends MotionValue = MotionValue> {
-  id: string;
-  time?: TimeAnchor;
-  at?: number;
-  value: T;
-  locked: boolean;
-}
-
-interface MotionSegmentBase<T extends MotionValue> {
-  id: string;
-  layerId: string;
-  actorId: string;
-  blend: 'override' | 'additive';
-  enabled: boolean;
-  locked: boolean;
-  easing: 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out';
-  path: { shape: 'linear' | 'smooth' | 'arc'; curvature: number };
-  assist: { anticipation: number; overshoot: number; hold: number; recovery: number };
-  source: 'drag' | 'puppeteering' | 'imported';
-  from: MotionControl<T> & { time: TimeAnchor };
-  to: MotionControl<T> & { time: TimeAnchor };
-  waypoints: Array<MotionControl<T> & { at: number }>;
-}
-
-export type MotionSegment =
-  | (MotionSegmentBase<[number, number]> & {
-      channel: 'root.position';
-      /** Whether the puppet walks the distance. `auto` walks anything far enough to read as travel. */
-      gait?: 'auto' | 'walk' | 'none';
-    })
-  | (MotionSegmentBase<number> & { channel: 'root.scale' })
-  | (MotionSegmentBase<{ rot: number; x: number; y: number; scale: number }> & {
-      channel: 'part.transform';
-      partId: string;
-    });
-
-export interface AnimationDocument {
-  schemaVersion: 1;
-  scene: string;
-  revision: number;
-  layers: Array<{ id: string; name: string; ownership: 'generated' | 'manual' | 'system'; priority: number; enabled: boolean; locked: boolean }>;
-  tracks: AnimationTrack[];
-  segments: MotionSegment[];
-  events: unknown[];
-}
-
 /** One expression drawn as a standalone SVG, cropped to the face. */
 export interface FacePlate {
   label: string;
@@ -816,6 +514,19 @@ export interface DoctorReport {
     onSystemDrive: boolean;
     caches: Array<{ name: string; dir: string; bytes: number }>;
     strays: Array<{ label: string; dir: string; bytes: number; fix: string }>;
+    manifest: {
+      path: string;
+      ok: boolean;
+      checkedHashes: boolean;
+      models: Array<{
+        id: string;
+        revision: string;
+        license: string;
+        ok: boolean;
+        missing: string[];
+        mismatched: string[];
+      }>;
+    };
   };
   llm: { ok: boolean; models: string[]; reason: string | null };
   engines: Array<{ name: string; ok: boolean; reason: string | null; checking?: boolean }>;

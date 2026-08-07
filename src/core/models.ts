@@ -12,8 +12,7 @@ import { ROOT } from './paths.ts';
  * The root is derived from the drive the project is on, so it follows the
  * checkout rather than needing to be configured. Override with ANIM_MODELS_ROOT.
  */
-export const MODELS_ROOT =
-  process.env['ANIM_MODELS_ROOT'] ?? path.join(path.parse(ROOT).root, 'ai-models');
+export const MODELS_ROOT = process.env['ANIM_MODELS_ROOT'] ?? path.join(path.parse(ROOT).root, 'ai-models');
 
 export const HF_CACHE = path.join(MODELS_ROOT, 'huggingface');
 export const TORCH_CACHE = path.join(MODELS_ROOT, 'torch');

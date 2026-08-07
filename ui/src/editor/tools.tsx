@@ -238,6 +238,16 @@ export function SystemReport({ onClose }: { onClose: () => void }) {
           {report.models.caches.map((cache) => (
             <ReportRow key={cache.name} label={cache.name} ok={null} value={gb(cache.bytes)} detail={cache.dir} />
           ))}
+          <ReportRow
+            label="manifest"
+            ok={report.models.manifest.ok}
+            value={report.models.manifest.ok ? 'approved models present' : 'model verification failed'}
+            detail={`${report.models.manifest.path} · ${report.models.manifest.checkedHashes ? 'checksums verified' : 'files present'}`}
+            fix={report.models.manifest.ok ? null : report.models.manifest.models
+              .filter((model) => !model.ok)
+              .map((model) => `${model.id}: ${[...model.missing, ...model.mismatched].join(', ')}`)
+              .join('; ')}
+          />
           {report.models.strays.map((stray) => (
             <ReportRow
               key={stray.label}

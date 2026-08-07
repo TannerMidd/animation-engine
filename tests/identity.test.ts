@@ -1,7 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import {
-  ShowIdentity, DEFAULT_IDENTITY, identityHash, canonicalJson, isLocked, stampOf,
+  ShowIdentity, DEFAULT_IDENTITY, canonicalJson, isLocked,
 } from '../src/schema/identity.ts';
+import { identityHash, stampOf } from '../src/show/identity.ts';
 import { setActiveIdentity, activeIdentity } from '../src/show/context.ts';
 import { compareProfiles } from '../src/show/store.ts';
 import { streamSeed, STREAMS } from '../src/core/streams.ts';

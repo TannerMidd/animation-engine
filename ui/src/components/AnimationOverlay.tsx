@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   reducePuppeteeringSamples,
   type PuppeteeringSample,
@@ -182,7 +182,10 @@ export function AnimationOverlay({
   const requestedController = (target.partId ?? 'body') as ControllerId;
   const activeController: ControllerId = controllers.includes(requestedController) ? requestedController : 'body';
 
-  const rootArea = validArea ?? { x: 0, y: 0, width, height };
+  const rootArea = useMemo(
+    () => validArea ?? { x: 0, y: 0, width, height },
+    [validArea, width, height],
+  );
   const stageArea: AnimationValidArea = { x: 0, y: 0, width, height };
   const snapThreshold = camera ? 12 * worldPerCssPx(camera, geom) : 0;
 

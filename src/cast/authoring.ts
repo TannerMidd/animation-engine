@@ -1,6 +1,7 @@
 import { Look } from '../schema/look.ts';
 import { Outfit } from '../schema/outfit.ts';
-import { isLocked, stampOf } from '../schema/identity.ts';
+import { isLocked } from '../schema/identity.ts';
+import { stampOf } from '../show/identity.ts';
 import { activeIdentity } from '../show/context.ts';
 import { newEntityId } from '../core/streams.ts';
 import { buildPlaceholderRig, buildPlaceholderSvg } from './placeholder.ts';

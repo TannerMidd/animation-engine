@@ -22,6 +22,10 @@ function cuePlaybackDurationMs(cue: DialogueCue, document: DialogueDocument): nu
   return cue.durationFrames ? (cue.durationFrames / document.fps) * 1000 : null;
 }
 
+function voiceRenderTakeId(render: DialogueDocument['voiceRenders'][number]): string | null {
+  return 'takeId' in render.source ? render.source.takeId : null;
+}
+
 export function PerformancePanel({
   scene, cue, document, sceneLines, context, sceneRun, onReload, onSaveCue, onDiscardTake, speakerVoiceBound,
 }: {
@@ -94,7 +98,7 @@ export function PerformancePanel({
     setWarnings([]);
     setTimingValidation(null);
     setError(null);
-  }, [cue?.delivery.expression, cue?.delivery.intent, cue?.id, cue?.spokenText]);
+  }, [cue?.beatIndex, cue?.delivery.expression, cue?.delivery.intent, cue?.id, cue?.spokenText]);
 
   useEffect(() => {
     setQualityWarningsAcknowledged(Boolean(
@@ -126,7 +130,7 @@ export function PerformancePanel({
   ));
   const matchingRenders = document.voiceRenders.filter((render) =>
     render.source.kind !== 'draft-tts' &&
-    (!render.source.takeId || takes.some((take) => take.id === render.source.takeId)) &&
+    (!voiceRenderTakeId(render) || takes.some((take) => take.id === voiceRenderTakeId(render))) &&
     (render.source.kind !== 'voice-conversion' || render.source.sourceCueId === cue.id));
   // A deterministic retry can point at the same cached audio. Show that output
   // once instead of filling the Voice inspector with identical rejection cards.
@@ -575,7 +579,7 @@ export function PerformancePanel({
     if (!render?.audio) return;
     setQualityWarningsAcknowledged(false);
     void saveFields({
-      selectedTakeId: render.source.takeId ?? cue.selectedTakeId,
+      selectedTakeId: voiceRenderTakeId(render) ?? cue.selectedTakeId,
       selectedRenderId: id,
       trim: { inMs: 0, outMs: render.audio.durationMs, speechOnsetMs: 0, speechEndMs: render.audio.durationMs },
       durationFrames: Math.max(1, Math.round((render.audio.durationMs / 1000) * document.fps)),

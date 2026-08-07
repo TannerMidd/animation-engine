@@ -566,7 +566,7 @@ function eyeSet(variant: string, p: Proportions): string {
     return dot(lx) + dot(rx);
   }
 
-  let rxE = base * g.rx;
+  const rxE = base * g.rx;
   let ryE = base * g.ry;
   let pupil = base * g.pupil;
   let pupilDx = 0;
@@ -930,7 +930,6 @@ function facialHair(p: Proportions, head: Point[]): string {
   const style = activeStyle();
   const r = p.headR;
   const cx = p.headCx;
-  const cy = p.headCy;
   const fill = c.hairColour;
 
   switch (c.facialHair) {

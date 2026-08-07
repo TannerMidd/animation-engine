@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
 import path from 'node:path';
+import { atomicWriteFile } from '../core/files.ts';
 import { OUT_DIR } from '../core/paths.ts';
 import {
   DIALOGUE_SCHEMA_VERSION,
@@ -350,17 +351,6 @@ export function assertDialogueCueLocks(
   }
 }
 
-async function atomicWrite(file: string, body: string): Promise<void> {
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  const temporary = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
-  try {
-    await fs.writeFile(temporary, body, { encoding: 'utf8', flag: 'wx' });
-    await fs.rename(temporary, file);
-  } finally {
-    await fs.rm(temporary, { force: true }).catch(() => {});
-  }
-}
-
 async function persistDialogueDocument(
   scene: string,
   document: DialogueDocumentType,
@@ -384,7 +374,7 @@ async function persistDialogueDocument(
   }
 
   const file = dialoguePath(scene, outDir);
-  await atomicWrite(file, `${JSON.stringify(parsed, null, 2)}\n`);
+  await atomicWriteFile(file, `${JSON.stringify(parsed, null, 2)}\n`);
   return file;
 }
 

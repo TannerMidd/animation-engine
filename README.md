@@ -10,25 +10,25 @@ downloads missing weights, and model caches remain under `F:\ai-models` by defau
 
 ## Status
 
-| Milestone | State |
-|---|---|
-| **M0** Schemas + placeholder puppet → still PNG | done |
-| **M1** Deterministic render harness → idle MP4 | done |
-| **M2** Voice + waveform-derived viseme lipsync | done |
-| **M3** Script → director → multi-character scene with cuts | done |
-| **M3.5** Neural voices (Chatterbox) + Rhubarb lipsync | done |
-| **M6** Declarative set system + foreground layering | done |
-| **M7** Pipeline extraction + local server | done |
-| **M8** UI shell: script editor + live preview | done |
-| **M9–M11** Beat timeline, set designer, cast editor | done |
-| **M12** Local LLM for script + set generation | done |
-| **M5** Inkscape SVG ingestion (your own art) | |
-| **M22** Performance capture, voice conversion, dialogue editorial | foundation implemented; verification gaps below |
-| **M23** Stateful staging and validated physical actions | foundation implemented |
-| **M24** AnimationDoc, direct manipulation, motion assist, puppeteering | foundation implemented |
-| **M25** Sequence-level coverage and editorial grammar | foundation implemented |
-| **M26** 48 kHz stereo mix, stems, deterministic Foley | foundation implemented; no full post chain/archive master |
-| **M27** Captions, thumbnails, 16:9 + actor-aware 9:16 publishing | foundation implemented; sidecar captions only |
+| Milestone                                                              | State                                                     |
+| ---------------------------------------------------------------------- | --------------------------------------------------------- |
+| **M0** Schemas + placeholder puppet → still PNG                        | done                                                      |
+| **M1** Deterministic render harness → idle MP4                         | done                                                      |
+| **M2** Voice + waveform-derived viseme lipsync                         | done                                                      |
+| **M3** Script → director → multi-character scene with cuts             | done                                                      |
+| **M3.5** Neural voices (Chatterbox) + Rhubarb lipsync                  | done                                                      |
+| **M6** Declarative set system + foreground layering                    | done                                                      |
+| **M7** Pipeline extraction + local server                              | done                                                      |
+| **M8** UI shell: script editor + live preview                          | done                                                      |
+| **M9–M11** Beat timeline, set designer, cast editor                    | done                                                      |
+| **M12** Local LLM for script + set generation                          | done                                                      |
+| **M5** Inkscape SVG ingestion (your own art)                           |                                                           |
+| **M22** Performance capture, voice conversion, dialogue editorial      | foundation implemented; verification gaps below           |
+| **M23** Stateful staging and validated physical actions                | foundation implemented                                    |
+| **M24** AnimationDoc, direct manipulation, motion assist, puppeteering | foundation implemented                                    |
+| **M25** Sequence-level coverage and editorial grammar                  | foundation implemented                                    |
+| **M26** 48 kHz stereo mix, stems, deterministic Foley                  | foundation implemented; no full post chain/archive master |
+| **M27** Captions, thumbnails, 16:9 + actor-aware 9:16 publishing       | foundation implemented; sidecar captions only             |
 
 “Foundation implemented” means the deterministic authoring/export path exists and is tested;
 it is not a claim that the human acceptance reels or every Phase 4 quality target have passed.
@@ -38,8 +38,9 @@ Current boundaries are explicit:
   energy-envelope cadence proxy, then requires a human audition; it does **not** run ASR,
   verify the transcript or target speaker identity, or produce verified phoneme alignment;
 - conversion provenance records the detected Hugging Face snapshot commit(s), package RECORD
-  fingerprint, and worker hash, but installation still follows an unpinned repository ref and
-  there is no approved-model manifest or independent weights checksum yet;
+  fingerprint, and worker hash. Approved Chatterbox, Kokoro and Whisper artifacts are pinned by
+  revision, license and independent SHA-256 in `config/models.manifest.json`; `anim doctor`
+  verifies the installed artifacts before production work;
 - direct manipulation covers the actor root, head, torso and two-bone arm IK, with live
   preview, snapping and puppeteering capture; per-character motion profiles, listening
   behaviour, word-accent placement and repetition linting are **not** implemented, which is
@@ -48,6 +49,15 @@ Current boundaries are explicit:
 - the mixer writes a social programme master and stems, not a separate less-compressed
   archival master or a complete EQ/de-ess/compression/room-matching post chain; and
 - `--draft` labels the export manifest but does not add a visible watermark to the video.
+
+## Architecture and quality gates
+
+The runtime boundaries, persistence guarantees, shared browser/server contracts, model supply
+chain and extension rules are documented in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+Use `npm run verify` for the complete local gate. CI additionally enforces formatting, lint,
+coverage, a production UI build, a real Chromium smoke test and hermetic Python worker tests on
+Linux.
 
 ## Model storage — read this first
 
@@ -96,7 +106,7 @@ until you ask.
 **Parallax.** `back`, `mid` and `fore` were pure draw order; they can now track
 the camera at different rates. `layout.parallax` gives each layer a factor — 1
 moves with the camera exactly (the default, and what every set did before), below
-1 lags and reads as further away. Offsets are measured from the camera's *centre*,
+1 lags and reads as further away. Offsets are measured from the camera's _centre_,
 so a centred push-in produces no drift, and each layer's travel is clamped to its
 own artwork so parallax can never open a hole at the edge of frame.
 
@@ -140,14 +150,14 @@ Then open **http://127.0.0.1:5178**. The whole app is one editor around one scen
 sidebar, stage, inspector, and a timeline across the bottom. **Modes** change the chrome
 rather than navigating away — the playhead and selection survive the switch.
 
-| | |
-|---|---|
-| **Write** | Screenplay editing. Fountain subset — cues, parentheticals, `[BEAT ms]`. |
-| **Direct** | Shot proposal, beat direction, staging. Locked beats survive reruns. |
-| **Animate** | Blocking, rig controls, Point A → Point B motion paths. |
-| **Perform** | Line Booth and Scene Run capture, takes, trims, voice conversion. |
-| **Sound** | Not in the engine yet — mix, stems and Foley are CLI-only today. |
-| **Publish** | Production readiness, 16:9 / 9:16 masters, captions, export manifest. |
+|             |                                                                          |
+| ----------- | ------------------------------------------------------------------------ |
+| **Write**   | Screenplay editing. Fountain subset — cues, parentheticals, `[BEAT ms]`. |
+| **Direct**  | Shot proposal, beat direction, staging. Locked beats survive reruns.     |
+| **Animate** | Blocking, rig controls, Point A → Point B motion paths.                  |
+| **Perform** | Line Booth and Scene Run capture, takes, trims, voice conversion.        |
+| **Sound**   | Not in the engine yet — mix, stems and Foley are CLI-only today.         |
+| **Publish** | Production readiness, 16:9 / 9:16 masters, captions, export manifest.    |
 
 The inspector follows the selection across beat, character, motion, rig, camera, prop, voice
 and scene tabs. The timeline carries script, dialogue, motion, camera, expression, gesture,
@@ -172,10 +182,10 @@ those write to the set descriptor, which every scene using that set shares.
 Both open over the scene and hand you back to it. Edits land on disk and appear in the scene
 on the next preview.
 
-| | |
-|---|---|
-| **Sets** | Build environments: layer tabs (back / mid / **fore**), prop palette, controls generated from each prop's declared params, and a live preview with characters staged in it that you can **drag props around on**. Composition notes appear over the frame, and *Tidy composition* applies the mechanical fixes. |
-| **Cast** | Edit what a character **looks like** — build, head shape, nose, ears, hair, facial hair, glasses, eye and brow style, four colour ramps and seven proportion sliders — with the puppet redrawn live. A *Faces* tab shows every expression at once. Voice settings, microphone recording for cloning, and a one-line audition to hear the result. |
+|          |                                                                                                                                                                                                                                                                                                                                                  |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Sets** | Build environments: layer tabs (back / mid / **fore**), prop palette, controls generated from each prop's declared params, and a live preview with characters staged in it that you can **drag props around on**. Composition notes appear over the frame, and _Tidy composition_ applies the mechanical fixes.                                  |
+| **Cast** | Edit what a character **looks like** — build, head shape, nose, ears, hair, facial hair, glasses, eye and brow style, four colour ramps and seven proportion sliders — with the puppet redrawn live. A _Faces_ tab shows every expression at once. Voice settings, microphone recording for cloning, and a one-line audition to hear the result. |
 
 **The preview is the renderer.** The iframe loads the exact page `buildPage` produces — the
 one Playwright screenshots for the final MP4. Playback is a `requestAnimationFrame` loop
@@ -210,7 +220,7 @@ generator gains a feature, keeping voices and any hand-tuned idle intact.
 
 Record straight from the microphone in the Cast panel, or drop in a file. Whatever arrives is
 normalised to mono 24 kHz PCM at loudness on the way in, so a bad clip fails immediately with
-a reason instead of three minutes into a render. *Hear it* synthesizes one line through the
+a reason instead of three minutes into a render. _Hear it_ synthesizes one line through the
 exact path a render uses — the first take loads the model and takes a while, the rest are
 cached.
 
@@ -225,7 +235,7 @@ pins `torch==2.6.0`, which has no sm_120 kernels and silently downgrades you to 
 build on a Blackwell card:
 
 ```bash
-python -m venv .venv && .venv\Scripts\python -m pip install chatterbox-tts
+python -m venv .venv && .venv\Scripts\python -m pip install -r requirements-python.lock.txt
 ```
 
 ```bash
@@ -293,21 +303,21 @@ speaks every line, lipsyncs it, renders, and muxes — from an empty `cast/` fol
 
 ### Commands
 
-| | |
-|---|---|
-| `new <name>` | scaffold a script with the format documented inline |
-| `check <script.md>` | parse, direct and validate — sub-second, renders nothing |
-| `render <script.md>` | Production-gated script → MP4. `--set office --seed 7 --resting DEADPAN --shotlist`; `--draft` labels only the manifest and does not visibly watermark the MP4. |
-| `cast new <name>` | create a placeholder character |
-| `cast check [name...]` | validate rigs against their SVGs |
-| `cast regen [name...]` | redraw art after a generator change, keeping voices — `--reroll` |
-| `cast sheet [name]` | contact sheet PNG: one name gives every expression, none gives the cast |
-| `still [name...]` | one frame to a PNG — `--pose`, `--expression` |
-| `idle [name...]` | an idling MP4 — `--seconds`, `--char-fps` |
-| `sets` | list sets; `sets props`, `sets palettes`, `sets preview <name>` |
-| `props` | list baked props and whether each still matches its source; `props bake <name>` (`--all`), `props preview <name>` |
-| `voices` | list SAPI voices; `voices bench` renders a cast listening sheet, `voices check --source <wav>` scores conversion |
-| `doctor` | check the toolchain |
+|                        |                                                                                                                                                                 |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `new <name>`           | scaffold a script with the format documented inline                                                                                                             |
+| `check <script.md>`    | parse, direct and validate — sub-second, renders nothing                                                                                                        |
+| `render <script.md>`   | Production-gated script → MP4. `--set office --seed 7 --resting DEADPAN --shotlist`; `--draft` labels only the manifest and does not visibly watermark the MP4. |
+| `cast new <name>`      | create a placeholder character                                                                                                                                  |
+| `cast check [name...]` | validate rigs against their SVGs                                                                                                                                |
+| `cast regen [name...]` | redraw art after a generator change, keeping voices — `--reroll`                                                                                                |
+| `cast sheet [name]`    | contact sheet PNG: one name gives every expression, none gives the cast                                                                                         |
+| `still [name...]`      | one frame to a PNG — `--pose`, `--expression`                                                                                                                   |
+| `idle [name...]`       | an idling MP4 — `--seconds`, `--char-fps`                                                                                                                       |
+| `sets`                 | list sets; `sets props`, `sets palettes`, `sets preview <name>`                                                                                                 |
+| `props`                | list baked props and whether each still matches its source; `props bake <name>` (`--all`), `props preview <name>`                                               |
+| `voices`               | list SAPI voices; `voices bench` renders a cast listening sheet, `voices check --source <wav>` scores conversion                                                |
+| `doctor`               | check the toolchain                                                                                                                                             |
 
 ## Writing a script
 
@@ -339,7 +349,7 @@ Friday. I sent it Friday.
 All-caps line = character cue. `(parenthetical)` = emotion hint the director reads.
 `[BEAT 1500]` = a pause, in milliseconds.
 
-Beats are explicit rather than inferred. In this genre the pause *is* the joke, and its
+Beats are explicit rather than inferred. In this genre the pause _is_ the joke, and its
 length is a writing decision — not something to guess at.
 
 ## How it works
@@ -360,10 +370,10 @@ script.md
 
 Two engines, chosen with `--voice-engine`:
 
-| | |
-|---|---|
+|                          |                                                                                                 |
+| ------------------------ | ----------------------------------------------------------------------------------------------- |
 | **chatterbox** (default) | Resemble AI's, MIT. Emotion control + zero-shot voice cloning. Needs the Python venv and a GPU. |
-| **sapi** | Windows built-in. No downloads, no GPU, no Python. Sounds its age, but always works. |
+| **sapi**                 | Windows built-in. No downloads, no GPU, no Python. Sounds its age, but always works.            |
 
 **Expression drives delivery.** The director already decides each line's expression, so the
 compiler feeds it straight into Chatterbox's emotion controls — a `DEADPAN` line is
@@ -373,12 +383,12 @@ get room to move. (Exaggeration tops out at 0.8 on purpose — past that the mod
 destabilises, which reads as worse acting, not bigger acting.)
 
 | expression | exaggeration | guidance | temperature |
-|---|---|---|---|
-| `DEADPAN` | 0.30 | 0.30 | 0.50 |
-| `NEUTRAL` | 0.50 | 0.45 | 0.70 |
-| `SMUG` | 0.58 | 0.42 | 0.75 |
-| `ANGRY` | 0.75 | 0.40 | 0.85 |
-| `SHOCKED` | 0.80 | 0.38 | 0.90 |
+| ---------- | ------------ | -------- | ----------- |
+| `DEADPAN`  | 0.30         | 0.30     | 0.50        |
+| `NEUTRAL`  | 0.50         | 0.45     | 0.70        |
+| `SMUG`     | 0.58         | 0.42     | 0.75        |
+| `ANGRY`    | 0.75         | 0.40     | 0.85        |
+| `SHOCKED`  | 0.80         | 0.38     | 0.90        |
 
 **Voice cloning.** Point a character's `voiceRef` at ~5–10s of clean speech under `cast/`
 and they'll sound like that person instead of like a TTS preset.

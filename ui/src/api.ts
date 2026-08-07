@@ -1,14 +1,22 @@
 import type {
-  AnimationDocument, BenchResult, CastSummary, CheckResult, ConversionCheckResult, DialogueCue, DialogueDocument,
+  AnimationDocument, BenchResult, CastSummary, CheckResult, DialogueCue, DialogueDocument,
   DoctorReport, FacePlate, Health, JobEvent, JobSummary, LlmDaemon, LlmStatus, Look, MigrationInfo, PreviewInfo, Outfit,
   ProductionPreflightReport, ProfileDiff, ProfileValidation, PropDefInfo, PropDetail, PropDocument, PropRender,
   Palette, ParamValue, Recipe, RecordedTake, RigCheckResult, RigDoc,
   SceneDetail, SceneSoundInfo, SceneSummary, SetDescriptor, SetSummary, ShotList, ShowInfo, StemId, Vocab,
 } from './types.ts';
+import {
+  AnimationDocumentContract,
+  DialogueDocumentContract,
+  DirectProposalContract,
+  type RuntimeContract,
+  SceneDetailContract,
+  SetDescriptorContract,
+} from './contracts.ts';
 
 /** Thin typed wrappers over the engine server. */
 
-async function call<T>(url: string, init?: RequestInit): Promise<T> {
+async function call<T>(url: string, init?: RequestInit, contract?: RuntimeContract<T>): Promise<T> {
   const res = await fetch(url, {
     ...init,
     headers: init?.body ? { 'content-type': 'application/json', ...init?.headers } : init?.headers,
@@ -17,13 +25,20 @@ async function call<T>(url: string, init?: RequestInit): Promise<T> {
     const body = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
   }
-  return res.json() as Promise<T>;
+  const value: unknown = await res.json();
+  if (!contract) return value as T;
+  try {
+    return contract.parse(value);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid server response for ${url}: ${detail}`);
+  }
 }
 
-const post = <T>(url: string, body?: unknown) =>
-  call<T>(url, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) });
-const put = <T>(url: string, body: unknown) =>
-  call<T>(url, { method: 'PUT', body: JSON.stringify(body) });
+const post = <T>(url: string, body?: unknown, contract?: RuntimeContract<T>) =>
+  call<T>(url, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) }, contract);
+const put = <T>(url: string, body: unknown, contract?: RuntimeContract<T>) =>
+  call<T>(url, { method: 'PUT', body: JSON.stringify(body) }, contract);
 const del = <T>(url: string) => call<T>(url, { method: 'DELETE' });
 
 export const api = {
@@ -40,7 +55,7 @@ export const api = {
   applyMigration: () => post<{ ok: true; applied: number; changes: MigrationInfo['changes'] }>('/api/migrate'),
 
   scenes: () => call<SceneSummary[]>('/api/scenes'),
-  scene: (name: string) => call<SceneDetail>(`/api/scenes/${name}`),
+  scene: (name: string) => call<SceneDetail>(`/api/scenes/${name}`, undefined, SceneDetailContract),
   saveScript: (name: string, source: string) => put<{ ok: true }>(`/api/scenes/${name}`, { source }),
 
   check: (name: string, body: { source?: string; seed?: number; resting?: string; set?: string | null }) =>
@@ -54,7 +69,7 @@ export const api = {
       droppedLocked: number;
       errors: string[];
       newCharacters: string[];
-    }>(`/api/scenes/${name}/direct`, body),
+    }>(`/api/scenes/${name}/direct`, body, DirectProposalContract),
   applyDirect: (name: string, shots: ShotList) =>
     post<{ ok: true }>(`/api/scenes/${name}/direct/apply`, { shots }),
   preflight: (name: string) => call<ProductionPreflightReport>(`/api/scenes/${name}/preflight`),
@@ -64,7 +79,9 @@ export const api = {
   saveShotList: (name: string, shots: ShotList) =>
     put<{ ok: true }>(`/api/scenes/${name}/shotlist`, { shots }),
 
-  dialogue: (name: string) => call<DialogueDocument>(`/api/scenes/${name}/dialogue`),
+  dialogue: (name: string) => call<DialogueDocument>(
+    `/api/scenes/${name}/dialogue`, undefined, DialogueDocumentContract,
+  ),
   saveDialogue: (name: string, document: DialogueDocument) =>
     put<{ ok: true; revision: number }>(`/api/scenes/${name}/dialogue`, { document }),
   saveDialogueCue: (name: string, cue: DialogueCue, expectedRevision?: number) =>
@@ -136,7 +153,9 @@ export const api = {
     body: { takeId?: string; consentId: string; registerPolicy?: 'preserve-performer' | 'adapt-to-character'; seed?: number },
   ) => post<JobSummary>(`/api/scenes/${name}/dialogue/${encodeURIComponent(cueId)}/convert`, body),
 
-  animation: (name: string) => call<AnimationDocument>(`/api/scenes/${name}/animation`),
+  animation: (name: string) => call<AnimationDocument>(
+    `/api/scenes/${name}/animation`, undefined, AnimationDocumentContract,
+  ),
   saveAnimation: (name: string, document: AnimationDocument) =>
     put<{ ok: true; revision: number; document: AnimationDocument }>(`/api/scenes/${name}/animation`, { document }),
 
@@ -204,7 +223,7 @@ export const api = {
   /** With a scene, every set also reports whether it can host that scene's staging. */
   sets: (scene?: string) =>
     call<SetSummary[]>(scene ? `/api/sets?scene=${encodeURIComponent(scene)}` : '/api/sets'),
-  set: (name: string) => call<SetDescriptor>(`/api/sets/${name}`),
+  set: (name: string) => call<SetDescriptor>(`/api/sets/${name}`, undefined, SetDescriptorContract),
   saveSet: (name: string, set: SetDescriptor) => put<{ ok: true }>(`/api/sets/${name}`, { set }),
   setPreview: (name: string, set?: SetDescriptor, cast?: string[]) =>
     post<{ previewId: string; notes: string[] }>(`/api/sets/${name}/preview`, { set, cast }),

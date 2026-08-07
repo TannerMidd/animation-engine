@@ -3,6 +3,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { ROOT } from '../core/paths.ts';
+import { atomicWriteFile } from '../core/files.ts';
+import { resolveWithin } from '../core/project.ts';
 
 /**
  * The asset library's ledger.
@@ -62,8 +64,7 @@ export async function loadManifest(): Promise<AssetManifest> {
 }
 
 export async function saveManifest(manifest: AssetManifest): Promise<void> {
-  await fs.mkdir(ASSETS_DIR, { recursive: true });
-  await fs.writeFile(MANIFEST, JSON.stringify(AssetManifest.parse(manifest), null, 2) + '\n', 'utf8');
+  await atomicWriteFile(MANIFEST, JSON.stringify(AssetManifest.parse(manifest), null, 2) + '\n');
 }
 
 /** Verify every approved asset still matches its recorded hash. */
@@ -72,7 +73,7 @@ export async function verifyAssets(): Promise<Array<{ assetId: string; problem: 
   const problems: Array<{ assetId: string; problem: string }> = [];
 
   for (const asset of manifest.assets) {
-    const file = path.join(ASSETS_DIR, asset.file);
+    const file = resolveWithin(ASSETS_DIR, asset.file);
     try {
       const hash = crypto.createHash('sha1').update(await fs.readFile(file)).digest('hex');
       if (hash !== asset.hash) {

@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ROOT } from '../core/paths.ts';
 import { MODELS_ROOT, HF_CACHE, OLLAMA_MODELS, strayCacheLocations, systemDriveRoot } from '../core/models.ts';
+import { verifyModelManifest, type ModelManifestStatus } from '../core/model-manifest.ts';
 import { ffmpegVersion, ffmpegPath } from '../render/encode.ts';
 import { findRhubarb } from '../voice/rhubarb.ts';
 import { ENGINE_NAMES, getEngine } from '../voice/index.ts';
@@ -38,6 +39,7 @@ export interface DoctorReport {
     onSystemDrive: boolean;
     caches: Array<{ name: string; dir: string; bytes: number }>;
     strays: Array<{ label: string; dir: string; bytes: number; fix: string }>;
+    manifest: ModelManifestStatus;
   };
   llm: { ok: boolean; models: string[]; reason: string | null };
   engines: DoctorEngineStatus[];
@@ -66,6 +68,8 @@ export interface DoctorOptions {
    * the CLI probes inline, which is what `anim doctor` always did.
    */
   probeEngine?: (name: string) => Promise<{ ok: boolean; reason?: string; checking?: boolean }>;
+  /** Hashing several gigabytes is explicit for the CLI; the editor checks presence and revisions only. */
+  verifyModelHashes?: boolean;
 }
 
 /** Bytes under a directory tree; 0 when it does not exist or cannot be read. */
@@ -159,6 +163,7 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<DoctorReport>
       onSystemDrive: MODELS_ROOT.toLowerCase().startsWith(systemDriveRoot().toLowerCase()),
       caches,
       strays,
+      manifest: await verifyModelManifest({ hashes: opts.verifyModelHashes }),
     },
     llm: llm.ok
       ? { ok: true, models: llm.models.map((m) => m.name), reason: null }

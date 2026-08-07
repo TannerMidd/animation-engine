@@ -3,7 +3,7 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { sceneDir } from '../../core/paths.ts';
 import { json, readJson, sendFile, HttpError, type Router } from '../http.ts';
-import { startJob, jobSummary, type Job } from '../jobs.ts';
+import { startJob, jobSummary } from '../jobs.ts';
 import {
   requireShotList, rigsFor, captureProductionReviewSnapshot, dialogueFor, sceneAsset,
   castVoiceReference, storePreview,
@@ -18,24 +18,16 @@ import { buildPreview } from '../../pipeline/preview.ts';
 import { renderScene } from '../../pipeline/render.ts';
 import {
   approximateWordTimings,
-  dialogueGuideIsCurrent,
-  dialogueGuidePath,
   resolveTimings,
-  mixSceneAudio,
   soundtrackIsCurrent,
   soundtrackEngine,
 } from '../../pipeline/voices.ts';
-import { readSceneSound, sceneStemPath, parseStemId } from '../../pipeline/sound.ts';
 import { markExportManifestDraft } from '../../pipeline/draft.ts';
-import { compileShotList } from '../../compile/scene.ts';
-import { loadRig, listRigs, type LoadedRig } from '../../cast/store.ts';
+import { loadRig } from '../../cast/store.ts';
 import { ShotList } from '../../schema/script.ts';
-import { loadSet } from '../../sets/index.ts';
-import { ENGINE_NAMES } from '../../voice/index.ts';
 import { freeVramForRender } from '../../llm/ollama.ts';
-import { ensureVoiceRefs } from '../../voice/casting.ts';
 import {
-  syncDialogueDocument, readDialogueDocument, updateDialogueDocument, writeDialogueDocument,
+  readDialogueDocument, updateDialogueDocument, writeDialogueDocument,
   assessSceneRunSegment, revokeVoiceConsent, revokeRecordedTake,
 } from '../../pipeline/dialogue.ts';
 import {
@@ -50,7 +42,6 @@ import {
   compareConversionAudio, convertPerformances, checkConversionIdentity,
 } from '../../voice/conversion.ts';
 import {
-  readAnimation,
   readAnimationOrDefault,
   retimeAnimationForDialogue,
   writeAnimation,
@@ -63,56 +54,8 @@ import {
   productionReviewSnapshotDigest,
   warningAcknowledgementIsCurrent,
 } from '../../pipeline/preflight-review.ts';
-
-/** An engine name from a request body, validated before it reaches a job. */
-function requestedEngine(raw: string | undefined, fallback: string): string {
-  if (raw === undefined) return fallback;
-  if (!(ENGINE_NAMES as readonly string[]).includes(raw)) {
-    throw new HttpError(400, `no voice engine "${raw}" — expected one of ${ENGINE_NAMES.join(', ')}`);
-  }
-  return raw;
-}
-
-/**
- * The soundtrack job, shared by Voices and Rebuild stems.
- *
- * Both resolve timings (cache hits unless something changed), compile, and
- * remix — one audio assembly path, two buttons that ask for it.
- */
-function startSoundtrackJob(
-  kind: 'voices' | 'sound',
-  scene: string,
-  shots: ShotList,
-  rigs: Map<string, LoadedRig>,
-  engine: string,
-): Job {
-  return startJob(kind, scene, async (handle) => {
-    const evicted = await freeVramForRender();
-    if (evicted.length) handle.log(`unloaded ${evicted.join(', ')} to free VRAM`);
-
-    const timings = await resolveTimings(scene, shots, rigs, {
-      engine,
-      onProgress: (stage, done, total) => handle.progress({ stage, done, total }),
-    });
-    const setDescriptor = shots.set ? await loadSet(shots.set) : null;
-    // The authored animation belongs here as much as it does in a render: it is
-    // what decides where a puppet is standing, so leaving it out makes the
-    // soundtrack refuse interactions the render performs quite happily.
-    const animation = await readAnimation(scene);
-    const compiled = compileShotList(shots, rigs, timings, animation, setDescriptor);
-    const dialogue = await readDialogueDocument(scene);
-    handle.progress({ stage: 'audio', done: 0, total: 1 });
-    await mixSceneAudio(scene, shots, compiled.audio, compiled.durationMs, {
-      stageActions: compiled.stageActions,
-      engine,
-      guideMuteCueIds: dialogue ? Object.fromEntries(shots.cast.map((member) => [
-        member.id,
-        dialogue.cues.filter((cue) => cue.speaker === member.id && !cue.locked).map((cue) => cue.id),
-      ])) : undefined,
-    });
-    return { lines: timings.size, durationMs: compiled.durationMs, engine };
-  });
-}
+import { registerSceneMediaRoutes } from './scene-media.ts';
+import { requestedEngine, startSoundtrackJob } from './scene-soundtrack.ts';
 
 export function registerSceneRoutes(router: Router): void {
   router.get('/api/scenes', async ({ res }) => {
@@ -218,6 +161,7 @@ export function registerSceneRoutes(router: Router): void {
   router.post('/api/scenes/:name/direct/apply', async ({ req, res, params }) => {
     const body = await readJson<{ shots: unknown }>(req);
     const shots = ShotList.parse(body.shots);
+    if (shots.scene !== params['name']) throw new HttpError(400, 'shot-list scene must match the URL');
     await writeShotList(params['name']!, shots);
     json(res, { ok: true, summary: summarise(shots) });
   });
@@ -225,6 +169,7 @@ export function registerSceneRoutes(router: Router): void {
   router.put('/api/scenes/:name/shotlist', async ({ req, res, params }) => {
     const body = await readJson<{ shots: unknown }>(req);
     const shots = ShotList.parse(body.shots);
+    if (shots.scene !== params['name']) throw new HttpError(400, 'shot-list scene must match the URL');
     await writeShotList(params['name']!, shots);
     json(res, { ok: true, summary: summarise(shots) });
   });
@@ -240,6 +185,7 @@ export function registerSceneRoutes(router: Router): void {
     const scene = params['name']!;
     const body = await readJson<{ document: unknown }>(req);
     const document = DialogueDocument.parse(body.document);
+    if (document.scene !== scene) throw new HttpError(400, 'dialogue scene must match the URL');
     const current = await dialogueFor(scene);
     if (document.revision !== current.revision) {
       throw new HttpError(409, `dialogue revision ${document.revision} does not match current revision ${current.revision}`);
@@ -940,6 +886,7 @@ export function registerSceneRoutes(router: Router): void {
     const scene = params['name']!;
     const body = await readJson<{ document: unknown }>(req);
     const document = AnimationDocument.parse(body.document);
+    if (document.scene !== scene) throw new HttpError(400, 'animation scene must match the URL');
     const current = await readAnimationOrDefault(scene);
     if (document.revision !== current.revision) {
       throw new HttpError(409, `animation revision ${document.revision} does not match current revision ${current.revision}`);
@@ -1113,155 +1060,5 @@ export function registerSceneRoutes(router: Router): void {
     });
   });
 
-  /**
-   * Serve the scene's soundtrack — but never a stale one.
-   *
-   * The manifest records what the track was built from; if the shot list, a
-   * voice reference, the identity profile, or the ambience settings have moved
-   * since, playing the old audio against the new edit would be quietly wrong in
-   * the way nobody catches. A 409 with "run Voices again" is the honest answer.
-   */
-  router.get('/api/scenes/:name/audio', async ({ res, params, req }) => {
-    const scene = params['name']!;
-    const shots = await readShotList(scene).catch(() => null);
-    if (shots) {
-      const rigs = await rigsFor(shots);
-      if (!(await soundtrackIsCurrent(scene, shots, rigs))) {
-        throw new HttpError(409, 'the rendered audio is stale — the scene, a voice, or the show identity changed since. Run Voices again.');
-      }
-    }
-    return sendFile(res, path.join(sceneDir(scene), 'dialogue.wav'), req);
-  });
-
-  // --- sound mode -----------------------------------------------------------
-
-  /** The production stems as they stand on disk, plus the room-tone recipe. */
-  router.get('/api/scenes/:name/sound', async ({ res, params }) => {
-    const scene = params['name']!;
-    const shots = await requireShotList(scene);
-    const rigs = await rigsFor(shots);
-    json(res, await readSceneSound(scene, shots, rigs));
-  });
-
-  /** One stem, under the same staleness gate as the master. */
-  router.get('/api/scenes/:name/stems/:stem', async ({ res, params, req }) => {
-    const scene = params['name']!;
-    let stem;
-    try {
-      stem = parseStemId(params['stem']!);
-    } catch (err) {
-      throw new HttpError(404, (err as Error).message);
-    }
-    const shots = await readShotList(scene).catch(() => null);
-    if (shots) {
-      const rigs = await rigsFor(shots);
-      if (!(await soundtrackIsCurrent(scene, shots, rigs))) {
-        throw new HttpError(409, 'the stems are stale — the scene, a voice, or the show identity changed since. Rebuild stems.');
-      }
-    }
-    return sendFile(res, sceneStemPath(scene, stem), req);
-  });
-
-  /**
-   * Remix without asking for anything new: cached takes in, fresh stems out.
-   * The same job as Voices under a different name, because there is exactly
-   * one audio assembly path.
-   */
-  router.post('/api/scenes/:name/sound/rebuild', async ({ req, res, params }) => {
-    const scene = params['name']!;
-    const body = await readJson<{ engine?: string }>(req);
-    const shots = await requireShotList(scene);
-    const rigs = await rigsFor(shots);
-    // Default to the engine that built the current track, so a rebuild is a
-    // remix rather than a silent engine change.
-    const engine = requestedEngine(body.engine, await soundtrackEngine(scene));
-    json(res, jobSummary(startSoundtrackJob('sound', scene, shots, rigs, engine)));
-  });
-
-  router.get('/api/scenes/:name/dialogue/guide/:speaker', async ({ res, params, req }) => {
-    const scene = params['name']!;
-    const shots = await readShotList(scene).catch(() => null);
-    if (!shots) throw new HttpError(404, 'the scene has not been directed');
-    if (!shots.cast.some((member) => member.id === params['speaker'])) {
-      throw new HttpError(404, `no cast member "${params['speaker']}"`);
-    }
-    const rigs = await rigsFor(shots);
-    if (!(await soundtrackIsCurrent(scene, shots, rigs))) {
-      throw new HttpError(409, 'the Scene Run guide is stale — run Voices again');
-    }
-    const dialogue = await readDialogueDocument(scene);
-    const mutedCueIds = (dialogue?.cues ?? [])
-      .filter((cue) => cue.speaker === params['speaker'] && !cue.locked)
-      .map((cue) => cue.id);
-    if (!(await dialogueGuideIsCurrent(scene, params['speaker']!, mutedCueIds))) {
-      throw new HttpError(409, 'the Scene Run guide context changed after a cue was locked or unlocked; run Voices again');
-    }
-    return sendFile(res, dialogueGuidePath(scene, params['speaker']!), req);
-  });
-
-  /**
-   * Voice casting preflight, as an explicit job.
-   *
-   * The same idempotent step a render runs — minting default voices for cast
-   * members that have none — invocable on its own so voices can be settled and
-   * auditioned before committing to a full render.
-   */
-  router.post('/api/scenes/:name/voices/prepare', async ({ res, params }) => {
-    const scene = params['name']!;
-    const shots = await requireShotList(scene);
-    const onDisk = new Set(await listRigs());
-
-    const job = startJob('prepare-voices', scene, async (handle) => {
-      const evicted = await freeVramForRender();
-      if (evicted.length) handle.log(`unloaded ${evicted.join(', ')} to free VRAM`);
-
-      const candidates = [];
-      for (const member of shots.cast) {
-        if (!onDisk.has(member.rig)) continue;
-        const { rig } = await loadRig(member.rig);
-        candidates.push({ name: member.rig, charId: rig.charId, voiceRef: rig.voiceRef });
-      }
-      const minted = await ensureVoiceRefs(candidates, (done, total, name) =>
-        handle.progress({ stage: 'casting', done, total, message: name }));
-      return { minted };
-    });
-
-    json(res, jobSummary(job));
-  });
-
-  router.get('/api/scenes/:name/video', ({ res, params, req }) =>
-    sendFile(res, outputPath(params['name']!), req));
-
-  router.get('/api/scenes/:name/video/vertical', ({ res, params, req }) => {
-    const scene = params['name']!;
-    return sendFile(res, path.join(sceneDir(scene), `${scene}.vertical.mp4`), req);
-  });
-
-  router.get('/api/scenes/:name/export', async ({ res, params }) => {
-    const scene = params['name']!;
-    const file = path.join(sceneDir(scene), `${scene}.export.json`);
-    json(res, JSON.parse(await fs.readFile(file, 'utf8')));
-  });
-
-  router.get('/api/scenes/:name/captions.vtt', ({ res, params, req }) => {
-    const scene = params['name']!;
-    return sendFile(res, path.join(sceneDir(scene), `${scene}.captions.vtt`), req);
-  });
-
-  router.get('/api/scenes/:name/captions.srt', ({ res, params, req }) => {
-    const scene = params['name']!;
-    return sendFile(res, path.join(sceneDir(scene), `${scene}.captions.srt`), req);
-  });
-
-  router.get('/api/scenes/:name/thumbnail/:index', async ({ res, params, req }) => {
-    const scene = params['name']!;
-    const index = Number(params['index']);
-    if (!Number.isInteger(index) || index < 0) throw new HttpError(400, 'thumbnail index must be a non-negative integer');
-    const manifest = JSON.parse(
-      await fs.readFile(path.join(sceneDir(scene), `${scene}.export.json`), 'utf8'),
-    ) as { thumbnails?: Array<{ file?: string }> };
-    const relative = manifest.thumbnails?.[index]?.file;
-    if (!relative || path.basename(relative) !== relative) throw new HttpError(404, 'no such thumbnail');
-    return sendFile(res, path.join(sceneDir(scene), relative), req);
-  });
+  registerSceneMediaRoutes(router);
 }

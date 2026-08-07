@@ -1,9 +1,12 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { SHOW_DIR } from '../core/paths.ts';
+import { atomicWriteFile } from '../core/files.ts';
+import { projectId, resolveWithin } from '../core/project.ts';
 import {
-  ShowIdentity, DEFAULT_IDENTITY, canonicalJson, identityHash,
+  ShowIdentity, DEFAULT_IDENTITY, canonicalJson,
 } from '../schema/identity.ts';
+import { identityHash } from './identity.ts';
 import { setActiveIdentity } from './context.ts';
 
 /**
@@ -21,7 +24,7 @@ import { setActiveIdentity } from './context.ts';
 const POINTER = path.join(SHOW_DIR, 'show.json');
 
 export function profilePath(id: string): string {
-  return path.join(SHOW_DIR, `${id}.identity.json`);
+  return resolveWithin(SHOW_DIR, `${projectId(id, 'show profile id')}.identity.json`);
 }
 
 export async function listProfiles(): Promise<Array<{ id: string; name: string; version: string; hash: string }>> {
@@ -47,7 +50,7 @@ export async function loadProfile(id: string): Promise<ShowIdentity> {
   // Fixtures are addressable with a prefix, so the eval tooling can load them
   // without them ever appearing in the ordinary profile list.
   const file = id.startsWith('fixtures/')
-    ? path.join(SHOW_DIR, 'fixtures', `${id.slice('fixtures/'.length)}.identity.json`)
+    ? resolveWithin(SHOW_DIR, 'fixtures', `${projectId(id.slice('fixtures/'.length), 'fixture profile id')}.identity.json`)
     : profilePath(id);
 
   let raw: string;
@@ -62,9 +65,8 @@ export async function loadProfile(id: string): Promise<ShowIdentity> {
 
 export async function saveProfile(identity: ShowIdentity): Promise<string> {
   const parsed = ShowIdentity.parse(identity);
-  await fs.mkdir(SHOW_DIR, { recursive: true });
   const file = profilePath(parsed.id);
-  await fs.writeFile(file, JSON.stringify(parsed, null, 2) + '\n', 'utf8');
+  await atomicWriteFile(file, JSON.stringify(parsed, null, 2) + '\n');
   return file;
 }
 
@@ -80,8 +82,7 @@ export async function activeProfileId(): Promise<string | null> {
 export async function setActiveProfileId(id: string): Promise<void> {
   // Loading first means the pointer can never name a profile that doesn't parse.
   await loadProfile(id);
-  await fs.mkdir(SHOW_DIR, { recursive: true });
-  await fs.writeFile(POINTER, JSON.stringify({ active: id }, null, 2) + '\n', 'utf8');
+  await atomicWriteFile(POINTER, JSON.stringify({ active: id }, null, 2) + '\n');
 }
 
 /**

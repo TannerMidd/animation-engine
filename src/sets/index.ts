@@ -1,8 +1,10 @@
 import fs from 'node:fs/promises';
-import path from 'node:path';
 import { SETS_DIR } from '../core/paths.ts';
+import { atomicWriteFile } from '../core/files.ts';
+import { projectId, resolveWithin } from '../core/project.ts';
 import {
   SetDescriptor,
+  SET_SCHEMA_VERSION,
   geometryFor,
   LAYERS,
   STAGE,
@@ -127,7 +129,7 @@ export function setPath(name: string): string {
   // Tolerant of a stray extension — scenes recorded a set as "office.svg" back
   // when sets were raw SVG files, and those shouldn't resolve to "office.svg.json".
   const base = name.replace(/\.(json|svg)$/i, '');
-  return path.join(SETS_DIR, `${base}.json`);
+  return resolveWithin(SETS_DIR, `${projectId(base, 'set name')}.json`);
 }
 
 export async function loadSet(name: string): Promise<SetDescriptor> {
@@ -142,9 +144,9 @@ export async function loadSet(name: string): Promise<SetDescriptor> {
 }
 
 export async function saveSet(desc: SetDescriptor): Promise<string> {
-  await fs.mkdir(SETS_DIR, { recursive: true });
-  const file = setPath(desc.name);
-  await fs.writeFile(file, JSON.stringify(desc, null, 2) + '\n', 'utf8');
+  const document = SetDescriptor.parse({ ...desc, schemaVersion: SET_SCHEMA_VERSION });
+  const file = setPath(document.name);
+  await atomicWriteFile(file, JSON.stringify(document, null, 2) + '\n');
   return file;
 }
 

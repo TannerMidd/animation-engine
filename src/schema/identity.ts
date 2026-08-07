@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import { z } from 'zod';
 import { OutfitFamily } from './outfit.ts';
 
@@ -274,14 +273,6 @@ function sortKeys(value: unknown): unknown {
  * render identically, and a hash mismatch on a stamped artifact means the
  * profile changed since the artifact was made.
  */
-export function identityHash(identity: ShowIdentity): string {
-  return crypto.createHash('sha1').update(canonicalJson(identity)).digest('hex').slice(0, 12);
-}
-
-export function stampOf(identity: ShowIdentity): IdentityStamp {
-  return { id: identity.id, version: identity.version, hash: identityHash(identity) };
-}
-
 // --- locks ----------------------------------------------------------------
 
 /**

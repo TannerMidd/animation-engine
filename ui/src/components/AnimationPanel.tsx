@@ -150,7 +150,7 @@ export function AnimationPanel({
   onSeek: (ms: number) => void;
   onDeleteSegment: (segmentId: string) => void;
 }) {
-  const actorIds = shots?.cast.map((member) => member.id) ?? [];
+  const actorIds = useMemo(() => shots?.cast.map((member) => member.id) ?? [], [shots?.cast]);
   const [actorId, setActorId] = useState('');
   const [partId, setPartId] = useState('body');
   const [durationFrames, setDurationFrames] = useState(12);
@@ -181,7 +181,7 @@ export function AnimationPanel({
   useEffect(() => {
     if (!actorIds.length) setActorId('');
     else if (!actorIds.includes(actorId)) setActorId(actorIds[0]!);
-  }, [actorIds.join('|'), actorId]);
+  }, [actorIds, actorId]);
 
   // Keyed on the rig NAME, not shots identity: an unrelated shot-list save
   // must not refetch the rig and stomp the user's Body-part selection. On
@@ -227,7 +227,7 @@ export function AnimationPanel({
     } else {
       setPartId(selected.partId);
     }
-  }, [actorId, document?.revision, rig, selectedSegmentId]);
+  }, [actorId, document?.segments, rig, selectedSegmentId]);
 
   const commit = useCallback(async (request: MotionAuthoringCommit) => {
     // The target stays mounted while saving, so this is the re-entrancy guard
@@ -343,7 +343,7 @@ export function AnimationPanel({
     setOvershoot(selectedSegment.assist.overshoot);
     setHold(selectedSegment.assist.hold);
     setRecovery(selectedSegment.assist.recovery);
-  }, [document?.revision, selectedSegment?.id]);
+  }, [selectedSegment]);
 
   const target = useMemo<AnimationEditTarget | null>(() => {
     if (!shots || !document || !actorId) return null;

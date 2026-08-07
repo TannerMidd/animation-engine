@@ -118,7 +118,7 @@ export function baseFrame(
   const cy = subjects.reduce((s, a) => s + a.headY, 0) / subjects.length + h * VERTICAL_BIAS[shot];
 
   let x = cx - w / 2;
-  let y = cy - h / 2;
+  const y = cy - h / 2;
 
   // An over-the-shoulder pushes the speaker off centre, leaving room where the
   // listener would be.

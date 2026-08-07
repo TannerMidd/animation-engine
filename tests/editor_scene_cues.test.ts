@@ -38,7 +38,7 @@ function cue(id: string, speaker: string, text: string, beatIndex: number): Dial
 function line(id: string, speaker: string, text: string): Beat {
   return {
     id, kind: 'line', speaker, text, expression: 'NEUTRAL', gesture: 'TALK',
-    purpose: 'coverage', shot: 'MID', focus: [], camera: 'HOLD', reactions: {},
+    purpose: 'coverage', shot: 'MID', focus: [], camera: 'HOLD', reactions: {}, locked: false,
   } as Beat;
 }
 

@@ -15,7 +15,6 @@ import {
   MARKS,
   SUPPORTED_STAGE_ACTIONS,
   type ShotList,
-  type ShotBeat,
   type StageAction,
   type StagePosition,
   type LookDirection,
@@ -35,22 +34,27 @@ import {
   type BlinkWindow,
 } from './layers.ts';
 import {
-  actingOf, expressionSegments, valueAt, gestureReleaseMs, fidgetSchedule, fidgetAt,
+  actingOf, expressionSegments, valueAt, fidgetSchedule, fidgetAt,
   gazeTowardSpeaker, type ActingResolved, type FidgetShift,
 } from './performance.ts';
 import { activeIdentity } from '../show/context.ts';
 import { titleCardSvg, endCardSvg } from '../render/cards.ts';
 import type { AnimationDocument } from '../schema/animation.ts';
 import {
-  alignedWordAnchorId,
-  canonicalWordAnchorId,
   activeRootMotion,
   resolveAnimation,
   sampleAnimation,
   sampleMotionSegment,
-  type AnimationTimeline,
   type ResolvedAnimation,
 } from './animation.ts';
+import {
+  buildAnimationTimeline,
+  buildTimeline,
+  cardTiming,
+  type TimedBeat,
+} from './timeline.ts';
+
+export { animationTimelineForTimings, cardTiming, estimateLineMs, LINE_TAIL_MS } from './timeline.ts';
 import { walkCycles, walks } from './walk.ts';
 import { geometryFor, type SetDescriptor } from '../sets/schema.ts';
 import {
@@ -74,24 +78,6 @@ import type { PropInteractionHandle } from '../sets/props/types.ts';
  * the director; what remains is arithmetic, which is why it is reproducible.
  */
 
-/** Breathing room after each line so dialogue doesn't butt end-to-end. */
-export const LINE_TAIL_MS = 160;
-
-/** Words per second, measured against Chatterbox output. Only for estimates. */
-const WORDS_PER_SECOND = 2.7;
-
-/**
- * Guess a line's length without synthesizing it.
- *
- * Used by `anim check` so you can sanity-check a script's pacing in under a
- * second. The real timeline always comes from the rendered audio — this is a
- * planning aid, never an input to the compiler.
- */
-export function estimateLineMs(text: string): number {
-  const words = text.trim().split(/\s+/).filter(Boolean).length;
-  return Math.max(700, Math.round((words / WORDS_PER_SECOND) * 1000)) + LINE_TAIL_MS;
-}
-
 /** How long a hand pose holds before the other hand takes over, while talking. */
 const TALK_SWAP_MS = 420;
 
@@ -103,35 +89,6 @@ const TALK_SWAP_MS = 420;
  * is the classic two-step snap and costs one frame.
  */
 const SNAP_BLEND = 0.6;
-
-/**
- * How many milliseconds of card sit before and after the scene body.
- *
- * The one place this arithmetic lives: the compiler splices frames with it and
- * the soundtrack shifts placements with it, so picture and sound cannot
- * disagree about where the scene starts.
- */
-export function cardTiming(shots: Pick<ShotList, 'cards' | 'fps'>): { titleMs: number; endMs: number; titleFrames: number; endFrames: number } {
-  if (!shots.cards) return { titleMs: 0, endMs: 0, titleFrames: 0, endFrames: 0 };
-  const cards = activeIdentity().visual.cards;
-  return {
-    titleFrames: cards.titleFrames,
-    endFrames: cards.endFrames,
-    titleMs: (cards.titleFrames / shots.fps) * 1000,
-    endMs: (cards.endFrames / shots.fps) * 1000,
-  };
-}
-
-interface Timed {
-  beat: ShotBeat;
-  index: number;
-  startMs: number;
-  endMs: number;
-  timing?: LineTiming;
-  /** When a held gesture on this beat drops back into talking. */
-  releaseMs: number;
-}
-type TimedBeat = Timed;
 
 interface ActorRt {
   id: string;
@@ -331,224 +288,6 @@ export interface CompiledScene {
   durationMs: number;
   /** Millisecond start of each beat on the final timeline (card-shifted). */
   beatStarts: number[];
-}
-
-function buildTimeline(shots: ShotList, timings: Map<number, LineTiming>): Timed[] {
-  const out: Timed[] = [];
-  let cursor = 0;
-  let previousSpeechEndMs: number | null = null;
-
-  shots.beats.forEach((beat, index) => {
-    let timing: LineTiming | undefined;
-
-    if (beat.kind === 'line') {
-      timing = timings.get(index);
-      if (!timing) throw new Error(`beat ${index} is a line but has no audio timing`);
-      if (!timing.editorialTiming) {
-        const startMs = cursor;
-        const endMs = startMs + timing.durationMs + LINE_TAIL_MS;
-        out.push({ beat, index, startMs, endMs, timing, releaseMs: 0 });
-        previousSpeechEndMs = startMs + (timing.speechEndMs ?? timing.durationMs);
-        cursor = endMs;
-        return;
-      }
-
-      const speechOnsetMs = timing.speechOnsetMs ?? timing.speechStartMs ?? 0;
-      const neutralSpeechStart = previousSpeechEndMs === null
-        ? cursor + speechOnsetMs
-        : Math.max(cursor, previousSpeechEndMs + (timing.turnGapMs ?? 0));
-      let requestedStart =
-        neutralSpeechStart - speechOnsetMs - (timing.pickupMs ?? 0) - (timing.overlapMs ?? 0);
-
-      if (timing.absoluteStartMs !== undefined) {
-        if (timing.overlapWithCueId) {
-          throw new Error(`dialogue cue "${timing.cueId ?? index}" cannot combine an absolute start with an overlap target`);
-        }
-        requestedStart = timing.absoluteStartMs;
-      }
-
-      if (timing.overlapWithCueId) {
-        const overlapWithCueId = timing.overlapWithCueId;
-        const target = [...out].reverse().find((candidate) => candidate.beat.id === overlapWithCueId);
-        const previousLine = [...out].reverse().find((candidate) => candidate.beat.kind === 'line');
-        if (!target || target.beat.kind !== 'line' || !target.timing) {
-          throw new Error(`dialogue cue "${timing.cueId ?? index}" overlaps unavailable cue "${timing.overlapWithCueId}"`);
-        }
-        if (target !== previousLine || target !== out[out.length - 1]) {
-          throw new Error(
-            `dialogue cue "${timing.cueId ?? index}" may only overlap the immediately preceding dialogue cue`,
-          );
-        }
-        if (timing.overlapMode === 'interruption' && timing.interruptAtMs !== null && timing.interruptAtMs !== undefined) {
-          const cutLocalMs = timing.interruptAtMs;
-          if (cutLocalMs <= 0 || cutLocalMs >= target.timing.durationMs) {
-            throw new Error(
-              `dialogue cue "${timing.cueId ?? index}" interruption point ${cutLocalMs}ms is outside ` +
-              `"${timing.overlapWithCueId}" (${Math.round(target.timing.durationMs)}ms)`,
-            );
-          }
-          const cutMs = target.startMs + cutLocalMs;
-          const cropTokens = <T extends { startMs: number; endMs: number }>(tokens: readonly T[] | undefined): T[] | undefined => (
-            tokens?.flatMap((token) => token.startMs >= cutLocalMs
-              ? []
-              : [{ ...token, endMs: Math.min(token.endMs, cutLocalMs) }])
-          );
-          target.timing = {
-            ...target.timing,
-            durationMs: cutLocalMs,
-            playbackDurationMs: Math.min(target.timing.playbackDurationMs ?? cutLocalMs, cutLocalMs),
-            speechStartMs: Math.min(target.timing.speechStartMs ?? cutLocalMs, cutLocalMs),
-            speechOnsetMs: Math.min(target.timing.speechOnsetMs ?? cutLocalMs, cutLocalMs),
-            speechEndMs: Math.min(target.timing.speechEndMs ?? cutLocalMs, cutLocalMs),
-            cues: target.timing.cues.filter((cue) => cue.ms < cutLocalMs),
-            words: cropTokens(target.timing.words),
-            alignment: target.timing.alignment ? {
-              ...target.timing.alignment,
-              words: cropTokens(target.timing.alignment.words) ?? [],
-            } : undefined,
-          };
-          target.endMs = cutMs;
-          cursor = cutMs;
-          previousSpeechEndMs = cutMs;
-          requestedStart = cutMs - speechOnsetMs;
-        }
-      }
-      // An overlap may reach into the preceding beat, but stable script order
-      // still needs monotonic starts for stage actions, cameras and anchors.
-      const previousStart = out[out.length - 1]?.startMs ?? 0;
-      if (timing.absoluteStartMs !== undefined && requestedStart < previousStart - 1e-6) {
-        throw new Error(
-          `dialogue cue "${timing.cueId ?? index}" absolute start ${Math.round(requestedStart)}ms ` +
-          `precedes the previous beat start ${Math.round(previousStart)}ms`,
-        );
-      }
-      const startMs = Math.max(0, previousStart, requestedStart);
-      const endMs = startMs + timing.durationMs + (timing.pauseAfterMs ?? 0);
-      out.push({ beat, index, startMs, endMs, timing, releaseMs: 0 });
-      previousSpeechEndMs = startMs + (timing.speechEndMs ?? timing.durationMs);
-      cursor = Math.max(cursor, endMs);
-      return;
-    }
-
-    out.push({ beat, index, startMs: cursor, endMs: cursor + beat.ms, releaseMs: 0 });
-    cursor += beat.ms;
-  });
-
-  // Gesture release points, once the whole timeline is placed.
-  for (const t of out) t.releaseMs = gestureReleaseMs(t, shots.characterFps);
-
-  return out;
-}
-
-const VALID_ANIMATION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
-
-function estimatedWordTimings(text: string, startMs: number, endMs: number): WordTiming[] {
-  const words = text.trim().split(/\s+/).filter(Boolean);
-  if (!words.length) return [];
-  const span = (endMs - startMs) / words.length;
-  return words.map((word, index) => ({
-    text: word,
-    startMs: startMs + span * index,
-    endMs: startMs + span * (index + 1),
-  }));
-}
-
-function animationWords(words: WordTiming[], lineStartMs: number) {
-  return words.flatMap((word, index) => {
-    // The index id is stable across voice takes because it comes from script
-    // order, not an aligner's token id. Preserve a valid supplied id as an
-    // alias so imported alignments can still carry their own stable handles.
-    const canonical = canonicalWordAnchorId(index);
-    const supplied = word.id ?? alignedWordAnchorId(index, word.text);
-    const item = {
-      id: canonical,
-      text: word.text,
-      startMs: lineStartMs + word.startMs,
-      endMs: lineStartMs + word.endMs,
-    };
-    return VALID_ANIMATION_ID.test(supplied) && supplied !== canonical
-      ? [item, { ...item, id: supplied }]
-      : [item];
-  });
-}
-
-/**
- * Put authoring anchors on the same final-programme clock as preview seeking.
- * LineTiming's speech and word coordinates are line-local; cards and beat
- * placement are added exactly once here.
- */
-function buildAnimationTimeline(
-  timeline: Timed[],
-  titleMs: number,
-  endMs: number,
-): AnimationTimeline {
-  const bodyDurationMs = timeline.reduce((max, timed) => Math.max(max, timed.endMs), 0);
-  return {
-    durationMs: titleMs + bodyDurationMs + endMs,
-    beats: timeline.map((timed) => {
-      const beatId = timed.beat.id;
-      if (!beatId) throw new Error(`beat ${timed.index} has no stable id for animation anchors`);
-      const startMs = titleMs + timed.startMs;
-      const endMs = titleMs + timed.endMs;
-      if (timed.beat.kind !== 'line' || !timed.timing) {
-        return { id: beatId, startMs, endMs };
-      }
-
-      const timing = timed.timing;
-      const declaredSpeechStart = timing.speechStartMs ?? timing.speechOnsetMs ?? 0;
-      const declaredSpeechEnd = timing.speechEndMs ?? timing.durationMs;
-      const providedWords = timing.words ?? timing.alignment?.words ?? [];
-      const rawWords = providedWords.length
-        ? providedWords
-        : estimatedWordTimings(timed.beat.text, declaredSpeechStart, declaredSpeechEnd);
-      const words = animationWords(rawWords, startMs);
-
-      // A plain TTS timing still has useful audio bounds. Reviewed recordings
-      // tighten these to actual speech, so semantic keys improve without a
-      // migration or a different animation document.
-      const firstWord = rawWords.length ? Math.min(...rawWords.map((word) => word.startMs)) : Infinity;
-      const lastWord = rawWords.length ? Math.max(...rawWords.map((word) => word.endMs)) : -Infinity;
-      const localSpeechStart = Math.min(
-        declaredSpeechStart,
-        firstWord,
-      );
-      const localSpeechEnd = Math.max(
-        declaredSpeechEnd,
-        lastWord,
-      );
-      if (
-        !Number.isFinite(localSpeechStart) || !Number.isFinite(localSpeechEnd) ||
-        localSpeechStart < 0 || localSpeechEnd < localSpeechStart || localSpeechEnd > timing.durationMs
-      ) {
-        throw new Error(`line beat "${beatId}" has invalid semantic speech timing`);
-      }
-
-      return {
-        id: beatId,
-        startMs,
-        endMs,
-        speech: {
-          startMs: startMs + localSpeechStart,
-          endMs: startMs + localSpeechEnd,
-          words,
-        },
-      };
-    }),
-  };
-}
-
-/**
- * Resolve the exact semantic animation clock from already selected line
- * timings. This is shared by rendering, preflight, and dialogue-retiming so
- * those paths cannot drift into different editorial schedules.
- */
-export function animationTimelineForTimings(
-  shots: ShotList,
-  timings: Map<number, LineTiming>,
-): AnimationTimeline {
-  const timeline = buildTimeline(shots, timings);
-  const cards = cardTiming(shots);
-  return buildAnimationTimeline(timeline, cards.titleMs, cards.endMs);
 }
 
 function validateAnimationTargets(animation: ResolvedAnimation, actors: ActorRt[], shots: ShotList): void {
@@ -2197,7 +1936,7 @@ export function compileShotList(
   const step = shots.fps / shots.characterFps;
   const frames: IRFrame[] = [];
 
-  const beatAt = (ms: number): Timed => {
+  const beatAt = (ms: number): TimedBeat => {
     // Authored pickups can overlap the previous beat. The most recently
     // started beat owns camera/gesture intent while the earlier voice may
     // continue speaking underneath.
@@ -2208,7 +1947,7 @@ export function compileShotList(
     return timeline[0]!;
   };
 
-  const speakingLineAt = (actorId: string, ms: number): { timed: Timed; localMs: number } | null => {
+  const speakingLineAt = (actorId: string, ms: number): { timed: TimedBeat; localMs: number } | null => {
     for (let i = timeline.length - 1; i >= 0; i--) {
       const timed = timeline[i]!;
       if (timed.beat.kind !== 'line' || timed.beat.speaker !== actorId || !timed.timing) continue;
